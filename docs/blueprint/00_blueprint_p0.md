@@ -211,9 +211,63 @@ fixtures = [
 
 ---
 
-## Câu hỏi chốt trước khi build
-1. Tên app `ketoan` (trùng repo) — OK? Module `Ketoan` — OK?
-2. Có cần `Customer.custom_npp_code` không, hay đã có sẵn mã NPP ở field nào? (nếu có, cho tôi tên field)
-3. Tên 2 role: `Ketoan Tac Nghiep` / `Ketoan Truong` — giữ hay đổi (vd dùng Accounts User/Manager sẵn có)?
-4. "Tiện ích nhanh" P0: ngoài *tìm khách → 360°* và *in bảng kê/biên bản đối chiếu công nợ*, anh muốn thêm tiện ích nào ngay không?
-```
+---
+
+## 9. CHỐT (đã duyệt 2026-06-18) — cập nhật theo trả lời + file tham khảo
+
+### Quyết định đã chốt
+1. **App `ketoan`, module `Ketoan`** — OK.
+2. **Customer = DocType Customer chuẩn**, không thêm custom field. NPP nhận diện qua
+   **Customer Group = `NPP`** (theo file `cong_no_npp`). → **Bỏ** `custom_npp_code`.
+3. **2 Role**:
+   - `Ke Toan Cong No` — kế toán công nợ (xem công nợ/quỹ, cảnh báo, tiện ích).
+   - `Ke Toan Truong` — full quyền, **xem thêm phần mua hàng & tài chính** (bundle Accounts Manager,
+     thấy field nhạy cảm permlevel, cấu hình Settings).
+4. **Tiện ích P0**: (a) tìm khách → 360° công nợ; (b) in bảng kê/biên bản đối chiếu công nợ;
+   (c) **NHẬP SỔ QUỸ** — modal nhập nhanh phiếu thu/chi tiền mặt (xem 9.3).
+5. Tham khảo các trang HTML rời của anh (website module) cho **design + tiện ích**.
+
+### 9.1 Bối cảnh thật (từ file tham khảo)
+- Company: **Công ty cổ phần Hoàng Giang** (abbr `HGC`).
+- Tài khoản chuẩn: `131 - Phải thu của khách hàng - HGC` (phải thu), `1111 - Tiền mặt - HGC` (quỹ TM),
+  `141 - Tạm ứng - HGC` (tạm ứng/quỹ dầu), `6412 - Chi phí bán hàng GT - HGC`.
+- Công nợ KH: **GL Entry** `party_type=Customer`, `account like '131%'`, `is_cancelled=0`,
+  nợ = Σ(`debit`−`credit`); gộp theo `(voucher_type, voucher_no)` để tính tuổi nợ theo chứng từ.
+- Tham số nghiệp vụ NPP (đưa vào Settings ở P1): chính sách thu (ngày 5 & 20; Tết tháng 11
+  cho nợ 50%), chiết khấu ≥100tr → 2% (JE Nợ 6412/Có 131).
+
+### 9.2 Điều chỉnh kiến trúc backend
+- Phong cách hiện tại của anh: trang HTML client-side gọi `frappe.client.get_list/insert/submit`.
+  **Theo house-style NPP**, app `ketoan` sẽ:
+  - Tổng hợp/aging/DSO/dashboard/cảnh báo → **whitelisted method Python có `_guard()`** (đúng, nhanh,
+    không leak), thay vì tính client-side.
+  - Ghi sổ (nhập sổ quỹ) → **whitelisted method** tạo chứng từ + validate + permission.
+- Giữ nguyên **ngôn ngữ thiết kế** từ file tham khảo (xem 9.4).
+
+### 9.3 Tiện ích "Nhập sổ quỹ" (P0)
+- Modal nhập nhanh: ngày · loại (Thu/Chi) · số tiền (quick chips +100k…+5tr) · nội dung ·
+  TK quỹ (`1111`) · TK đối ứng · (tùy chọn) thông tin NH để **sinh QR VietQR**.
+- Nút "Tạo phiếu" → whitelisted `ketoan.api.cashbook.create_entry`:
+  - Chi tiền mặt → **Journal Entry** (Nợ TK đối ứng / Có `1111`).
+  - Thu tiền mặt → **Payment Entry** (Receive) gắn Customer, hoặc JE.
+  - Server-side: validate số tiền>0, account thuộc company, set `user_remark`, tạo **DRAFT**
+    (human-in-loop: người mở Desk kiểm & submit; cấu hình cho phép submit ở Settings).
+- VietQR: URL `img.vietqr.io/image/<BIN>-<STK>-compact2.png?amount=&addInfo=` (client-side, như mẫu).
+
+### 9.4 Design system (từ `Chi_quy_dau` + modern-web-design)
+- Font **Be Vietnam Pro**, icon **Font Awesome 6**. Dark theme token `--kt-*` (primary #6366f1,
+  success #22c55e, warning #f59e0b, danger #ef4444, bg #0f172a/#1e293b, border #334155), gradient gold/indigo.
+- Ẩn chrome website ERPNext khi nhúng. KPI stats panel, card bo góc, badge rổ nợ, đèn xanh/vàng/đỏ,
+  toast, modal, FAB mobile, pagination, pill filters. Mobile-first.
+- CSS prefix **`kt-`**. Theo `frappe-portal-spa`: hash router, ES module code-split, import-map cache-bust, Chart.js lazy.
+
+### 9.5 Map tiện ích tham khảo → phân kỳ
+| Tiện ích (file) | Đợt |
+|---|---|
+| Nhập sổ quỹ + VietQR (`Chi_quy_dau`) | **P0** |
+| Bảng kê/đối chiếu công nợ NPP, 360° khách (`cong_no_npp`) | **P0** |
+| Nhắc nợ Zalo, chính sách thu ngày 5/20, Tết | P1 |
+| Chiết khấu ≥100tr → JE 6412/131 | P1 |
+| Tính lương công nhật/khoán, in lương (`Tinh_luong`) | P2 (phân hệ Lương) |
+
+> **Trạng thái: ĐÃ DUYỆT** → handoff `nextcode-build` để scaffold app `ketoan` + implement P0.

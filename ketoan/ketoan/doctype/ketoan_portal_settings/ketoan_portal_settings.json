@@ -1,0 +1,131 @@
+{
+ "actions": [],
+ "creation": "2026-06-18 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "general_section",
+  "default_company",
+  "cash_bank_account_filter",
+  "column_break_general",
+  "allow_submit_cashbook",
+  "aging_section",
+  "aging_bucket_1",
+  "aging_bucket_2",
+  "column_break_aging",
+  "aging_bucket_3",
+  "dso_window_days",
+  "alert_section",
+  "enable_credit_limit_alert",
+  "cash_balance_warn"
+ ],
+ "fields": [
+  {
+   "fieldname": "general_section",
+   "fieldtype": "Section Break",
+   "label": "Chung"
+  },
+  {
+   "fieldname": "default_company",
+   "fieldtype": "Link",
+   "label": "Công ty mặc định",
+   "options": "Company"
+  },
+  {
+   "default": "Cash and Bank",
+   "fieldname": "cash_bank_account_filter",
+   "fieldtype": "Select",
+   "label": "Nguồn sổ quỹ (account_type)",
+   "options": "Cash and Bank\nCash\nBank"
+  },
+  {
+   "fieldname": "column_break_general",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Nếu bật: nhập sổ quỹ sẽ submit luôn (mặc định tạo DRAFT để người duyệt trong Desk).",
+   "fieldname": "allow_submit_cashbook",
+   "fieldtype": "Check",
+   "label": "Cho phép submit khi nhập sổ quỹ"
+  },
+  {
+   "fieldname": "aging_section",
+   "fieldtype": "Section Break",
+   "label": "Tuổi nợ & DSO"
+  },
+  {
+   "default": "30",
+   "fieldname": "aging_bucket_1",
+   "fieldtype": "Int",
+   "label": "Rổ tuổi nợ 1 (ngày)"
+  },
+  {
+   "default": "60",
+   "fieldname": "aging_bucket_2",
+   "fieldtype": "Int",
+   "label": "Rổ tuổi nợ 2 (ngày)"
+  },
+  {
+   "fieldname": "column_break_aging",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "90",
+   "fieldname": "aging_bucket_3",
+   "fieldtype": "Int",
+   "label": "Rổ tuổi nợ 3 (ngày)"
+  },
+  {
+   "default": "365",
+   "description": "Cửa sổ doanh thu để ước tính DSO ≈ nợ / doanh thu kỳ × số ngày.",
+   "fieldname": "dso_window_days",
+   "fieldtype": "Int",
+   "label": "Cửa sổ tính DSO (ngày)"
+  },
+  {
+   "fieldname": "alert_section",
+   "fieldtype": "Section Break",
+   "label": "Cảnh báo"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_credit_limit_alert",
+   "fieldtype": "Check",
+   "label": "Bật cảnh báo vượt hạn mức tín dụng"
+  },
+  {
+   "default": "0",
+   "description": "Tồn quỹ tiền mặt vượt mức này sẽ cảnh báo (0 = tắt). Dùng ở P1.",
+   "fieldname": "cash_balance_warn",
+   "fieldtype": "Currency",
+   "label": "Ngưỡng cảnh báo tồn quỹ"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-06-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ketoan",
+ "name": "Ketoan Portal Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Ke Toan Truong",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Ke Toan Cong No"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}
