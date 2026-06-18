@@ -11,6 +11,8 @@ P0:
 - A4 quỹ tiền mặt âm (chắc chắn sai dữ liệu)
 """
 
+from urllib.parse import quote
+
 import frappe
 from frappe.utils import flt, today
 
@@ -67,7 +69,7 @@ def _alert_credit_limit(company: str, s) -> list:
             "outstanding": flt(r.outstanding),
             "credit_limit": flt(r.credit_limit),
             "over": flt(r.outstanding) - flt(r.credit_limit),
-            "link": f"/app/customer/{frappe.utils.quote(r.customer)}",
+            "link": f"/app/customer/{quote(r.customer)}",
         }
         for r in rows
     ]
@@ -146,7 +148,7 @@ def _alert_unallocated(company: str) -> list:
         {
             "label": f"{r.party_name or r.party} · {r.name}",
             "amount": flt(r.unallocated_amount),
-            "link": f"/app/payment-entry/{frappe.utils.quote(r.name)}",
+            "link": f"/app/payment-entry/{quote(r.name)}",
         }
         for r in rows
     ]
@@ -187,7 +189,7 @@ def _alert_cash_negative(company: str) -> list:
         {
             "label": r.account_name or r.account,
             "amount": flt(r.balance),
-            "link": f"/app/general-ledger?account={frappe.utils.quote(r.account)}",
+            "link": f"/app/general-ledger?account={quote(r.account)}",
         }
         for r in rows
     ]

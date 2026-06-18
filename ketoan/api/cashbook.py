@@ -8,6 +8,8 @@ VÀ người dùng là quản lý. Có guard + validate đầy đủ.
 - Thu tiền: Nợ TK quỹ / Có TK đối ứng (nếu gắn khách → dòng có party để đối trừ 131).
 """
 
+from urllib.parse import quote
+
 import frappe
 from frappe import _
 from frappe.utils import flt, today, getdate
@@ -116,7 +118,7 @@ def create_entry(
         "doctype": "Journal Entry",
         "name": je.name,
         "docstatus": je.docstatus,
-        "route": f"/app/journal-entry/{frappe.utils.quote(je.name)}",
+        "route": f"/app/journal-entry/{quote(je.name)}",
     }
 
 
