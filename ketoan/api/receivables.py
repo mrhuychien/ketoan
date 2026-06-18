@@ -131,17 +131,14 @@ def get_customer_detail(customer: str, company: str | None = None) -> dict:
 
     # Khoản thu chưa khớp (advance) của khách.
     unallocated = flt(
-        frappe.db.get_value(
-            "Payment Entry",
-            {
-                "docstatus": 1,
-                "party_type": "Customer",
-                "party": customer,
-                "company": company,
-                "unallocated_amount": [">", 0],
-            },
-            "sum(unallocated_amount)",
-        )
+        frappe.db.sql(
+            """
+            SELECT SUM(unallocated_amount) FROM `tabPayment Entry`
+            WHERE docstatus = 1 AND party_type = 'Customer' AND party = %(customer)s
+              AND company = %(company)s AND unallocated_amount > 0
+            """,
+            {"customer": customer, "company": company},
+        )[0][0]
         or 0
     )
 
@@ -169,11 +166,13 @@ def get_dso(company: str | None = None) -> dict:
     window = int(get_settings().dso_window_days or 365)
 
     debt = flt(
-        frappe.db.get_value(
-            "Sales Invoice",
-            {"docstatus": 1, "company": company, "outstanding_amount": [">", 0]},
-            "sum(outstanding_amount)",
-        )
+        frappe.db.sql(
+            """
+            SELECT SUM(outstanding_amount) FROM `tabSales Invoice`
+            WHERE docstatus = 1 AND company = %(company)s AND outstanding_amount > 0
+            """,
+            {"company": company},
+        )[0][0]
         or 0
     )
 

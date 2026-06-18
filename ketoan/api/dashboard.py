@@ -27,16 +27,14 @@ def get_overview(company: str | None = None) -> dict:
 
     # Khoản thu treo (advance) toàn công ty.
     unallocated = flt(
-        frappe.db.get_value(
-            "Payment Entry",
-            {
-                "docstatus": 1,
-                "party_type": "Customer",
-                "company": company,
-                "unallocated_amount": [">", 0],
-            },
-            "sum(unallocated_amount)",
-        )
+        frappe.db.sql(
+            """
+            SELECT SUM(unallocated_amount) FROM `tabPayment Entry`
+            WHERE docstatus = 1 AND party_type = 'Customer'
+              AND company = %(company)s AND unallocated_amount > 0
+            """,
+            {"company": company},
+        )[0][0]
         or 0
     )
 
