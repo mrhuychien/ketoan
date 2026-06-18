@@ -1,3 +1,5 @@
+[pre_model_sync]
+
 [post_model_sync]
 ketoan.patches.v0_0_1.create_portal_roles
 ketoan.patches.v0_0_1.set_portal_defaults
