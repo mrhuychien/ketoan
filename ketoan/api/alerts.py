@@ -54,8 +54,8 @@ def _alert_credit_limit(company: str, s) -> list:
         WHERE si.docstatus = 1 AND si.company = %(company)s AND si.outstanding_amount > 0
           AND ccl.credit_limit > 0
         GROUP BY si.customer, si.customer_name, ccl.credit_limit
-        HAVING outstanding > ccl.credit_limit
-        ORDER BY (outstanding - ccl.credit_limit) DESC
+        HAVING SUM(si.outstanding_amount) > ccl.credit_limit
+        ORDER BY (SUM(si.outstanding_amount) - ccl.credit_limit) DESC
         """,
         {"company": company},
         as_dict=True,
@@ -177,8 +177,8 @@ def _alert_cash_negative(company: str) -> list:
           AND acc.account_type IN %(types)s AND acc.is_group = 0
           AND gle.posting_date <= %(today)s
         GROUP BY gle.account, acc.account_name
-        HAVING balance < -0.5
-        ORDER BY balance ASC
+        HAVING SUM(gle.debit - gle.credit) < -0.5
+        ORDER BY SUM(gle.debit - gle.credit) ASC
         """,
         {"company": company, "types": types, "today": today()},
         as_dict=True,

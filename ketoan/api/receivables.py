@@ -40,7 +40,7 @@ def get_ar_summary(company: str | None = None, limit: int = 200) -> dict:
           AND si.company = %(company)s
           AND si.outstanding_amount > 0
         GROUP BY si.customer, si.customer_name, c.customer_group
-        ORDER BY outstanding DESC
+        ORDER BY SUM(si.outstanding_amount) DESC
         LIMIT %(limit)s
         """,
         {"company": company, "limit": limit},

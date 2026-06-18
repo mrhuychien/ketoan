@@ -32,8 +32,8 @@ def get_balances(company: str | None = None, as_of: str | None = None) -> dict:
           AND acc.account_type IN %(types)s
           AND acc.is_group = 0
         GROUP BY gle.account, acc.account_name, acc.account_type
-        HAVING ROUND(balance, 2) <> 0
-        ORDER BY acc.account_type, balance DESC
+        HAVING ROUND(SUM(gle.debit - gle.credit), 2) <> 0
+        ORDER BY acc.account_type, SUM(gle.debit - gle.credit) DESC
         """,
         {"company": company, "as_of": as_of, "types": types},
         as_dict=True,
