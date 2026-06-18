@@ -1,0 +1,39 @@
+{% extends "templates/web.html" %}
+
+{%- set base = "/assets/ketoan/ketoan" -%}
+{%- set v = asset_version -%}
+
+{% block title %}Kế toán Tác nghiệp{% endblock %}
+
+{% block head_include %}
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="stylesheet" href="{{ base }}/shell.css?v={{ v }}">
+
+<!-- Context bridge: SPA đọc global này, không gọi API để biết mình là ai -->
+<script>window.KETOAN_CONTEXT = {{ ketoan_context | tojson }};</script>
+
+<!-- LUẬT VÀNG #1: ES static import không kế thừa ?v= → import map remap shared module
+     sang bản có ?v= để né cache 1 năm của /assets. Đặt TRƯỚC mọi <script type=module>. -->
+<script type="importmap">
+{
+  "imports": {
+    "{{ base }}/lib/api.js": "{{ base }}/lib/api.js?v={{ v }}",
+    "{{ base }}/lib/format.js": "{{ base }}/lib/format.js?v={{ v }}",
+    "{{ base }}/lib/router.js": "{{ base }}/lib/router.js?v={{ v }}",
+    "{{ base }}/lib/dom.js": "{{ base }}/lib/dom.js?v={{ v }}",
+    "{{ base }}/components/toast.js": "{{ base }}/components/toast.js?v={{ v }}",
+    "{{ base }}/components/modal.js": "{{ base }}/components/modal.js?v={{ v }}",
+    "{{ base }}/components/cashbook.js": "{{ base }}/components/cashbook.js?v={{ v }}"
+  }
+}
+</script>
+{% endblock %}
+
+{% block page_content %}
+<div id="kt-root">
+  <div class="kt-boot"><div class="kt-spinner"></div><p>Đang tải bàn làm việc…</p></div>
+</div>
+<script type="module" src="{{ base }}/shell.js?v={{ v }}"></script>
+{% endblock %}
