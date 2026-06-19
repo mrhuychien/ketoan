@@ -1,10 +1,11 @@
 """Whitelisted methods — Đối chiếu công nợ kênh NPP.
 
-Tái hiện nghiệp vụ trang "Đối chiếu Công nợ NPP":
-- Công nợ từng NPP (GL receivable), doanh số bình quân tháng, số cần thanh toán
-  theo chính sách (thường / Tết).
-- Chiết khấu: NPP có công nợ ≥ ngưỡng → tạo bút toán chiết khấu (Nợ 6412 / Có 131),
-  DRAFT, human-in-loop.
+- get_debts: công nợ từng NPP (số dư GL phải thu), DS bình quân tháng, số cần
+  thanh toán theo chính sách (thường / Tết).
+- get_discount_eligible / create_discount_entries: chương trình chiết khấu theo
+  THÁNG — NPP có DOANH SỐ THÁNG (debit 131 từ Sales Invoice) ≥ ngưỡng → chiết khấu
+  = % × doanh số tháng; tạo bút toán (Nợ 6412 / Có 131) DRAFT, chống trùng theo
+  marker cheque_no = CK2-<customer>-<YYYY-MM>.
 Read-only trừ create_discount_entries (ghi DRAFT). Guard ở dòng đầu, SQL parameterized.
 """
 
@@ -12,9 +13,9 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import flt, today, getdate
+from frappe.utils import flt, today, getdate, get_first_day, get_last_day
 
-from ketoan.api._guard import guard_view, resolve_company, get_settings, is_manager
+from ketoan.api._guard import guard_view, resolve_company, get_settings
 
 
 def _cfg() -> dict:
@@ -51,22 +52,66 @@ def _receivable_clause(cfg: dict, params: dict) -> str:
     return "acc.account_type = 'Receivable'"
 
 
+def _npp_customers(cfg: dict):
+    return frappe.get_all(
+        "Customer",
+        filters={"customer_group": cfg["group"], "disabled": 0},
+        fields=["name", "customer_name", "mobile_no"],
+    )
+
+
+def _month_range(month: str | None):
+    """month='YYYY-MM' → (first_day, last_day, 'YYYY-MM'). Mặc định tháng hiện tại."""
+    if month:
+        y, m = [int(x) for x in month.split("-")[:2]]
+        d = getdate(f"{y}-{m:02d}-01")
+    else:
+        d = getdate(today())
+    first = get_first_day(d)
+    last = get_last_day(d)
+    return str(first), str(last), f"{first.year}-{first.month:02d}"
+
+
+def _marker(customer: str, month_key: str) -> str:
+    """Khóa chống trùng bút toán chiết khấu (lưu ở Journal Entry.cheque_no)."""
+    return f"CK2-{customer}-{month_key}"
+
+
+def _month_sales(company: str, names: tuple, first: str, last: str, cfg: dict) -> dict:
+    """Doanh số tháng theo NPP = SUM(debit) TK phải thu từ Sales Invoice trong tháng."""
+    params = {"company": company, "names": names, "first": first, "last": last}
+    rclause = _receivable_clause(cfg, params)
+    rows = frappe.db.sql(
+        f"""
+        SELECT gle.party AS customer, SUM(gle.debit) AS sales
+        FROM `tabGL Entry` gle
+        JOIN `tabAccount` acc ON acc.name = gle.account
+        WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
+          AND gle.party_type = 'Customer' AND gle.party IN %(names)s
+          AND gle.voucher_type = 'Sales Invoice'
+          AND gle.posting_date BETWEEN %(first)s AND %(last)s
+          AND {rclause}
+        GROUP BY gle.party
+        """,
+        params,
+        as_dict=True,
+    )
+    return {r.customer: flt(r.sales) for r in rows}
+
+
 @frappe.whitelist()
 def get_debts(company: str | None = None) -> dict:
-    """Bảng đối chiếu công nợ NPP + chính sách + cấu hình chiết khấu."""
+    """Bảng đối chiếu công nợ NPP + chính sách thanh toán."""
     guard_view()
     company = resolve_company(company)
     cfg = _cfg()
     policy, tet_start = _policy(cfg)
 
-    customers = frappe.get_all(
-        "Customer",
-        filters={"customer_group": cfg["group"], "disabled": 0},
-        fields=["name", "customer_name", "mobile_no"],
-    )
+    customers = _npp_customers(cfg)
     if not customers:
         return {
-            "company": company, "policy": policy, "tet_start": tet_start, "config": cfg,
+            "company": company, "policy": policy, "tet_start": tet_start,
+            "config": {"due_days": cfg["due_days"], "tet_pct": cfg["tet_pct"], "group": cfg["group"]},
             "rows": [], "total_debt": 0, "total_required": 0,
             "note": _("Không tìm thấy khách trong nhóm '{0}'").format(cfg["group"]),
         }
@@ -74,7 +119,7 @@ def get_debts(company: str | None = None) -> dict:
     names = tuple(c.name for c in customers)
     base = {"company": company, "names": names, "today": today()}
 
-    # 1) Công nợ theo GL phải thu (số dư sổ cái = debit - credit).
+    # 1) Công nợ theo GL phải thu (số dư = debit - credit).
     rparams = dict(base)
     rclause = _receivable_clause(cfg, rparams)
     debt_rows = frappe.db.sql(
@@ -107,7 +152,7 @@ def get_debts(company: str | None = None) -> dict:
     )
     monthly = {r.customer: flt(r.rev) / 12.0 for r in sales_rows}
 
-    # 3) Số liệu phục vụ requiredPayment.
+    # 3) requiredPayment theo chính sách.
     if policy == "normal":
         params = dict(base, due_days=cfg["due_days"])
         over_rows = frappe.db.sql(
@@ -150,7 +195,7 @@ def get_debts(company: str | None = None) -> dict:
         else:
             allowed = tet_total.get(c.name, 0.0) * cfg["tet_pct"] / 100.0
             required = max(0.0, d - allowed)
-        required = min(required, max(d, 0.0))  # không đòi quá số đang nợ
+        required = min(required, max(d, 0.0))
 
         if d < -0.5:
             status = "negative"
@@ -166,8 +211,6 @@ def get_debts(company: str | None = None) -> dict:
             "debt": d,
             "monthly_sales": monthly.get(c.name, 0.0),
             "required_payment": required,
-            "discount_eligible": d >= cfg["threshold"],
-            "discount_amount": round(d * cfg["discount_pct"] / 100.0) if d >= cfg["threshold"] else 0,
             "status": status,
         })
         total_debt += d
@@ -178,14 +221,7 @@ def get_debts(company: str | None = None) -> dict:
         "company": company,
         "policy": policy,
         "tet_start": tet_start,
-        "config": {
-            "threshold": cfg["threshold"],
-            "discount_pct": cfg["discount_pct"],
-            "due_days": cfg["due_days"],
-            "tet_pct": cfg["tet_pct"],
-            "group": cfg["group"],
-            "discount_account_set": bool(cfg["discount_expense_account"] and cfg["receivable_account"]),
-        },
+        "config": {"due_days": cfg["due_days"], "tet_pct": cfg["tet_pct"], "group": cfg["group"]},
         "rows": rows,
         "total_debt": total_debt,
         "total_required": total_required,
@@ -193,11 +229,69 @@ def get_debts(company: str | None = None) -> dict:
 
 
 @frappe.whitelist()
-def create_discount_entries(customers, company: str | None = None) -> dict:
-    """Tạo bút toán chiết khấu (Nợ 6412 / Có 131) cho danh sách NPP — DRAFT.
+def get_discount_eligible(company: str | None = None, month: str | None = None) -> dict:
+    """NPP đủ điều kiện chiết khấu trong THÁNG: doanh số tháng ≥ ngưỡng → % doanh số."""
+    guard_view()
+    company = resolve_company(company)
+    cfg = _cfg()
+    first, last, mkey = _month_range(month)
 
-    customers: JSON list tên Customer. Server tự tính chiết khấu từ công nợ thật
-    (không tin số client gửi). Cần cấu hình TK chiết khấu + TK phải thu ở Settings.
+    cfg_out = {
+        "threshold": cfg["threshold"],
+        "discount_pct": cfg["discount_pct"],
+        "discount_account_set": bool(cfg["discount_expense_account"] and cfg["receivable_account"]),
+    }
+    customers = _npp_customers(cfg)
+    if not customers:
+        return {"company": company, "month": mkey, "config": cfg_out, "rows": [], "total_discount": 0}
+
+    names = tuple(c.name for c in customers)
+    sales = _month_sales(company, names, first, last, cfg)
+
+    # JE chiết khấu đã tạo cho tháng này (để khóa, tránh tạo trùng).
+    markers = [_marker(c.name, mkey) for c in customers]
+    ex_map = {}
+    if markers:
+        for e in frappe.get_all(
+            "Journal Entry",
+            filters={"cheque_no": ["in", markers], "docstatus": ["<", 2]},
+            fields=["cheque_no", "name"],
+        ):
+            ex_map[e.cheque_no] = e.name
+
+    rows = []
+    for c in customers:
+        s = sales.get(c.name, 0.0)
+        if s < cfg["threshold"]:
+            continue
+        disc = round(s * cfg["discount_pct"] / 100.0)
+        je_name = ex_map.get(_marker(c.name, mkey))
+        rows.append({
+            "customer": c.name,
+            "customer_name": c.customer_name or c.name,
+            "monthly_sales": s,
+            "discount_amount": disc,
+            "status": "created" if je_name else "pending",
+            "je_name": je_name,
+            "route": f"/app/journal-entry/{je_name}" if je_name else None,
+        })
+
+    rows.sort(key=lambda r: r["monthly_sales"], reverse=True)
+    return {
+        "company": company,
+        "month": mkey,
+        "config": cfg_out,
+        "rows": rows,
+        "total_discount": sum(r["discount_amount"] for r in rows),
+    }
+
+
+@frappe.whitelist()
+def create_discount_entries(customers, month: str | None = None, company: str | None = None) -> dict:
+    """Tạo bút toán chiết khấu (Nợ 6412 / Có 131) theo doanh số THÁNG — DRAFT.
+
+    Server tự tính chiết khấu từ doanh số tháng thật (không tin client). Khóa
+    chống trùng theo cheque_no = CK2-<customer>-<YYYY-MM>.
     """
     guard_view()
     company = resolve_company(company)
@@ -211,41 +305,38 @@ def create_discount_entries(customers, company: str | None = None) -> dict:
     if not customers:
         frappe.throw(_("Chưa chọn NPP nào"))
 
+    first, last, mkey = _month_range(month)
     names = tuple(customers)
-    rparams = {"company": company, "names": names}
-    rclause = _receivable_clause(cfg, rparams)
-    debt_rows = frappe.db.sql(
-        f"""
-        SELECT gle.party AS customer, SUM(gle.debit - gle.credit) AS debt
-        FROM `tabGL Entry` gle
-        JOIN `tabAccount` acc ON acc.name = gle.account
-        WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
-          AND gle.party_type = 'Customer' AND gle.party IN %(names)s
-          AND {rclause}
-        GROUP BY gle.party
-        """,
-        rparams,
-        as_dict=True,
-    )
-    debt = {r.customer: flt(r.debt) for r in debt_rows}
+    sales = _month_sales(company, names, first, last, cfg)
+
+    markers = [_marker(c, mkey) for c in customers]
+    existing = set(
+        frappe.get_all("Journal Entry", filters={"cheque_no": ["in", markers], "docstatus": ["<", 2]}, pluck="cheque_no")
+    ) if markers else set()
 
     created = []
     skipped = []
     for cust in customers:
-        d = debt.get(cust, 0.0)
-        if d < cfg["threshold"]:
-            skipped.append({"customer": cust, "reason": "Dưới ngưỡng chiết khấu"})
+        s = sales.get(cust, 0.0)
+        if s < cfg["threshold"]:
+            skipped.append({"customer": cust, "reason": "Doanh số tháng dưới ngưỡng"})
             continue
-        amount = round(d * cfg["discount_pct"] / 100.0)
+        mk = _marker(cust, mkey)
+        if mk in existing:
+            skipped.append({"customer": cust, "reason": "Đã có bút toán tháng này"})
+            continue
+        amount = round(s * cfg["discount_pct"] / 100.0)
         if amount <= 0:
             skipped.append({"customer": cust, "reason": "Chiết khấu = 0"})
             continue
 
         je = frappe.new_doc("Journal Entry")
         je.voucher_type = "Journal Entry"
-        je.posting_date = today()
+        je.posting_date = last
         je.company = company
-        je.user_remark = f"Chiết khấu {cfg['discount_pct']}% công nợ NPP — {cust}"
+        je.cheque_no = mk
+        je.cheque_date = last
+        je.user_remark = f"Chiết khấu {cfg['discount_pct']}% doanh số tháng {mkey} — {cust}"
         je.append("accounts", {
             "account": cfg["discount_expense_account"],
             "debit_in_account_currency": amount,
@@ -256,12 +347,10 @@ def create_discount_entries(customers, company: str | None = None) -> dict:
             "party_type": "Customer",
             "party": cust,
         })
-        je.insert()  # tôn trọng permission JE của user
+        je.insert()
         created.append({
-            "customer": cust,
-            "name": je.name,
-            "amount": amount,
+            "customer": cust, "name": je.name, "amount": amount,
             "route": f"/app/journal-entry/{je.name}",
         })
 
-    return {"created": created, "skipped": skipped, "count": len(created)}
+    return {"created": created, "skipped": skipped, "count": len(created), "month": mkey}

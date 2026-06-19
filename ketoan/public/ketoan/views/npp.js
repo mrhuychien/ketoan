@@ -22,7 +22,7 @@ export async function render({ container }) {
     return;
   }
 
-  const state = { tab: "debt", statusFilter: "all", search: "", selected: new Set() };
+  const state = { tab: "debt", statusFilter: "all", search: "", discountMonth: currentMonth(), discSelected: new Set(), discData: null };
 
   setHTML(
     container,
@@ -46,7 +46,7 @@ export async function render({ container }) {
       <div class="kt-segment kt-mb" id="npp-tabs">
         <button data-tab="debt" class="is-active">Công nợ NPP</button>
         <button data-tab="due">Đến hạn</button>
-        <button data-tab="discount">Chiết khấu ${data.config.discount_pct}%</button>
+        <button data-tab="discount">Chiết khấu</button>
       </div>
 
       <div id="npp-tab-body"></div>
@@ -208,56 +208,74 @@ function zaloMessage(r, data) {
   return lines.join("\n");
 }
 
-/* ---------- Tab 3: Chiết khấu ---------- */
-function renderDiscount(body, data, state) {
-  const eligible = data.rows.filter((r) => r.discount_eligible);
-  const totalSel = () => eligible.filter((r) => state.selected.has(r.customer)).reduce((s, r) => s + r.discount_amount, 0);
-
-  setHTML(
-    body,
-    html`
-      ${!data.config.discount_account_set
-        ? html`<div class="kt-alert kt-alert--warning"><div class="kt-alert-title"><i class="fas fa-gear"></i> Chưa cấu hình tài khoản</div>
-            <div class="kt-alert-hint">Vào <b>Ketoan Portal Settings</b> đặt <i>TK chi phí chiết khấu (6412)</i> và <i>TK phải thu (131)</i> để tạo bút toán.</div></div>`
-        : ""}
-      <div class="kt-card">
-        <div class="kt-card-head">
-          <div class="kt-card-title"><i class="fas fa-percent"></i> NPP đủ điều kiện chiết khấu ${data.config.discount_pct}% (nợ ≥ ${formatVNDShort(data.config.threshold)})</div>
-          <div style="display:flex;gap:8px;align-items:center">
-            <span class="kt-sub">Tổng chiết khấu chọn: <b id="npp-disc-total" style="color:var(--kt-success)">${formatVND(0)}</b></span>
-            <button class="kt-btn kt-btn--success kt-btn--sm" id="npp-disc-create" ${data.config.discount_account_set ? "" : "disabled"}><i class="fas fa-file-circle-plus"></i> Tạo bút toán</button>
-          </div>
+/* ---------- Tab 3: Chiết khấu (theo doanh số THÁNG) ---------- */
+async function renderDiscount(body, data, state) {
+  const months = monthOptions();
+  const shell = (inner, dd) => html`
+    <div class="kt-card">
+      <div class="kt-card-head">
+        <div>
+          <div class="kt-card-title"><i class="fas fa-percent"></i> Chương trình chiết khấu</div>
+          <div class="kt-sub">Doanh số tháng ≥ ngưỡng → thưởng % doanh số. Server tự tính &amp; chống tạo trùng.</div>
         </div>
-        <div class="kt-card-body">
-          <div class="kt-table-wrap"><table class="kt-table">
-            <thead><tr><th><input type="checkbox" id="npp-disc-all"></th><th>NPP</th><th class="num">Công nợ</th><th class="num">Chiết khấu ${data.config.discount_pct}%</th></tr></thead>
-            <tbody>${eligible.map((r) => html`<tr data-customer="${r.customer}">
-              <td><input type="checkbox" class="npp-disc-cb" value="${r.customer}" ${state.selected.has(r.customer) ? "checked" : ""}></td>
-              <td>${r.customer_name}</td>
-              <td class="num">${formatVND(r.debt)}</td>
-              <td class="num pos">${formatVND(r.discount_amount)}</td>
-            </tr>`)}</tbody>
-          </table></div>
-          ${eligible.length === 0 ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có NPP đủ điều kiện</p></div>` : ""}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select class="kt-select" id="npp-disc-month" style="width:auto">
+            ${months.map((m) => html`<option value="${m.value}" ${m.value === state.discountMonth ? "selected" : ""}>${m.label}</option>`)}
+          </select>
+          <button class="kt-btn kt-btn--primary kt-btn--sm" id="npp-disc-check"><i class="fas fa-magnifying-glass"></i> Kiểm tra</button>
         </div>
       </div>
-    `
-  );
+      <div class="kt-card-body">${inner}</div>
+    </div>`;
+
+  setHTML(body, shell(html`<div class="kt-boot"><div class="kt-spinner"></div></div>`));
+  bindMonth(body, data, state);
+
+  let dd;
+  try {
+    dd = await api.nppDiscountEligible(state.discountMonth);
+  } catch (e) {
+    setHTML(body.querySelector(".kt-card-body"), html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+  state.discData = dd;
+  state.discSelected = new Set();
+
+  const pending = dd.rows.filter((r) => r.status !== "created");
+  const totalSel = () => dd.rows.filter((r) => state.discSelected.has(r.customer)).reduce((s, r) => s + r.discount_amount, 0);
+
+  const inner = html`
+    ${!dd.config.discount_account_set
+      ? html`<div class="kt-alert kt-alert--warning"><div class="kt-alert-title"><i class="fas fa-gear"></i> Chưa cấu hình tài khoản</div>
+          <div class="kt-alert-hint">Vào <b>Ketoan Portal Settings</b> đặt <i>TK chi phí chiết khấu (6412)</i> và <i>TK phải thu (131)</i> để tạo bút toán.</div></div>`
+      : ""}
+    <div class="kt-mb" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span class="kt-sub">Ngưỡng ${formatVNDShort(dd.config.threshold)} · ${dd.config.discount_pct}% doanh số · ${dd.rows.length} NPP đủ điều kiện tháng ${dd.month}</span>
+      <span class="kt-sub">Tổng chiết khấu chọn: <b id="npp-disc-total" style="color:var(--kt-success)">${formatVND(0)}</b>
+        <button class="kt-btn kt-btn--success kt-btn--sm" id="npp-disc-create" style="margin-left:8px" ${dd.config.discount_account_set ? "" : "disabled"}><i class="fas fa-file-circle-plus"></i> Tạo bút toán</button></span>
+    </div>
+    <div class="kt-table-wrap"><table class="kt-table">
+      <thead><tr><th><input type="checkbox" id="npp-disc-all" ${pending.length ? "" : "disabled"}></th><th>Khách hàng</th><th class="num">Doanh số tháng</th><th class="num">Chiết khấu ${dd.config.discount_pct}%</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+      <tbody>${dd.rows.map((r) => discRow(r))}</tbody>
+    </table></div>
+    ${dd.rows.length === 0 ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có NPP đủ điều kiện trong tháng ${dd.month}</p></div>` : ""}
+  `;
+  setHTML(body.querySelector(".kt-card-body"), inner);
 
   const totalEl = body.querySelector("#npp-disc-total");
   const refreshTotal = () => { totalEl.textContent = formatVND(totalSel()); };
 
   body.querySelectorAll(".npp-disc-cb").forEach((cb) =>
     cb.addEventListener("change", () => {
-      if (cb.checked) state.selected.add(cb.value); else state.selected.delete(cb.value);
+      if (cb.checked) state.discSelected.add(cb.value); else state.discSelected.delete(cb.value);
       refreshTotal();
     })
   );
   const all = body.querySelector("#npp-disc-all");
   if (all) all.addEventListener("change", () => {
-    body.querySelectorAll(".npp-disc-cb").forEach((cb) => {
+    body.querySelectorAll(".npp-disc-cb:not(:disabled)").forEach((cb) => {
       cb.checked = all.checked;
-      if (all.checked) state.selected.add(cb.value); else state.selected.delete(cb.value);
+      if (all.checked) state.discSelected.add(cb.value); else state.discSelected.delete(cb.value);
     });
     refreshTotal();
   });
@@ -265,20 +283,55 @@ function renderDiscount(body, data, state) {
 
   const createBtn = body.querySelector("#npp-disc-create");
   if (createBtn) createBtn.addEventListener("click", async () => {
-    const picks = eligible.filter((r) => state.selected.has(r.customer)).map((r) => r.customer);
+    const picks = [...state.discSelected];
     if (!picks.length) { toast("Chọn ít nhất 1 NPP", "warning"); return; }
-    if (!confirm(`Tạo ${picks.length} bút toán chiết khấu (nháp)?`)) return;
+    if (!confirm(`Tạo ${picks.length} bút toán chiết khấu tháng ${dd.month} (nháp)?`)) return;
     createBtn.disabled = true; createBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tạo...';
     try {
-      const res = await api.nppCreateDiscount(picks);
+      const res = await api.nppCreateDiscount(picks, state.discountMonth);
       toast(`Đã tạo ${res.count} bút toán nháp` + (res.skipped.length ? ` · bỏ qua ${res.skipped.length}` : ""), "success");
-      state.selected.clear();
       renderDiscount(body, data, state);
     } catch (e) {
       toast(e.message, "error");
       createBtn.disabled = false; createBtn.innerHTML = '<i class="fas fa-file-circle-plus"></i> Tạo bút toán';
     }
   });
+}
+
+function discRow(r) {
+  const created = r.status === "created";
+  return html`<tr>
+    <td><input type="checkbox" class="npp-disc-cb" value="${r.customer}" ${created ? "disabled" : ""}></td>
+    <td>${r.customer_name}</td>
+    <td class="num">${formatVND(r.monthly_sales)}</td>
+    <td class="num pos">${formatVND(r.discount_amount)}</td>
+    <td>${created ? html`<span class="kt-badge kt-badge--green">Đã tạo JE</span>` : html`<span class="kt-badge kt-badge--gray">Chờ tạo</span>`}</td>
+    <td>${r.route ? html`<a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="${r.route}">Xem JE</a>` : "—"}</td>
+  </tr>`;
+}
+
+function bindMonth(body, data, state) {
+  const sel = body.querySelector("#npp-disc-month");
+  const btn = body.querySelector("#npp-disc-check");
+  const go = () => { state.discountMonth = sel.value; renderDiscount(body, data, state); };
+  if (sel) sel.addEventListener("change", go);
+  if (btn) btn.addEventListener("click", go);
+}
+
+function currentMonth() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthOptions() {
+  const out = [];
+  const d = new Date();
+  for (let i = 0; i < 12; i++) {
+    const y = d.getFullYear(), m = d.getMonth() + 1;
+    out.push({ value: `${y}-${String(m).padStart(2, "0")}`, label: `Tháng ${m}/${y}` });
+    d.setMonth(d.getMonth() - 1);
+  }
+  return out;
 }
 
 /* ---------- helpers ---------- */
