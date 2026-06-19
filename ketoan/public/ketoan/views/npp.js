@@ -22,7 +22,7 @@ export async function render({ container }) {
     return;
   }
 
-  const state = { tab: "debt", statusFilter: "all", search: "", discountMonth: currentMonth(), discSelected: new Set(), discData: null };
+  const state = { tab: "debt", statusFilter: "all", search: "", debtSelected: new Set(), discountMonth: currentMonth(), discSelected: new Set(), discData: null };
 
   setHTML(
     container,
@@ -97,12 +97,15 @@ function renderDebt(body, data, state) {
             <button data-f="normal" class="${state.statusFilter === "normal" ? "is-active" : ""}">Bình thường</button>
             <button data-f="negative" class="${state.statusFilter === "negative" ? "is-active" : ""}">Số dư âm</button>
           </div>
-          <div class="kt-search"><i class="fas fa-search"></i><input class="kt-input" id="npp-search" placeholder="Tìm NPP..." value="${state.search}"></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="kt-btn kt-btn--primary kt-btn--sm" id="npp-bulk-export"><i class="fas fa-file-pdf"></i> Xuất đối chiếu (<span id="npp-sel-count">0</span>)</button>
+            <div class="kt-search"><i class="fas fa-search"></i><input class="kt-input" id="npp-search" placeholder="Tìm NPP..." value="${state.search}"></div>
+          </div>
         </div>
         <div class="kt-card-body">
           <div class="kt-table-wrap"><table class="kt-table">
-            <thead><tr><th>NPP</th><th class="num">Công nợ</th><th class="num">DS bình quân/tháng</th><th class="num">Cần thanh toán</th><th>Trạng thái</th><th></th></tr></thead>
-            <tbody>${filtered.map((r) => debtRow(r))}</tbody>
+            <thead><tr><th><input type="checkbox" id="npp-debt-all"></th><th>NPP</th><th class="num">Công nợ</th><th class="num">DS bình quân/tháng</th><th class="num">Cần thanh toán</th><th>Trạng thái</th><th></th></tr></thead>
+            <tbody>${filtered.map((r) => debtRow(r, state))}</tbody>
           </table></div>
           ${filtered.length === 0 ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có NPP phù hợp</p></div>` : ""}
         </div>
@@ -117,17 +120,43 @@ function renderDebt(body, data, state) {
     renderDebt(body, data, state);
   });
   const search = body.querySelector("#npp-search");
-  search.addEventListener("input", () => { state.search = search.value; });
   let timer = null;
   search.addEventListener("input", () => {
+    state.search = search.value;
     clearTimeout(timer);
     timer = setTimeout(() => renderDebt(body, data, state), 200);
   });
+
+  // Chọn để xuất hàng loạt
+  const countEl = body.querySelector("#npp-sel-count");
+  const refreshCount = () => { countEl.textContent = state.debtSelected.size; };
+  body.querySelectorAll(".npp-debt-cb").forEach((cb) =>
+    cb.addEventListener("change", () => {
+      if (cb.checked) state.debtSelected.add(cb.value); else state.debtSelected.delete(cb.value);
+      refreshCount();
+    })
+  );
+  const all = body.querySelector("#npp-debt-all");
+  if (all) all.addEventListener("change", () => {
+    body.querySelectorAll(".npp-debt-cb").forEach((cb) => {
+      cb.checked = all.checked;
+      if (all.checked) state.debtSelected.add(cb.value); else state.debtSelected.delete(cb.value);
+    });
+    refreshCount();
+  });
+  refreshCount();
+
+  body.querySelector("#npp-bulk-export").addEventListener("click", () => {
+    if (!state.debtSelected.size) { toast("Chọn ít nhất 1 NPP để xuất", "warning"); return; }
+    openBulkExport([...state.debtSelected]);
+  });
 }
 
-function debtRow(r) {
+function debtRow(r, state) {
   const s = STATUS[r.status] || STATUS.normal;
+  const checked = state.debtSelected.has(r.customer) ? "checked" : "";
   return html`<tr class="kt-row-link" data-customer="${r.customer}">
+    <td><input type="checkbox" class="npp-debt-cb" value="${r.customer}" ${checked}></td>
     <td>${r.customer_name}</td>
     <td class="num ${r.debt < 0 ? "danger" : ""}">${formatVND(r.debt)}</td>
     <td class="num">${formatVND(r.monthly_sales)}</td>
@@ -135,6 +164,43 @@ function debtRow(r) {
     <td><span class="kt-badge kt-badge--${s.cls}">${s.label}</span></td>
     <td class="num"><span class="kt-btn-icon"><i class="fas fa-chevron-right"></i></span></td>
   </tr>`;
+}
+
+function openBulkExport(picks) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const yearStart = todayStr.slice(0, 4) + "-01-01";
+  const m = openModal({
+    title: `Xuất đối chiếu ${picks.length} NPP`,
+    icon: "fa-file-pdf",
+    maxWidth: 460,
+    body: html`
+      <p class="kt-sub kt-mb">Gộp ${picks.length} biên bản vào 1 file PDF (mỗi NPP một trang).</p>
+      <div class="kt-row2">
+        <div class="kt-field"><label><i class="fas fa-calendar"></i> Từ ngày</label>
+          <input type="date" id="npp-bx-from" class="kt-input" value="${yearStart}"></div>
+        <div class="kt-field"><label><i class="fas fa-calendar"></i> Đến ngày</label>
+          <input type="date" id="npp-bx-to" class="kt-input" value="${todayStr}" max="${todayStr}"></div>
+      </div>
+      <div class="kt-modal-actions">
+        <button class="kt-btn kt-btn--outline" id="npp-bx-cancel">Hủy</button>
+        <button class="kt-btn kt-btn--primary" id="npp-bx-go"><i class="fas fa-download"></i> Tải PDF</button>
+      </div>`,
+  });
+  m.body.querySelector("#npp-bx-cancel").addEventListener("click", m.close);
+  m.body.querySelector("#npp-bx-go").addEventListener("click", async () => {
+    const f = m.body.querySelector("#npp-bx-from").value;
+    const t = m.body.querySelector("#npp-bx-to").value;
+    const btn = m.body.querySelector("#npp-bx-go");
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tạo...';
+    try {
+      await api.nppExportBulk(picks, f, t);
+      toast("Đã xuất PDF", "success");
+      m.close();
+    } catch (e) {
+      toast(e.message, "error");
+      btn.disabled = false; btn.innerHTML = '<i class="fas fa-download"></i> Tải PDF';
+    }
+  });
 }
 
 /* ---------- Tab 2: Đến hạn + nhắc nợ Zalo ---------- */

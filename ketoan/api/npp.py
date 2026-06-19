@@ -367,32 +367,40 @@ def create_discount_entries(customers, month: str | None = None, company: str | 
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Xuất biên bản đối chiếu công nợ (PDF) gửi NPP
+# Xuất biên bản đối chiếu công nợ (PDF) gửi NPP — đơn lẻ & hàng loạt
 # ═══════════════════════════════════════════════════════════════════════════
 
-@frappe.whitelist()
-def export_reconciliation(
-    customer: str,
-    from_date: str | None = None,
-    to_date: str | None = None,
-    company: str | None = None,
-):
-    """Xuất biên bản đối chiếu công nợ 1 khách ra PDF (download).
+_RECON_STYLE = """
+* { font-family: "Be Vietnam Pro","DejaVu Sans",Arial,sans-serif; }
+body { color:#1e293b; font-size:12px; }
+h1 { text-align:center; font-size:18px; margin:4px 0; }
+.sub { text-align:center; color:#555; margin-bottom:14px; font-size:12px; }
+.meta { margin:10px 0; line-height:1.7; }
+.meta b { display:inline-block; min-width:130px; }
+table.gl { width:100%; border-collapse:collapse; margin-top:8px; }
+table.gl th, table.gl td { border:1px solid #cbd5e1; padding:6px 8px; font-size:11px; }
+table.gl th { background:#f1f5f9; text-align:left; }
+.num { text-align:right; white-space:nowrap; }
+.tot td { font-weight:bold; background:#f8fafc; }
+.words { font-style:italic; margin:8px 0 18px; }
+.sign { width:100%; margin-top:26px; border:none; }
+.sign td { border:none; text-align:center; vertical-align:top; width:50%; font-size:12px; }
+.sign .role { font-weight:bold; }
+.sign .hint { color:#777; font-size:10px; }
+.pagebreak { page-break-after:always; }
+"""
 
-    Số dư đầu kỳ (trước from_date) + phát sinh trong kỳ (TK phải thu) + số dư cuối kỳ.
-    Read-only, guard ở dòng đầu.
-    """
-    guard_view()
-    company = resolve_company(company)
-    if not customer or not frappe.db.exists("Customer", customer):
-        frappe.throw(_("Khách hàng không tồn tại"))
+
+def _recon_default_period(to_date: str | None):
     to_date = to_date or today()
-    from_date = from_date or str(get_first_day(getdate(to_date).replace(month=1, day=1)))
+    from_date = str(getdate(to_date).replace(month=1, day=1))
+    return from_date, to_date
 
-    cfg = _cfg()
 
+def _recon_fragment(company_name: str, customer: str, from_date: str, to_date: str, cfg: dict) -> str:
+    """HTML 1 biên bản đối chiếu cho 1 khách (không kèm <html>/<style>)."""
     # Số dư đầu kỳ
-    op_params = {"company": company, "customer": customer, "from": from_date}
+    op_params = {"company": cfg["_company"], "customer": customer, "from": from_date}
     op_clause = _receivable_clause(cfg, op_params)
     opening = flt(
         frappe.db.sql(
@@ -409,7 +417,7 @@ def export_reconciliation(
     )
 
     # Phát sinh trong kỳ
-    pr_params = {"company": company, "customer": customer, "from": from_date, "to": to_date}
+    pr_params = {"company": cfg["_company"], "customer": customer, "from": from_date, "to": to_date}
     pr_clause = _receivable_clause(cfg, pr_params)
     entries = frappe.db.sql(
         f"""
@@ -428,22 +436,7 @@ def export_reconciliation(
     info = frappe.db.get_value(
         "Customer", customer, ["customer_name", "tax_id", "mobile_no"], as_dict=True
     ) or {}
-    company_name = frappe.db.get_value("Company", company, "company_name") or company
 
-    html = _reconciliation_html(
-        company_name, customer, info, from_date, to_date, opening, entries
-    )
-
-    from frappe.utils.pdf import get_pdf
-
-    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", customer)[:40]
-    frappe.local.response.filename = f"DoiChieuCongNo_{safe}_{to_date}.pdf"
-    frappe.local.response.filecontent = get_pdf(html, options={"orientation": "Portrait"})
-    frappe.local.response.type = "download"
-
-
-def _reconciliation_html(company_name, customer, info, from_date, to_date, opening, entries):
-    """Dựng HTML biên bản đối chiếu công nợ (inline CSS cho wkhtmltopdf)."""
     total_debit = sum(flt(e.debit) for e in entries)
     total_credit = sum(flt(e.credit) for e in entries)
     closing = opening + total_debit - total_credit
@@ -453,14 +446,14 @@ def _reconciliation_html(company_name, customer, info, from_date, to_date, openi
     for e in entries:
         running += flt(e.debit) - flt(e.credit)
         rows.append(
-            f"<tr>"
+            "<tr>"
             f"<td>{formatdate(e.posting_date)}</td>"
-            f"<td>{escape_html((e.voucher_no or '') )}</td>"
+            f"<td>{escape_html(e.voucher_no or '')}</td>"
             f"<td>{escape_html((e.remarks or e.voucher_type or '')[:80])}</td>"
             f"<td class='num'>{format_vnd(e.debit) if flt(e.debit) else ''}</td>"
             f"<td class='num'>{format_vnd(e.credit) if flt(e.credit) else ''}</td>"
             f"<td class='num'>{format_vnd(running)}</td>"
-            f"</tr>"
+            "</tr>"
         )
     rows_html = "".join(rows) or "<tr><td colspan='6' style='text-align:center;color:#888'>Không có phát sinh trong kỳ</td></tr>"
 
@@ -469,24 +462,7 @@ def _reconciliation_html(company_name, customer, info, from_date, to_date, openi
     phone = escape_html(info.get("mobile_no") or "")
     closing_words = money_in_words(abs(closing), "VND")
 
-    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
-    * {{ font-family: "Be Vietnam Pro","DejaVu Sans",Arial,sans-serif; }}
-    body {{ color:#1e293b; font-size:12px; }}
-    h1 {{ text-align:center; font-size:18px; margin:4px 0; }}
-    .sub {{ text-align:center; color:#555; margin-bottom:14px; font-size:12px; }}
-    .meta {{ margin:10px 0; line-height:1.7; }}
-    .meta b {{ display:inline-block; min-width:130px; }}
-    table {{ width:100%; border-collapse:collapse; margin-top:8px; }}
-    th,td {{ border:1px solid #cbd5e1; padding:6px 8px; font-size:11px; }}
-    th {{ background:#f1f5f9; text-align:left; }}
-    .num {{ text-align:right; white-space:nowrap; }}
-    .tot td {{ font-weight:bold; background:#f8fafc; }}
-    .words {{ font-style:italic; margin:8px 0 18px; }}
-    .sign {{ width:100%; margin-top:26px; }}
-    .sign td {{ border:none; text-align:center; vertical-align:top; width:50%; font-size:12px; }}
-    .sign .role {{ font-weight:bold; }}
-    .sign .hint {{ color:#777; font-size:10px; }}
-    </style></head><body>
+    return f"""
     <div style="text-align:center;font-weight:bold;font-size:13px">{escape_html(company_name)}</div>
     <h1>BIÊN BẢN ĐỐI CHIẾU CÔNG NỢ</h1>
     <div class="sub">Kỳ: {formatdate(from_date)} — {formatdate(to_date)}</div>
@@ -496,7 +472,7 @@ def _reconciliation_html(company_name, customer, info, from_date, to_date, openi
       {f'<div><b>Điện thoại:</b> {phone}</div>' if phone else ''}
       <div><b>Dư nợ đầu kỳ:</b> {format_vnd(opening)}</div>
     </div>
-    <table>
+    <table class="gl">
       <thead><tr><th>Ngày</th><th>Chứng từ</th><th>Diễn giải</th><th class="num">Phát sinh nợ</th><th class="num">Đã thanh toán</th><th class="num">Lũy kế</th></tr></thead>
       <tbody>
         <tr class="tot"><td colspan="5">Dư nợ đầu kỳ</td><td class="num">{format_vnd(opening)}</td></tr>
@@ -511,4 +487,57 @@ def _reconciliation_html(company_name, customer, info, from_date, to_date, openi
       <td><div class="role">ĐẠI DIỆN KHÁCH HÀNG</div><div class="hint">(Ký, ghi rõ họ tên, đóng dấu)</div></td>
       <td><div class="role">ĐẠI DIỆN {escape_html(company_name.upper())}</div><div class="hint">(Ký, ghi rõ họ tên, đóng dấu)</div></td>
     </tr></table>
-    </body></html>"""
+    """
+
+
+def _recon_document(fragments: list) -> str:
+    body = '<div class="pagebreak"></div>'.join(fragments)
+    return f'<!doctype html><html><head><meta charset="utf-8"><style>{_RECON_STYLE}</style></head><body>{body}</body></html>'
+
+
+def _render_pdf_download(html: str, filename: str):
+    from frappe.utils.pdf import get_pdf
+    frappe.local.response.filename = filename
+    frappe.local.response.filecontent = get_pdf(html, options={"orientation": "Portrait"})
+    frappe.local.response.type = "download"
+
+
+@frappe.whitelist()
+def export_reconciliation(customer: str, from_date: str | None = None, to_date: str | None = None, company: str | None = None):
+    """Xuất biên bản đối chiếu công nợ 1 khách ra PDF (download)."""
+    guard_view()
+    company = resolve_company(company)
+    if not customer or not frappe.db.exists("Customer", customer):
+        frappe.throw(_("Khách hàng không tồn tại"))
+    from_date, to_date = (from_date or _recon_default_period(to_date)[0]), (to_date or today())
+
+    cfg = _cfg()
+    cfg["_company"] = company
+    company_name = frappe.db.get_value("Company", company, "company_name") or company
+    html = _recon_document([_recon_fragment(company_name, customer, from_date, to_date, cfg)])
+
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", customer)[:40]
+    _render_pdf_download(html, f"DoiChieuCongNo_{safe}_{to_date}.pdf")
+
+
+@frappe.whitelist()
+def export_reconciliation_bulk(customers, from_date: str | None = None, to_date: str | None = None, company: str | None = None):
+    """Xuất biên bản đối chiếu hàng loạt nhiều NPP vào 1 PDF (mỗi khách 1 trang)."""
+    guard_view()
+    company = resolve_company(company)
+    if isinstance(customers, str):
+        customers = json.loads(customers)
+    customers = [c for c in (customers or []) if frappe.db.exists("Customer", c)]
+    if not customers:
+        frappe.throw(_("Chưa chọn NPP hợp lệ nào"))
+    if len(customers) > 200:
+        frappe.throw(_("Tối đa 200 NPP mỗi lần xuất"))
+    from_date, to_date = (from_date or _recon_default_period(to_date)[0]), (to_date or today())
+
+    cfg = _cfg()
+    cfg["_company"] = company
+    company_name = frappe.db.get_value("Company", company, "company_name") or company
+    fragments = [_recon_fragment(company_name, c, from_date, to_date, cfg) for c in customers]
+    html = _recon_document(fragments)
+
+    _render_pdf_download(html, f"DoiChieuCongNo_{len(customers)}NPP_{to_date}.pdf")
