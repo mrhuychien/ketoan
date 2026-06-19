@@ -2,6 +2,7 @@
 import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
 import { formatVND, formatDate, escapeHtml } from "../lib/format.js";
+import { navigate } from "../lib/router.js";
 import { openCashbook } from "../components/cashbook.js";
 
 const q = encodeURIComponent;
@@ -23,7 +24,10 @@ export async function render({ container }) {
       html`
         <div class="kt-view-head">
           <div class="kt-view-title"><i class="fas fa-wallet"></i> Sổ quỹ &amp; dòng tiền</div>
-          <button class="kt-btn kt-btn--success kt-btn--sm" id="kt-new-cash"><i class="fas fa-plus"></i> Nhập sổ quỹ</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="kt-btn kt-btn--outline kt-btn--sm" id="kt-import-bank"><i class="fas fa-file-import"></i> Nhập từ file (sao kê)</button>
+            <button class="kt-btn kt-btn--success kt-btn--sm" id="kt-new-cash"><i class="fas fa-plus"></i> Nhập sổ quỹ</button>
+          </div>
         </div>
 
         <div class="kt-stats">
@@ -77,6 +81,7 @@ export async function render({ container }) {
     );
 
     container.querySelector("#kt-new-cash").addEventListener("click", () => openCashbook({ onDone: load }));
+    container.querySelector("#kt-import-bank").addEventListener("click", () => navigate("/nhap-sao-ke"));
   }
 
   await load();

@@ -101,4 +101,9 @@ export const api = {
   // Cashbook
   cashbookOptions: (a) => callMethod(NS + "cashbook.get_form_options", withCompany(a)),
   cashbookCreate: (a) => callMethod(NS + "cashbook.create_entry", withCompany(a)),
+
+  // Bank statement import
+  bankImportOptions: (a) => callMethod(NS + "bankimport.get_import_options", withCompany(a)),
+  bankParse: (content, a) => callMethod(NS + "bankimport.parse_statement", withCompany({ content, ...a })),
+  bankImport: (rows, bank_account, a) => callMethod(NS + "bankimport.import_transactions", withCompany({ rows: JSON.stringify(rows), bank_account, ...a })),
 };
