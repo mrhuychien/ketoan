@@ -14,13 +14,13 @@ import frappe
 from frappe import _
 from frappe.utils import flt, today, getdate
 
-from ketoan.api._guard import guard_view, resolve_company, get_settings, is_manager
+from ketoan.api._guard import guard_cash, resolve_company, get_settings, is_manager
 
 
 @frappe.whitelist()
 def get_form_options(company: str | None = None) -> dict:
     """Tùy chọn cho form nhập sổ quỹ: TK quỹ (Cash/Bank) + TK đối ứng gợi ý."""
-    guard_view()
+    guard_cash()
     company = resolve_company(company)
 
     cash_accounts = frappe.get_all(
@@ -62,7 +62,7 @@ def create_entry(
     entry_type: 'Thu' (Receive) hoặc 'Chi' (Pay).
     Trả về {doctype, name, docstatus, route} để SPA deep-link sang Desk.
     """
-    guard_view()
+    guard_cash()
     company = resolve_company(company)
     amount = flt(amount)
     posting_date = posting_date or today()

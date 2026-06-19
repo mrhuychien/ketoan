@@ -5,6 +5,7 @@ import { formatVND, formatVNDShort, escapeHtml } from "../lib/format.js";
 
 const SEV = { danger: "red", warning: "yellow", info: "green" };
 const BAR = { current: "var(--kt-success)", b1: "#a3e635", b2: "var(--kt-warning)", b3: "#fb923c", over: "var(--kt-danger)" };
+const CAN_CASH = !!(window.KETOAN_CONTEXT || {}).canViewCash;
 
 export async function render({ container }) {
   setHTML(container, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
@@ -40,10 +41,12 @@ export async function render({ container }) {
           <div class="kt-stat-label"><i class="fas fa-user-shield"></i> Khách vượt hạn mức</div>
           <div class="kt-stat-value warn">${c.over_limit_customers}</div>
         </div>
-        <div class="kt-stat is-link" data-go="#/quy">
-          <div class="kt-stat-label"><i class="fas fa-wallet"></i> Số dư quỹ</div>
-          <div class="kt-stat-value ${c.cash_total < 0 ? "neg" : "pos"}">${formatVND(c.cash_total)}</div>
-        </div>
+        ${CAN_CASH
+          ? html`<div class="kt-stat is-link" data-go="#/quy">
+              <div class="kt-stat-label"><i class="fas fa-wallet"></i> Số dư quỹ</div>
+              <div class="kt-stat-value ${c.cash_total < 0 ? "neg" : "pos"}">${formatVND(c.cash_total)}</div>
+            </div>`
+          : ""}
         <div class="kt-stat is-link" data-go="#/canh-bao">
           <div class="kt-stat-label"><i class="fas fa-link-slash"></i> Khoản thu treo</div>
           <div class="kt-stat-value ${c.unallocated_payment > 0 ? "warn" : ""}">${formatVND(c.unallocated_payment)}</div>
@@ -54,7 +57,7 @@ export async function render({ container }) {
         </div>
       </div>
 
-      <div class="kt-grid-2">
+      <div class="${CAN_CASH ? "kt-grid-2" : ""}">
         <div class="kt-card">
           <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-layer-group"></i> Tuổi nợ</div>
             <a class="kt-btn kt-btn--outline kt-btn--sm" href="#/cong-no">Chi tiết</a></div>
@@ -71,19 +74,21 @@ export async function render({ container }) {
           </div>
         </div>
 
-        <div class="kt-card">
-          <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-money-bill-transfer"></i> Quỹ tiền</div>
-            <a class="kt-btn kt-btn--outline kt-btn--sm" href="#/quy">Sổ quỹ</a></div>
-          <div class="kt-card-body">
-            ${d.cash_accounts.length
-              ? html`<div class="kt-table-wrap"><table class="kt-table"><tbody>
-                  ${d.cash_accounts.map(
-                    (a) => html`<tr><td>${a.account_name || a.account}</td><td class="num ${a.balance < 0 ? "danger" : "pos"}">${formatVND(a.balance)}</td></tr>`
-                  )}
-                </tbody></table></div>`
-              : html`<div class="kt-empty"><i class="fas fa-wallet"></i><p>Chưa có tài khoản tiền</p></div>`}
-          </div>
-        </div>
+        ${CAN_CASH
+          ? html`<div class="kt-card">
+              <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-money-bill-transfer"></i> Quỹ tiền</div>
+                <a class="kt-btn kt-btn--outline kt-btn--sm" href="#/quy">Sổ quỹ</a></div>
+              <div class="kt-card-body">
+                ${d.cash_accounts.length
+                  ? html`<div class="kt-table-wrap"><table class="kt-table"><tbody>
+                      ${d.cash_accounts.map(
+                        (a) => html`<tr><td>${a.account_name || a.account}</td><td class="num ${a.balance < 0 ? "danger" : "pos"}">${formatVND(a.balance)}</td></tr>`
+                      )}
+                    </tbody></table></div>`
+                  : html`<div class="kt-empty"><i class="fas fa-wallet"></i><p>Chưa có tài khoản tiền</p></div>`}
+              </div>
+            </div>`
+          : ""}
       </div>
 
       <div class="kt-card kt-mb" style="margin-top:16px">

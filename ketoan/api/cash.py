@@ -7,13 +7,13 @@ Số dư & dòng tiền tính từ GL Entry trên các TK có account_type Cash/
 import frappe
 from frappe.utils import flt, today, add_days
 
-from ketoan.api._guard import guard_view, resolve_company, cash_account_types
+from ketoan.api._guard import guard_cash, resolve_company, cash_account_types
 
 
 @frappe.whitelist()
 def get_balances(company: str | None = None, as_of: str | None = None) -> dict:
     """Số dư từng TK tiền mặt/tiền gửi tại thời điểm `as_of` (mặc định hôm nay)."""
-    guard_view()
+    guard_cash()
     company = resolve_company(company)
     as_of = as_of or today()
     types = cash_account_types()
@@ -48,7 +48,7 @@ def get_balances(company: str | None = None, as_of: str | None = None) -> dict:
 @frappe.whitelist()
 def get_cashflow(company: str | None = None, from_date: str | None = None, to_date: str | None = None) -> dict:
     """Dòng tiền thu (debit) / chi (credit) theo ngày trên TK tiền."""
-    guard_view()
+    guard_cash()
     company = resolve_company(company)
     to_date = to_date or today()
     from_date = from_date or add_days(to_date, -30)
@@ -101,7 +101,7 @@ def get_transactions(
     limit: int = 100,
 ) -> dict:
     """List giao dịch GL trên TK tiền (mới nhất trước), kèm chứng từ để deep-link."""
-    guard_view()
+    guard_cash()
     company = resolve_company(company)
     to_date = to_date or today()
     from_date = from_date or add_days(to_date, -30)

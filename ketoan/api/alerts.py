@@ -16,7 +16,7 @@ from urllib.parse import quote
 import frappe
 from frappe.utils import flt, today
 
-from ketoan.api._guard import guard_view, resolve_company, get_settings, cash_account_types
+from ketoan.api._guard import guard_view, resolve_company, get_settings, cash_account_types, can_view_cash
 
 
 @frappe.whitelist()
@@ -30,7 +30,9 @@ def get_alerts(company: str | None = None) -> dict:
     alerts.extend(_alert_credit_limit(company, s))
     alerts.extend(_alert_overdue(company, s))
     alerts.extend(_alert_unallocated(company))
-    alerts.extend(_alert_cash_negative(company))
+    # A4 quỹ âm là nghiệp vụ quỹ → chỉ hiện cho người có quyền xem quỹ.
+    if can_view_cash():
+        alerts.extend(_alert_cash_negative(company))
 
     severity_rank = {"danger": 0, "warning": 1, "info": 2}
     alerts.sort(key=lambda a: (severity_rank.get(a["severity"], 9), -flt(a.get("amount"))))

@@ -13,18 +13,20 @@ const ROUTES = [
   { pattern: "/", view: "views/dashboard.js", nav: "dashboard", title: "Tổng quan" },
   { pattern: "/cong-no", view: "views/receivables.js", nav: "cong-no", title: "Công nợ" },
   { pattern: "/khach/:id", view: "views/customer.js", nav: "cong-no", title: "360° khách" },
-  { pattern: "/quy", view: "views/cash.js", nav: "quy", title: "Sổ quỹ" },
+  { pattern: "/quy", view: "views/cash.js", nav: "quy", title: "Sổ quỹ", cap: "cash" },
   { pattern: "/canh-bao", view: "views/alerts.js", nav: "canh-bao", title: "Cảnh báo" },
   { pattern: "/tien-ich", view: "views/utilities.js", nav: "tien-ich", title: "Tiện ích" },
 ];
 
+const CAN_CASH = !!CTX.canViewCash;
+
 const NAV_ITEMS = [
   { key: "dashboard", path: "/", icon: "fa-gauge-high", label: "Tổng quan" },
   { key: "cong-no", path: "/cong-no", icon: "fa-file-invoice-dollar", label: "Công nợ" },
-  { key: "quy", path: "/quy", icon: "fa-wallet", label: "Sổ quỹ" },
+  { key: "quy", path: "/quy", icon: "fa-wallet", label: "Sổ quỹ", cap: "cash" },
   { key: "canh-bao", path: "/canh-bao", icon: "fa-triangle-exclamation", label: "Cảnh báo" },
   { key: "tien-ich", path: "/tien-ich", icon: "fa-bolt", label: "Tiện ích" },
-];
+].filter((n) => n.cap !== "cash" || CAN_CASH);
 
 function renderShell() {
   const root = document.getElementById("kt-root");
@@ -75,6 +77,13 @@ async function route() {
 
   if (!matched) {
     setHTML(view, html`<div class="kt-empty"><i class="fas fa-compass"></i><p>Không tìm thấy trang. <a href="#/">Về tổng quan</a></p></div>`);
+    return;
+  }
+
+  // Chặn truy cập màn quỹ nếu không có quyền (vd kế toán công nợ).
+  if (matched.route.cap === "cash" && !CAN_CASH) {
+    setActiveNav(null);
+    setHTML(view, html`<div class="kt-empty"><i class="fas fa-lock"></i><p>Bạn không có quyền xem nghiệp vụ quỹ/tiền.<br><a href="#/">Về tổng quan</a></p></div>`);
     return;
   }
 

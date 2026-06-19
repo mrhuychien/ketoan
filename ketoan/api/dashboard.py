@@ -8,7 +8,7 @@ Read-only, guard ở dòng đầu. Tái dùng method các phân hệ để trán
 import frappe
 from frappe.utils import flt, today
 
-from ketoan.api._guard import guard_view, resolve_company, is_manager
+from ketoan.api._guard import guard_view, resolve_company, is_manager, can_view_cash
 from ketoan.api import receivables, cash, alerts
 
 
@@ -17,10 +17,12 @@ def get_overview(company: str | None = None) -> dict:
     """Trả về toàn bộ thẻ KPI + danh sách cảnh báo cho trang chủ portal."""
     guard_view()
     company = resolve_company(company)
+    show_cash = can_view_cash()
 
     aging = receivables.get_aging(company)
     dso = receivables.get_dso(company)
-    balances = cash.get_balances(company)
+    # Kế toán công nợ không xem quỹ → bỏ qua truy vấn quỹ (tránh 403).
+    balances = cash.get_balances(company) if show_cash else {"total": None, "rows": []}
     alert_data = alerts.get_alerts(company)
 
     overdue = sum(b["amount"] for b in aging["buckets"] if b["key"] != "current")
@@ -44,6 +46,7 @@ def get_overview(company: str | None = None) -> dict:
         "company": company,
         "as_of": today(),
         "is_manager": is_manager(),
+        "can_view_cash": show_cash,
         "cards": {
             "total_ar": aging["total"],
             "overdue": overdue,

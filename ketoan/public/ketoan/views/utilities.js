@@ -5,13 +5,15 @@ import { formatVND, escapeHtml } from "../lib/format.js";
 import { navigate } from "../lib/router.js";
 import { openCashbook } from "../components/cashbook.js";
 
+const CAN_CASHBOOK = !!(window.KETOAN_CONTEXT || {}).canUseCashbook;
+
 export async function render({ container }) {
   setHTML(
     container,
     html`
       <div class="kt-view-head"><div class="kt-view-title"><i class="fas fa-bolt"></i> Tiện ích nhanh</div></div>
 
-      <div class="kt-grid-2 kt-mb">
+      <div class="${CAN_CASHBOOK ? "kt-grid-2" : ""} kt-mb">
         <div class="kt-card">
           <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-magnifying-glass"></i> Tìm khách → 360° công nợ</div></div>
           <div class="kt-card-body">
@@ -20,13 +22,15 @@ export async function render({ container }) {
           </div>
         </div>
 
-        <div class="kt-card">
-          <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-money-bill-wave"></i> Nhập sổ quỹ</div></div>
-          <div class="kt-card-body">
-            <p class="kt-sub kt-mb">Tạo nhanh phiếu thu/chi tiền mặt (Journal Entry nháp) — kèm QR VietQR. Người duyệt &amp; ghi sổ trong Desk.</p>
-            <button class="kt-btn kt-btn--success" id="ut-cashbook"><i class="fas fa-plus"></i> Mở phiếu sổ quỹ</button>
-          </div>
-        </div>
+        ${CAN_CASHBOOK
+          ? html`<div class="kt-card">
+              <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-money-bill-wave"></i> Nhập sổ quỹ</div></div>
+              <div class="kt-card-body">
+                <p class="kt-sub kt-mb">Tạo nhanh phiếu thu/chi tiền mặt (Journal Entry nháp) — kèm QR VietQR. Người duyệt &amp; ghi sổ trong Desk.</p>
+                <button class="kt-btn kt-btn--success" id="ut-cashbook"><i class="fas fa-plus"></i> Mở phiếu sổ quỹ</button>
+              </div>
+            </div>`
+          : ""}
       </div>
 
       <div class="kt-card">
@@ -42,7 +46,8 @@ export async function render({ container }) {
     `
   );
 
-  container.querySelector("#ut-cashbook").addEventListener("click", () => openCashbook());
+  const cbBtn = container.querySelector("#ut-cashbook");
+  if (cbBtn) cbBtn.addEventListener("click", () => openCashbook());
 
   // Tìm khách: dùng frappe.client.get_list qua method API (search_link tương đương).
   const search = container.querySelector("#ut-search");
