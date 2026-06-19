@@ -5,7 +5,7 @@
 - get_discount_eligible / create_discount_entries: chương trình chiết khấu theo
   THÁNG — NPP có DOANH SỐ THÁNG (debit 131 từ Sales Invoice) ≥ ngưỡng → chiết khấu
   = % × doanh số tháng; tạo bút toán (Nợ 6412 / Có 131) DRAFT, chống trùng theo
-  marker [CK2-<customer>-<YYYY-MM>] ghi trong user_remark.
+  marker [CK2-<customer>-<YYYY-MM>] ghi trong trường remark.
 Read-only trừ create_discount_entries (ghi DRAFT). Guard ở dòng đầu, SQL parameterized.
 """
 
@@ -17,6 +17,7 @@ from frappe import _
 from frappe.utils import flt, today, getdate, get_first_day, get_last_day
 
 from ketoan.api._guard import guard_view, resolve_company, get_settings
+from ketoan.utils import je_remark_field
 
 
 def _cfg() -> dict:
@@ -74,21 +75,22 @@ def _month_range(month: str | None):
 
 
 def _marker(customer: str, month_key: str) -> str:
-    """Khóa chống trùng bút toán chiết khấu — ghi thẳng vào Journal Entry.user_remark."""
+    """Khóa chống trùng bút toán chiết khấu — ghi thẳng vào trường remark của Journal Entry."""
     return f"[CK2-{customer}-{month_key}]"
 
 
 def _existing_discount_je(month_key: str) -> dict:
-    """Map marker -> tên JE chiết khấu đã tạo trong tháng (dò trong user_remark)."""
+    """Map marker -> tên JE chiết khấu đã tạo trong tháng (dò trong field remark)."""
+    field = je_remark_field()
     candidates = frappe.get_all(
         "Journal Entry",
-        filters={"user_remark": ["like", f"%-{month_key}]%"], "docstatus": ["<", 2]},
-        fields=["name", "user_remark"],
+        filters={field: ["like", f"%-{month_key}]%"], "docstatus": ["<", 2]},
+        fields=["name", field],
     )
     pattern = re.compile(r"\[CK2-.*-" + re.escape(month_key) + r"\]")
     ex = {}
     for c in candidates:
-        m = pattern.search(c.user_remark or "")
+        m = pattern.search(c.get(field) or "")
         if m:
             ex[m.group(0)] = c.name
     return ex
@@ -300,7 +302,7 @@ def create_discount_entries(customers, month: str | None = None, company: str | 
     """Tạo bút toán chiết khấu (Nợ 6412 / Có 131) theo doanh số THÁNG — DRAFT.
 
     Server tự tính chiết khấu từ doanh số tháng thật (không tin client). Khóa
-    chống trùng theo marker [CK2-<customer>-<YYYY-MM>] trong user_remark.
+    chống trùng theo marker [CK2-<customer>-<YYYY-MM>] trong trường remark.
     """
     guard_view()
     company = resolve_company(company)
@@ -340,8 +342,8 @@ def create_discount_entries(customers, month: str | None = None, company: str | 
         je.voucher_type = "Journal Entry"
         je.posting_date = last
         je.company = company
-        # Ghi thẳng vào remark: marker chống trùng + diễn giải.
-        je.user_remark = f"{mk} Chiết khấu {cfg['discount_pct']}% doanh số tháng {mkey} — {cust}"
+        # Ghi thẳng vào trường remark: marker chống trùng + diễn giải.
+        je.set(je_remark_field(), f"{mk} Chiết khấu {cfg['discount_pct']}% doanh số tháng {mkey} — {cust}")
         je.append("accounts", {
             "account": cfg["discount_expense_account"],
             "debit_in_account_currency": amount,

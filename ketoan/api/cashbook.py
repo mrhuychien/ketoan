@@ -15,6 +15,7 @@ from frappe import _
 from frappe.utils import flt, today, getdate
 
 from ketoan.api._guard import guard_cash, resolve_company, get_settings, is_manager
+from ketoan.utils import je_remark_field
 
 
 @frappe.whitelist()
@@ -88,7 +89,7 @@ def create_entry(
     je.voucher_type = "Cash Entry"
     je.posting_date = posting_date
     je.company = company
-    je.user_remark = content or ("Thu tiền" if entry_type == "Thu" else "Chi tiền")
+    je.set(je_remark_field(), content or ("Thu tiền" if entry_type == "Thu" else "Chi tiền"))
 
     if entry_type == "Thu":
         # Nợ quỹ / Có đối ứng (gắn party nếu là khách để đối trừ công nợ)
