@@ -14,10 +14,13 @@ import re
 
 import frappe
 from frappe import _
-from frappe.utils import flt, today, getdate, get_first_day, get_last_day
+from frappe.utils import (
+    flt, today, getdate, get_first_day, get_last_day,
+    formatdate, money_in_words, escape_html,
+)
 
 from ketoan.api._guard import guard_view, resolve_company, get_settings
-from ketoan.utils import je_remark_field
+from ketoan.utils import je_remark_field, format_vnd
 
 
 def _cfg() -> dict:
@@ -361,3 +364,151 @@ def create_discount_entries(customers, month: str | None = None, company: str | 
         })
 
     return {"created": created, "skipped": skipped, "count": len(created), "month": mkey}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Xuất biên bản đối chiếu công nợ (PDF) gửi NPP
+# ═══════════════════════════════════════════════════════════════════════════
+
+@frappe.whitelist()
+def export_reconciliation(
+    customer: str,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    company: str | None = None,
+):
+    """Xuất biên bản đối chiếu công nợ 1 khách ra PDF (download).
+
+    Số dư đầu kỳ (trước from_date) + phát sinh trong kỳ (TK phải thu) + số dư cuối kỳ.
+    Read-only, guard ở dòng đầu.
+    """
+    guard_view()
+    company = resolve_company(company)
+    if not customer or not frappe.db.exists("Customer", customer):
+        frappe.throw(_("Khách hàng không tồn tại"))
+    to_date = to_date or today()
+    from_date = from_date or str(get_first_day(getdate(to_date).replace(month=1, day=1)))
+
+    cfg = _cfg()
+
+    # Số dư đầu kỳ
+    op_params = {"company": company, "customer": customer, "from": from_date}
+    op_clause = _receivable_clause(cfg, op_params)
+    opening = flt(
+        frappe.db.sql(
+            f"""
+            SELECT SUM(gle.debit - gle.credit)
+            FROM `tabGL Entry` gle JOIN `tabAccount` acc ON acc.name = gle.account
+            WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
+              AND gle.party_type = 'Customer' AND gle.party = %(customer)s
+              AND {op_clause} AND gle.posting_date < %(from)s
+            """,
+            op_params,
+        )[0][0]
+        or 0
+    )
+
+    # Phát sinh trong kỳ
+    pr_params = {"company": company, "customer": customer, "from": from_date, "to": to_date}
+    pr_clause = _receivable_clause(cfg, pr_params)
+    entries = frappe.db.sql(
+        f"""
+        SELECT gle.posting_date, gle.voucher_type, gle.voucher_no, gle.remarks,
+               gle.debit, gle.credit
+        FROM `tabGL Entry` gle JOIN `tabAccount` acc ON acc.name = gle.account
+        WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
+          AND gle.party_type = 'Customer' AND gle.party = %(customer)s
+          AND {pr_clause} AND gle.posting_date BETWEEN %(from)s AND %(to)s
+        ORDER BY gle.posting_date ASC, gle.creation ASC
+        """,
+        pr_params,
+        as_dict=True,
+    )
+
+    info = frappe.db.get_value(
+        "Customer", customer, ["customer_name", "tax_id", "mobile_no"], as_dict=True
+    ) or {}
+    company_name = frappe.db.get_value("Company", company, "company_name") or company
+
+    html = _reconciliation_html(
+        company_name, customer, info, from_date, to_date, opening, entries
+    )
+
+    from frappe.utils.pdf import get_pdf
+
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", customer)[:40]
+    frappe.local.response.filename = f"DoiChieuCongNo_{safe}_{to_date}.pdf"
+    frappe.local.response.filecontent = get_pdf(html, options={"orientation": "Portrait"})
+    frappe.local.response.type = "download"
+
+
+def _reconciliation_html(company_name, customer, info, from_date, to_date, opening, entries):
+    """Dựng HTML biên bản đối chiếu công nợ (inline CSS cho wkhtmltopdf)."""
+    total_debit = sum(flt(e.debit) for e in entries)
+    total_credit = sum(flt(e.credit) for e in entries)
+    closing = opening + total_debit - total_credit
+
+    running = opening
+    rows = []
+    for e in entries:
+        running += flt(e.debit) - flt(e.credit)
+        rows.append(
+            f"<tr>"
+            f"<td>{formatdate(e.posting_date)}</td>"
+            f"<td>{escape_html((e.voucher_no or '') )}</td>"
+            f"<td>{escape_html((e.remarks or e.voucher_type or '')[:80])}</td>"
+            f"<td class='num'>{format_vnd(e.debit) if flt(e.debit) else ''}</td>"
+            f"<td class='num'>{format_vnd(e.credit) if flt(e.credit) else ''}</td>"
+            f"<td class='num'>{format_vnd(running)}</td>"
+            f"</tr>"
+        )
+    rows_html = "".join(rows) or "<tr><td colspan='6' style='text-align:center;color:#888'>Không có phát sinh trong kỳ</td></tr>"
+
+    cust_name = escape_html(info.get("customer_name") or customer)
+    tax = escape_html(info.get("tax_id") or "")
+    phone = escape_html(info.get("mobile_no") or "")
+    closing_words = money_in_words(abs(closing), "VND")
+
+    return f"""<!doctype html><html><head><meta charset="utf-8"><style>
+    * {{ font-family: "Be Vietnam Pro","DejaVu Sans",Arial,sans-serif; }}
+    body {{ color:#1e293b; font-size:12px; }}
+    h1 {{ text-align:center; font-size:18px; margin:4px 0; }}
+    .sub {{ text-align:center; color:#555; margin-bottom:14px; font-size:12px; }}
+    .meta {{ margin:10px 0; line-height:1.7; }}
+    .meta b {{ display:inline-block; min-width:130px; }}
+    table {{ width:100%; border-collapse:collapse; margin-top:8px; }}
+    th,td {{ border:1px solid #cbd5e1; padding:6px 8px; font-size:11px; }}
+    th {{ background:#f1f5f9; text-align:left; }}
+    .num {{ text-align:right; white-space:nowrap; }}
+    .tot td {{ font-weight:bold; background:#f8fafc; }}
+    .words {{ font-style:italic; margin:8px 0 18px; }}
+    .sign {{ width:100%; margin-top:26px; }}
+    .sign td {{ border:none; text-align:center; vertical-align:top; width:50%; font-size:12px; }}
+    .sign .role {{ font-weight:bold; }}
+    .sign .hint {{ color:#777; font-size:10px; }}
+    </style></head><body>
+    <div style="text-align:center;font-weight:bold;font-size:13px">{escape_html(company_name)}</div>
+    <h1>BIÊN BẢN ĐỐI CHIẾU CÔNG NỢ</h1>
+    <div class="sub">Kỳ: {formatdate(from_date)} — {formatdate(to_date)}</div>
+    <div class="meta">
+      <div><b>Khách hàng:</b> {cust_name}</div>
+      {f'<div><b>Mã số thuế:</b> {tax}</div>' if tax else ''}
+      {f'<div><b>Điện thoại:</b> {phone}</div>' if phone else ''}
+      <div><b>Dư nợ đầu kỳ:</b> {format_vnd(opening)}</div>
+    </div>
+    <table>
+      <thead><tr><th>Ngày</th><th>Chứng từ</th><th>Diễn giải</th><th class="num">Phát sinh nợ</th><th class="num">Đã thanh toán</th><th class="num">Lũy kế</th></tr></thead>
+      <tbody>
+        <tr class="tot"><td colspan="5">Dư nợ đầu kỳ</td><td class="num">{format_vnd(opening)}</td></tr>
+        {rows_html}
+        <tr class="tot"><td colspan="3">Cộng phát sinh</td><td class="num">{format_vnd(total_debit)}</td><td class="num">{format_vnd(total_credit)}</td><td></td></tr>
+        <tr class="tot"><td colspan="5">Dư nợ cuối kỳ</td><td class="num">{format_vnd(closing)}</td></tr>
+      </tbody>
+    </table>
+    <div class="words">Số tiền còn phải thu bằng chữ: {closing_words}</div>
+    <p>Hai bên thống nhất số liệu công nợ nêu trên là đúng và đầy đủ tính đến ngày {formatdate(to_date)}.</p>
+    <table class="sign"><tr>
+      <td><div class="role">ĐẠI DIỆN KHÁCH HÀNG</div><div class="hint">(Ký, ghi rõ họ tên, đóng dấu)</div></td>
+      <td><div class="role">ĐẠI DIỆN {escape_html(company_name.upper())}</div><div class="hint">(Ký, ghi rõ họ tên, đóng dấu)</div></td>
+    </tr></table>
+    </body></html>"""

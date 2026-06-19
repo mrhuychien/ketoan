@@ -2,8 +2,10 @@
 import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
 import { formatVND, formatDate, escapeHtml } from "../lib/format.js";
+import { openModal } from "../components/modal.js";
 
-const isManager = (window.KETOAN_CONTEXT || {}).isManager;
+const CTX = window.KETOAN_CONTEXT || {};
+const isManager = CTX.isManager;
 const q = encodeURIComponent;
 
 export async function render({ container, params }) {
@@ -42,8 +44,9 @@ export async function render({ container, params }) {
       </div>
 
       <div class="kt-card kt-mb">
-        <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-bolt"></i> Thao tác trong ERPNext</div></div>
+        <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-bolt"></i> Thao tác</div></div>
         <div class="kt-card-body" style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="kt-btn kt-btn--primary kt-btn--sm" id="kt-export-recon"><i class="fas fa-file-pdf"></i> Xuất đối chiếu (PDF)</button>
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/customer/${q(d.customer)}"><i class="fas fa-up-right-from-square"></i> Mở khách</a>
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/general-ledger?party_type=Customer&party=${q(d.customer)}"><i class="fas fa-book"></i> Sổ cái</a>
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/payment-entry?party=${q(d.customer)}"><i class="fas fa-money-bill-wave"></i> Phiếu thu</a>
@@ -72,4 +75,38 @@ export async function render({ container, params }) {
       </div>
     `
   );
+
+  const exportBtn = container.querySelector("#kt-export-recon");
+  if (exportBtn) exportBtn.addEventListener("click", () => openReconModal(d));
+}
+
+function openReconModal(d) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const yearStart = todayStr.slice(0, 4) + "-01-01";
+  const m = openModal({
+    title: "Xuất biên bản đối chiếu công nợ",
+    icon: "fa-file-pdf",
+    maxWidth: 460,
+    body: html`
+      <p class="kt-sub kt-mb">Khách: <b>${d.customer_name || d.customer}</b></p>
+      <div class="kt-row2">
+        <div class="kt-field"><label><i class="fas fa-calendar"></i> Từ ngày</label>
+          <input type="date" id="kt-rc-from" class="kt-input" value="${yearStart}"></div>
+        <div class="kt-field"><label><i class="fas fa-calendar"></i> Đến ngày</label>
+          <input type="date" id="kt-rc-to" class="kt-input" value="${todayStr}" max="${todayStr}"></div>
+      </div>
+      <div class="kt-modal-actions">
+        <button class="kt-btn kt-btn--outline" id="kt-rc-cancel">Hủy</button>
+        <button class="kt-btn kt-btn--primary" id="kt-rc-go"><i class="fas fa-download"></i> Tải PDF</button>
+      </div>`,
+  });
+  m.body.querySelector("#kt-rc-cancel").addEventListener("click", m.close);
+  m.body.querySelector("#kt-rc-go").addEventListener("click", () => {
+    const f = m.body.querySelector("#kt-rc-from").value;
+    const t = m.body.querySelector("#kt-rc-to").value;
+    const url = "/api/method/ketoan.api.npp.export_reconciliation"
+      + `?customer=${q(d.customer)}&from_date=${q(f)}&to_date=${q(t)}&company=${q(CTX.company || "")}`;
+    window.open(url, "_blank");
+    m.close();
+  });
 }
