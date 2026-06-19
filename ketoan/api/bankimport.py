@@ -26,6 +26,33 @@ from ketoan.utils import je_remark_field
 _MARK_RE = re.compile(r"\[BANKIMP-([0-9a-f]{16})\]")
 
 
+def _load_rules(company: str) -> list:
+    """Quy tắc map đang bật cho company (hoặc dùng chung), ưu tiên cao + từ khóa dài trước."""
+    rules = frappe.get_all(
+        "Ketoan Bank Map Rule",
+        filters={"enabled": 1},
+        or_filters=[["company", "=", company], ["company", "is", "not set"]],
+        fields=["name", "keyword", "counter_account", "direction", "party_type", "party", "priority"],
+    )
+    rules = [r for r in rules if (r.keyword or "").strip()]
+    rules.sort(key=lambda r: (-(r.priority or 0), -len(r.keyword or "")))
+    return rules
+
+
+def _match_rule(content: str, direction: str, rules: list):
+    """Trả quy tắc khớp đầu tiên (theo từ khóa + chiều tiền) hoặc None."""
+    low = (content or "").lower()
+    for r in rules:
+        d = r.direction or "Bất kỳ"
+        if d == "Tiền vào" and direction != "in":
+            continue
+        if d == "Tiền ra" and direction != "out":
+            continue
+        if (r.keyword or "").lower() in low:
+            return r
+    return None
+
+
 def _num(v) -> float:
     if v is None or v == "":
         return 0.0
@@ -159,7 +186,22 @@ def parse_statement(content: str, company: str | None = None) -> dict:
         if t["duplicate"]:
             dup_count += 1
 
-    return {"company": company, "transactions": txns, "duplicates": dup_count, "total": len(txns)}
+    # Gợi ý TK đối ứng theo quy tắc map đã lưu.
+    rules = _load_rules(company)
+    suggested = 0
+    for t in txns:
+        r = _match_rule(t["content"], t["direction"], rules)
+        t["suggested_counter"] = r.counter_account if r else None
+        t["suggested_party_type"] = (r.party_type or None) if r else None
+        t["suggested_party"] = (r.party or None) if r else None
+        t["suggested_rule"] = (r.keyword or None) if r else None
+        if r and not t["duplicate"]:
+            suggested += 1
+
+    return {
+        "company": company, "transactions": txns,
+        "duplicates": dup_count, "total": len(txns), "suggested": suggested,
+    }
 
 
 @frappe.whitelist()
@@ -255,3 +297,63 @@ def import_transactions(rows, bank_account: str, company: str | None = None) -> 
             skipped.append({"key": key, "reason": str(e)[:120]})
 
     return {"created": created, "skipped": skipped, "count": len(created)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Quản lý quy tắc map nội dung → TK đối ứng
+# ═══════════════════════════════════════════════════════════════════════════
+
+@frappe.whitelist()
+def get_rules(company: str | None = None) -> list:
+    """Danh sách quy tắc map (cho company hoặc dùng chung)."""
+    guard_cash()
+    company = resolve_company(company)
+    return frappe.get_all(
+        "Ketoan Bank Map Rule",
+        or_filters=[["company", "=", company], ["company", "is", "not set"]],
+        fields=["name", "keyword", "counter_account", "direction", "party_type", "party", "priority", "enabled"],
+        order_by="priority desc, keyword asc",
+    )
+
+
+@frappe.whitelist()
+def save_rule(keyword: str, counter_account: str, direction: str = "Bất kỳ",
+              party_type: str | None = None, party: str | None = None,
+              priority: int = 0, company: str | None = None, name: str | None = None) -> dict:
+    """Tạo/cập nhật 1 quy tắc map."""
+    guard_cash()
+    company = resolve_company(company)
+    keyword = (keyword or "").strip()
+    if not keyword:
+        frappe.throw(_("Thiếu từ khóa"))
+    if not counter_account or not frappe.db.exists("Account", counter_account):
+        frappe.throw(_("TK đối ứng không hợp lệ"))
+    if direction not in ("Bất kỳ", "Tiền vào", "Tiền ra"):
+        direction = "Bất kỳ"
+    party = (party or "").strip() or None
+    party_type = party_type or None
+    if party and not party_type:
+        frappe.throw(_("Đã chọn đối tượng thì phải chọn loại đối tượng"))
+
+    doc = frappe.get_doc("Ketoan Bank Map Rule", name) if name else frappe.new_doc("Ketoan Bank Map Rule")
+    doc.update({
+        "keyword": keyword,
+        "counter_account": counter_account,
+        "direction": direction,
+        "party_type": party_type,
+        "party": party,
+        "priority": int(priority or 0),
+        "enabled": 1,
+        "company": company,
+    })
+    doc.save()
+    return {"name": doc.name, "keyword": doc.keyword}
+
+
+@frappe.whitelist()
+def delete_rule(name: str) -> dict:
+    """Xóa 1 quy tắc map."""
+    guard_cash()
+    if name and frappe.db.exists("Ketoan Bank Map Rule", name):
+        frappe.delete_doc("Ketoan Bank Map Rule", name, ignore_permissions=False)
+    return {"deleted": name}

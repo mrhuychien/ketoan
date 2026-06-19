@@ -1,0 +1,109 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-06-19 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "keyword",
+  "counter_account",
+  "column_break_1",
+  "direction",
+  "priority",
+  "enabled",
+  "party_section",
+  "party_type",
+  "party",
+  "company"
+ ],
+ "fields": [
+  {
+   "description": "Từ khóa xuất hiện trong nội dung giao dịch (không phân biệt hoa thường).",
+   "fieldname": "keyword",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Từ khóa",
+   "reqd": 1
+  },
+  {
+   "fieldname": "counter_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "TK đối ứng",
+   "options": "Account",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Bất kỳ",
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Chiều tiền",
+   "options": "Bất kỳ\nTiền vào\nTiền ra"
+  },
+  {
+   "default": "0",
+   "description": "Cao hơn được ưu tiên áp dụng trước.",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Ưu tiên"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Kích hoạt"
+  },
+  {
+   "fieldname": "party_section",
+   "fieldtype": "Section Break",
+   "label": "Đối tượng (tùy chọn)"
+  },
+  {
+   "fieldname": "party_type",
+   "fieldtype": "Select",
+   "label": "Loại đối tượng",
+   "options": "\nCustomer\nSupplier"
+  },
+  {
+   "depends_on": "party_type",
+   "fieldname": "party",
+   "fieldtype": "Dynamic Link",
+   "label": "Đối tượng",
+   "options": "party_type"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Công ty (để trống = mọi công ty)",
+   "options": "Company"
+  }
+ ],
+ "links": [],
+ "modified": "2026-06-19 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ketoan",
+ "name": "Ketoan Bank Map Rule",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1,
+   "role": "System Manager"
+  },
+  {
+   "create": 1, "delete": 1, "print": 1, "read": 1, "report": 1, "write": 1,
+   "role": "Ke Toan Truong"
+  },
+  {
+   "create": 1, "delete": 1, "read": 1, "write": 1,
+   "role": "Accounts Manager"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}
