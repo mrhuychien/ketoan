@@ -83,6 +83,40 @@ def _row_key(ref, date_iso, debit, credit, content) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
+def _cell(row, idx):
+    if idx is None or idx >= len(row):
+        return ""
+    return row[idx]
+
+
+def _detect_columns(all_rows):
+    """Dò dòng header + chỉ số cột theo tên. Fallback layout chuẩn (0..5)."""
+    default = {"ref": 0, "date": 1, "debit": 2, "credit": 3, "content": 5}
+    for idx, row in enumerate(all_rows[:15]):
+        if not row:
+            continue
+        texts = [str(c or "").strip().lower() for c in row]
+        joined = " | ".join(texts)
+        if not (("ghi" in joined and ("nợ" in joined or "no" in joined)) or "tham chiếu" in joined or "nội dung" in joined):
+            continue
+        cols = dict(default)
+        found = False
+        for ci, t in enumerate(texts):
+            if "tham chiếu" in t:
+                cols["ref"] = ci; found = True
+            elif "ngày" in t or "ngay" in t:
+                cols["date"] = ci; found = True
+            elif "ghi nợ" in t or t in ("nợ", "no", "debit", "ghi no"):
+                cols["debit"] = ci; found = True
+            elif "ghi có" in t or t in ("có", "co", "credit", "ghi co"):
+                cols["credit"] = ci; found = True
+            elif "nội dung" in t or "diễn giải" in t or "mô tả" in t or "noi dung" in t:
+                cols["content"] = ci; found = True
+        if found:
+            return cols, idx
+    return default, 0
+
+
 def _suggest_bank_account(company: str) -> str | None:
     """Đoán TK ngân hàng 112 (account_number/name bắt đầu 112)."""
     rows = frappe.get_all(
@@ -133,21 +167,27 @@ def parse_statement(content: str, company: str | None = None) -> dict:
     try:
         from openpyxl import load_workbook
         wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+        ws = wb.active
+        # Nhiều file ngân hàng khai báo dimension sai (chỉ A1) → read_only dừng sau 1 dòng.
+        ws.reset_dimensions()
     except Exception:
         frappe.throw(_("Không đọc được file Excel. Hãy xuất đúng định dạng .xlsx"))
 
-    ws = wb.active
+    all_rows = [r for r in ws.iter_rows(values_only=True)]
+
+    # Dò dòng header + vị trí cột (chịu được file có dòng tiêu đề thừa / đổi thứ tự cột).
+    cols, header_idx = _detect_columns(all_rows)
+
     txns = []
-    for i, row in enumerate(ws.iter_rows(values_only=True)):
-        if i == 0:
-            continue  # bỏ header
-        if not row or len(row) < 6:
+    for i in range(header_idx + 1, len(all_rows)):
+        row = all_rows[i]
+        if not row:
             continue
-        ref = str(row[0] or "").strip()
-        date_iso, date_raw = _parse_date(row[1])
-        debit = _num(row[2])   # Ghi nợ = tiền RA khỏi ngân hàng
-        credit = _num(row[3])  # Ghi có = tiền VÀO ngân hàng
-        content_txt = str(row[5] or "").strip()
+        ref = str(_cell(row, cols["ref"]) or "").strip()
+        date_iso, date_raw = _parse_date(_cell(row, cols["date"]))
+        debit = _num(_cell(row, cols["debit"]))   # Ghi nợ = tiền RA khỏi ngân hàng
+        credit = _num(_cell(row, cols["credit"]))  # Ghi có = tiền VÀO ngân hàng
+        content_txt = str(_cell(row, cols["content"]) or "").strip()
         if not date_iso or (debit == 0 and credit == 0):
             continue
         key = _row_key(ref, date_iso, debit, credit, content_txt)
