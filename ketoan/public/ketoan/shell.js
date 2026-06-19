@@ -12,6 +12,7 @@ const withV = (p) => `${BASE}/${p}?v=${V}`;
 const ROUTES = [
   { pattern: "/", view: "views/dashboard.js", nav: "dashboard", title: "Tổng quan" },
   { pattern: "/cong-no", view: "views/receivables.js", nav: "cong-no", title: "Công nợ" },
+  { pattern: "/doi-chieu-npp", view: "views/npp.js", nav: "npp", title: "Đối chiếu NPP" },
   { pattern: "/khach/:id", view: "views/customer.js", nav: "cong-no", title: "360° khách" },
   { pattern: "/quy", view: "views/cash.js", nav: "quy", title: "Sổ quỹ", cap: "cash" },
   { pattern: "/canh-bao", view: "views/alerts.js", nav: "canh-bao", title: "Cảnh báo" },
@@ -23,6 +24,7 @@ const CAN_CASH = !!CTX.canViewCash;
 const NAV_ITEMS = [
   { key: "dashboard", path: "/", icon: "fa-gauge-high", label: "Tổng quan" },
   { key: "cong-no", path: "/cong-no", icon: "fa-file-invoice-dollar", label: "Công nợ" },
+  { key: "npp", path: "/doi-chieu-npp", icon: "fa-handshake", label: "Đối chiếu NPP" },
   { key: "quy", path: "/quy", icon: "fa-wallet", label: "Sổ quỹ", cap: "cash" },
   { key: "canh-bao", path: "/canh-bao", icon: "fa-triangle-exclamation", label: "Cảnh báo" },
   { key: "tien-ich", path: "/tien-ich", icon: "fa-bolt", label: "Tiện ích" },

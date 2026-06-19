@@ -17,7 +17,17 @@
   "dso_window_days",
   "alert_section",
   "enable_credit_limit_alert",
-  "cash_balance_warn"
+  "cash_balance_warn",
+  "npp_section",
+  "npp_customer_group",
+  "invoice_due_days",
+  "discount_threshold",
+  "discount_percent",
+  "column_break_npp",
+  "tet_start_month",
+  "tet_payment_percent",
+  "receivable_account",
+  "discount_expense_account"
  ],
  "fields": [
   {
@@ -100,6 +110,71 @@
    "fieldname": "cash_balance_warn",
    "fieldtype": "Currency",
    "label": "Ngưỡng cảnh báo tồn quỹ"
+  },
+  {
+   "fieldname": "npp_section",
+   "fieldtype": "Section Break",
+   "label": "Đối chiếu công nợ kênh NPP"
+  },
+  {
+   "default": "NPP",
+   "description": "Customer Group nhận diện nhà phân phối.",
+   "fieldname": "npp_customer_group",
+   "fieldtype": "Link",
+   "label": "Nhóm khách NPP",
+   "options": "Customer Group"
+  },
+  {
+   "default": "30",
+   "description": "Hóa đơn quá số ngày này (từ ngày HĐ) coi là đến hạn (chính sách thường).",
+   "fieldname": "invoice_due_days",
+   "fieldtype": "Int",
+   "label": "Số ngày đến hạn HĐ"
+  },
+  {
+   "default": "100000000",
+   "description": "NPP có công nợ ≥ ngưỡng này đủ điều kiện chiết khấu.",
+   "fieldname": "discount_threshold",
+   "fieldtype": "Currency",
+   "label": "Ngưỡng chiết khấu"
+  },
+  {
+   "default": "2",
+   "fieldname": "discount_percent",
+   "fieldtype": "Percent",
+   "label": "Tỷ lệ chiết khấu (%)"
+  },
+  {
+   "fieldname": "column_break_npp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "11",
+   "description": "Từ tháng này áp chính sách Tết (cho nợ một phần HĐ Tết).",
+   "fieldname": "tet_start_month",
+   "fieldtype": "Int",
+   "label": "Tháng bắt đầu chính sách Tết"
+  },
+  {
+   "default": "50",
+   "description": "Tỷ lệ công nợ HĐ Tết được phép giữ (vd 50% = cho nợ một nửa).",
+   "fieldname": "tet_payment_percent",
+   "fieldtype": "Percent",
+   "label": "Tỷ lệ cho nợ HĐ Tết (%)"
+  },
+  {
+   "description": "TK phải thu (để trống = tự dò account_type Receivable).",
+   "fieldname": "receivable_account",
+   "fieldtype": "Link",
+   "label": "TK phải thu (131)",
+   "options": "Account"
+  },
+  {
+   "description": "TK chi phí ghi nhận chiết khấu (bắt buộc khi tạo bút toán chiết khấu).",
+   "fieldname": "discount_expense_account",
+   "fieldtype": "Link",
+   "label": "TK chi phí chiết khấu (6412)",
+   "options": "Account"
   }
  ],
  "issingle": 1,

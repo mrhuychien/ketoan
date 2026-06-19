@@ -61,6 +61,10 @@ export const api = {
   cashflow: (a) => callMethod(NS + "cash.get_cashflow", withCompany(a)),
   transactions: (a) => callMethod(NS + "cash.get_transactions", withCompany(a)),
 
+  // NPP reconciliation
+  nppDebts: (a) => callMethod(NS + "npp.get_debts", withCompany(a)),
+  nppCreateDiscount: (customers, a) => callMethod(NS + "npp.create_discount_entries", withCompany({ customers: JSON.stringify(customers), ...a })),
+
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
 
