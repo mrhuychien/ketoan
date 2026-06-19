@@ -5,11 +5,12 @@
 - get_discount_eligible / create_discount_entries: chương trình chiết khấu theo
   THÁNG — NPP có DOANH SỐ THÁNG (debit 131 từ Sales Invoice) ≥ ngưỡng → chiết khấu
   = % × doanh số tháng; tạo bút toán (Nợ 6412 / Có 131) DRAFT, chống trùng theo
-  marker cheque_no = CK2-<customer>-<YYYY-MM>.
+  marker [CK2-<customer>-<YYYY-MM>] ghi trong user_remark.
 Read-only trừ create_discount_entries (ghi DRAFT). Guard ở dòng đầu, SQL parameterized.
 """
 
 import json
+import re
 
 import frappe
 from frappe import _
@@ -73,8 +74,24 @@ def _month_range(month: str | None):
 
 
 def _marker(customer: str, month_key: str) -> str:
-    """Khóa chống trùng bút toán chiết khấu (lưu ở Journal Entry.cheque_no)."""
-    return f"CK2-{customer}-{month_key}"
+    """Khóa chống trùng bút toán chiết khấu — ghi thẳng vào Journal Entry.user_remark."""
+    return f"[CK2-{customer}-{month_key}]"
+
+
+def _existing_discount_je(month_key: str) -> dict:
+    """Map marker -> tên JE chiết khấu đã tạo trong tháng (dò trong user_remark)."""
+    candidates = frappe.get_all(
+        "Journal Entry",
+        filters={"user_remark": ["like", f"%-{month_key}]%"], "docstatus": ["<", 2]},
+        fields=["name", "user_remark"],
+    )
+    pattern = re.compile(r"\[CK2-.*-" + re.escape(month_key) + r"\]")
+    ex = {}
+    for c in candidates:
+        m = pattern.search(c.user_remark or "")
+        if m:
+            ex[m.group(0)] = c.name
+    return ex
 
 
 def _month_sales(company: str, names: tuple, first: str, last: str, cfg: dict) -> dict:
@@ -248,16 +265,8 @@ def get_discount_eligible(company: str | None = None, month: str | None = None) 
     names = tuple(c.name for c in customers)
     sales = _month_sales(company, names, first, last, cfg)
 
-    # JE chiết khấu đã tạo cho tháng này (để khóa, tránh tạo trùng).
-    markers = [_marker(c.name, mkey) for c in customers]
-    ex_map = {}
-    if markers:
-        for e in frappe.get_all(
-            "Journal Entry",
-            filters={"cheque_no": ["in", markers], "docstatus": ["<", 2]},
-            fields=["cheque_no", "name"],
-        ):
-            ex_map[e.cheque_no] = e.name
+    # JE chiết khấu đã tạo cho tháng này (để khóa, tránh tạo trùng) — dò trong remark.
+    ex_map = _existing_discount_je(mkey)
 
     rows = []
     for c in customers:
@@ -291,7 +300,7 @@ def create_discount_entries(customers, month: str | None = None, company: str | 
     """Tạo bút toán chiết khấu (Nợ 6412 / Có 131) theo doanh số THÁNG — DRAFT.
 
     Server tự tính chiết khấu từ doanh số tháng thật (không tin client). Khóa
-    chống trùng theo cheque_no = CK2-<customer>-<YYYY-MM>.
+    chống trùng theo marker [CK2-<customer>-<YYYY-MM>] trong user_remark.
     """
     guard_view()
     company = resolve_company(company)
@@ -309,10 +318,7 @@ def create_discount_entries(customers, month: str | None = None, company: str | 
     names = tuple(customers)
     sales = _month_sales(company, names, first, last, cfg)
 
-    markers = [_marker(c, mkey) for c in customers]
-    existing = set(
-        frappe.get_all("Journal Entry", filters={"cheque_no": ["in", markers], "docstatus": ["<", 2]}, pluck="cheque_no")
-    ) if markers else set()
+    existing = set(_existing_discount_je(mkey).keys())
 
     created = []
     skipped = []
@@ -334,9 +340,8 @@ def create_discount_entries(customers, month: str | None = None, company: str | 
         je.voucher_type = "Journal Entry"
         je.posting_date = last
         je.company = company
-        je.cheque_no = mk
-        je.cheque_date = last
-        je.user_remark = f"Chiết khấu {cfg['discount_pct']}% doanh số tháng {mkey} — {cust}"
+        # Ghi thẳng vào remark: marker chống trùng + diễn giải.
+        je.user_remark = f"{mk} Chiết khấu {cfg['discount_pct']}% doanh số tháng {mkey} — {cust}"
         je.append("accounts", {
             "account": cfg["discount_expense_account"],
             "debit_in_account_currency": amount,
