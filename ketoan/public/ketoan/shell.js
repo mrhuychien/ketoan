@@ -16,20 +16,23 @@ const ROUTES = [
   { pattern: "/khach/:id", view: "views/customer.js", nav: "cong-no", title: "360° khách" },
   { pattern: "/quy", view: "views/cash.js", nav: "quy", title: "Sổ quỹ", cap: "cash" },
   { pattern: "/nhap-sao-ke", view: "views/bankimport.js", nav: "quy", title: "Nhập sao kê", cap: "cash" },
+  { pattern: "/luong", view: "views/payroll.js", nav: "luong", title: "Tính lương", cap: "manager" },
   { pattern: "/canh-bao", view: "views/alerts.js", nav: "canh-bao", title: "Cảnh báo" },
   { pattern: "/tien-ich", view: "views/utilities.js", nav: "tien-ich", title: "Tiện ích" },
 ];
 
-const CAN_CASH = !!CTX.canViewCash;
+const CAPS = { cash: !!CTX.canViewCash, manager: !!CTX.isManager };
+const hasCap = (cap) => !cap || !!CAPS[cap];
 
 const NAV_ITEMS = [
   { key: "dashboard", path: "/", icon: "fa-gauge-high", label: "Tổng quan" },
   { key: "cong-no", path: "/cong-no", icon: "fa-file-invoice-dollar", label: "Công nợ" },
   { key: "npp", path: "/doi-chieu-npp", icon: "fa-handshake", label: "Đối chiếu NPP" },
   { key: "quy", path: "/quy", icon: "fa-wallet", label: "Sổ quỹ", cap: "cash" },
+  { key: "luong", path: "/luong", icon: "fa-money-check-dollar", label: "Tính lương", cap: "manager" },
   { key: "canh-bao", path: "/canh-bao", icon: "fa-triangle-exclamation", label: "Cảnh báo" },
   { key: "tien-ich", path: "/tien-ich", icon: "fa-bolt", label: "Tiện ích" },
-].filter((n) => n.cap !== "cash" || CAN_CASH);
+].filter((n) => hasCap(n.cap));
 
 function renderShell() {
   const root = document.getElementById("kt-root");
@@ -83,10 +86,10 @@ async function route() {
     return;
   }
 
-  // Chặn truy cập màn quỹ nếu không có quyền (vd kế toán công nợ).
-  if (matched.route.cap === "cash" && !CAN_CASH) {
+  // Chặn truy cập màn hình theo capability (quỹ / quản lý).
+  if (!hasCap(matched.route.cap)) {
     setActiveNav(null);
-    setHTML(view, html`<div class="kt-empty"><i class="fas fa-lock"></i><p>Bạn không có quyền xem nghiệp vụ quỹ/tiền.<br><a href="#/">Về tổng quan</a></p></div>`);
+    setHTML(view, html`<div class="kt-empty"><i class="fas fa-lock"></i><p>Bạn không có quyền xem chức năng này.<br><a href="#/">Về tổng quan</a></p></div>`);
     return;
   }
 
