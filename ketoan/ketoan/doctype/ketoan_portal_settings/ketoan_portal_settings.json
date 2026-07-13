@@ -20,6 +20,7 @@
   "cash_balance_warn",
   "npp_section",
   "npp_customer_group",
+  "mt_customer_group",
   "invoice_due_days",
   "discount_threshold",
   "discount_percent",
@@ -125,6 +126,14 @@
    "options": "Customer Group"
   },
   {
+   "default": "MT",
+   "description": "Customer Group nhận diện kênh MT (siêu thị). Kênh 'Du lịch, Khác' = ngoài NPP và MT.",
+   "fieldname": "mt_customer_group",
+   "fieldtype": "Link",
+   "label": "Nhóm khách MT",
+   "options": "Customer Group"
+  },
+  {
    "default": "30",
    "description": "Hóa đơn quá số ngày này (từ ngày HĐ) coi là đến hạn (chính sách thường).",
    "fieldname": "invoice_due_days",
@@ -197,10 +206,6 @@
   },
   {
    "read": 1,
-   "role": "Ke Toan Ban Hang"
-  },
-  {
-   "read": 1,
    "role": "Ke Toan Mua Hang"
   },
   {
@@ -210,6 +215,18 @@
   {
    "read": 1,
    "role": "Ke Toan Hach Toan"
+  },
+  {
+   "read": 1,
+   "role": "Ke Toan NPP"
+  },
+  {
+   "read": 1,
+   "role": "Ke Toan MT"
+  },
+  {
+   "read": 1,
+   "role": "Ke Toan Du Lich"
   }
  ],
  "sort_field": "modified",

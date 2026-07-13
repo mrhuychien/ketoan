@@ -78,9 +78,9 @@ export const api = {
   // Dashboard
   overview: (a) => callMethod(NS + "dashboard.get_overview", withCompany(a)),
 
-  // Receivables
-  arSummary: (a) => callMethod(NS + "receivables.get_ar_summary", withCompany(a)),
-  aging: (a) => callMethod(NS + "receivables.get_aging", withCompany(a)),
+  // Receivables (channel: npp | mt | khac | tat-ca)
+  arSummary: (channel, a) => callMethod(NS + "receivables.get_ar_summary", withCompany({ channel: channel || "tat-ca", ...a })),
+  aging: (channel, a) => callMethod(NS + "receivables.get_aging", withCompany({ channel: channel || "tat-ca", ...a })),
   customerDetail: (customer, a) => callMethod(NS + "receivables.get_customer_detail", withCompany({ customer, ...a })),
   dso: (a) => callMethod(NS + "receivables.get_dso", withCompany(a)),
 

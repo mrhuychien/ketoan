@@ -7,7 +7,9 @@ Idempotent + bọc try/except + log_error: lỗi seed KHÔNG được làm chế
 import frappe
 
 PORTAL_ROLES = (
-    "Ke Toan Ban Hang",
+    "Ke Toan NPP",
+    "Ke Toan MT",
+    "Ke Toan Du Lich",
     "Ke Toan Mua Hang",
     "Ke Toan Tien Luong",
     "Ke Toan Hach Toan",
@@ -15,7 +17,7 @@ PORTAL_ROLES = (
 )
 
 # Role cũ đã bỏ (map người dùng sang role mới trước khi xóa nếu cần).
-LEGACY_ROLES = ("Ke Toan Cong No",)
+LEGACY_ROLES = ("Ke Toan Cong No", "Ke Toan Ban Hang")
 
 
 def after_install():

@@ -4,27 +4,69 @@
 
 export const WORKSPACES = [
   {
-    key: "sales",
-    label: "Kế toán bán hàng",
-    icon: "fa-cart-shopping",
-    desc: "Công nợ phải thu, đối chiếu NPP, thu tiền khách hàng",
+    key: "npp",
+    label: "Kế toán NPP",
+    icon: "fa-handshake",
+    desc: "Kênh nhà phân phối: đối chiếu công nợ, chính sách thu, chiết khấu",
+    sections: [
+      { title: "Tác nghiệp", icon: "fa-bolt", items: [
+        { label: "Lập hóa đơn bán", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice/new" },
+        { label: "Phiếu thu tiền", icon: "fa-money-bill-wave", type: "desk", href: "/app/payment-entry/new" },
+        { label: "Khách hàng NPP", icon: "fa-users", type: "desk", href: "/app/customer?customer_group=NPP" },
+      ]},
+      { title: "Báo cáo", icon: "fa-chart-line", items: [
+        { label: "Đối chiếu công nợ NPP (chính sách thường/Tết)", icon: "fa-handshake", type: "route", route: "/doi-chieu-npp" },
+        { label: "Công nợ kênh NPP + tuổi nợ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no/npp" },
+        { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/app/accounts-receivable" },
+      ]},
+      { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
+        { label: "Chiết khấu 2% theo doanh số tháng", icon: "fa-percent", type: "route", route: "/doi-chieu-npp" },
+        { label: "Nhắc nợ Zalo / đến hạn", icon: "fa-comment-dots", type: "route", route: "/doi-chieu-npp" },
+        { label: "Xuất biên bản đối chiếu (PDF)", icon: "fa-file-pdf", type: "route", route: "/cong-no/npp" },
+        { label: "Tìm khách → 360°", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
+      ]},
+    ],
+  },
+  {
+    key: "mt",
+    label: "Kế toán MT",
+    icon: "fa-store",
+    desc: "Kênh MT (siêu thị/hiện đại): công nợ, đối chiếu, thu tiền",
+    sections: [
+      { title: "Tác nghiệp", icon: "fa-bolt", items: [
+        { label: "Lập hóa đơn bán", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice/new" },
+        { label: "Phiếu thu tiền", icon: "fa-money-bill-wave", type: "desk", href: "/app/payment-entry/new" },
+        { label: "Khách hàng MT", icon: "fa-users", type: "desk", href: "/app/customer?customer_group=MT" },
+      ]},
+      { title: "Báo cáo", icon: "fa-chart-line", items: [
+        { label: "Công nợ kênh MT + tuổi nợ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no/mt" },
+        { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/app/accounts-receivable" },
+        { label: "Sales Register", icon: "fa-table", type: "desk", href: "/app/query-report/Sales Register" },
+      ]},
+      { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
+        { label: "Xuất biên bản đối chiếu (PDF)", icon: "fa-file-pdf", type: "route", route: "/cong-no/mt" },
+        { label: "Tìm khách → 360°", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
+      ]},
+    ],
+  },
+  {
+    key: "travel",
+    label: "Kế toán Du lịch, Khác",
+    icon: "fa-umbrella-beach",
+    desc: "Kênh du lịch & khách lẻ/khác: công nợ, thu tiền",
     sections: [
       { title: "Tác nghiệp", icon: "fa-bolt", items: [
         { label: "Lập hóa đơn bán", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice/new" },
         { label: "Phiếu thu tiền", icon: "fa-money-bill-wave", type: "desk", href: "/app/payment-entry/new" },
         { label: "Khách hàng", icon: "fa-users", type: "desk", href: "/app/customer" },
-        { label: "Đơn bán hàng", icon: "fa-file-lines", type: "desk", href: "/app/sales-order" },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
-        { label: "Công nợ phải thu + tuổi nợ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no" },
-        { label: "Đối chiếu công nợ NPP", icon: "fa-handshake", type: "route", route: "/doi-chieu-npp" },
+        { label: "Công nợ kênh Du lịch, Khác + tuổi nợ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no/khac" },
         { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/app/accounts-receivable" },
-        { label: "Sales Register", icon: "fa-table", type: "desk", href: "/app/query-report/Sales Register" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
+        { label: "Xuất biên bản đối chiếu (PDF)", icon: "fa-file-pdf", type: "route", route: "/cong-no/khac" },
         { label: "Tìm khách → 360°", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
-        { label: "Chiết khấu / nhắc nợ NPP", icon: "fa-percent", type: "route", route: "/doi-chieu-npp" },
-        { label: "Xuất đối chiếu công nợ (PDF)", icon: "fa-file-pdf", type: "route", route: "/cong-no" },
       ]},
     ],
   },
@@ -101,13 +143,16 @@ export const WORKSPACES = [
     desc: "Tổng quan toàn phòng, cảnh báo, cấu hình",
     sections: [
       { title: "Tác nghiệp", icon: "fa-bolt", items: [
-        { label: "Bàn bán hàng", icon: "fa-cart-shopping", type: "route", route: "/vt/sales" },
+        { label: "Bàn Kế toán NPP", icon: "fa-handshake", type: "route", route: "/vt/npp" },
+        { label: "Bàn Kế toán MT", icon: "fa-store", type: "route", route: "/vt/mt" },
+        { label: "Bàn Kế toán Du lịch, Khác", icon: "fa-umbrella-beach", type: "route", route: "/vt/travel" },
         { label: "Bàn mua hàng", icon: "fa-truck-field", type: "route", route: "/vt/purchase" },
         { label: "Bàn tiền lương", icon: "fa-money-check-dollar", type: "route", route: "/vt/payroll" },
         { label: "Bàn hạch toán", icon: "fa-book", type: "route", route: "/vt/gl" },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
         { label: "Dashboard tổng hợp", icon: "fa-gauge-high", type: "route", route: "/dashboard" },
+        { label: "Công nợ phải thu toàn bộ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no" },
         { label: "Trung tâm cảnh báo", icon: "fa-triangle-exclamation", type: "route", route: "/canh-bao" },
         { label: "Sổ cái", icon: "fa-book", type: "desk", href: "/app/general-ledger" },
       ]},

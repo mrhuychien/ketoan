@@ -16,13 +16,13 @@ from urllib.parse import quote
 import frappe
 from frappe.utils import flt, today
 
-from ketoan.api._guard import guard_view, resolve_company, get_settings, cash_account_types, can_view_cash
+from ketoan.api._guard import guard_manager, resolve_company, get_settings, cash_account_types, can_view_cash
 
 
 @frappe.whitelist()
 def get_alerts(company: str | None = None) -> dict:
     """Gộp toàn bộ cảnh báo P0 cho 1 company."""
-    guard_view()
+    guard_manager()
     company = resolve_company(company)
     s = get_settings()
 

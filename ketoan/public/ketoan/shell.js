@@ -18,10 +18,11 @@ const ROUTES = [
   { pattern: "/vt/:key", view: "views/workspace.js", title: "Workspace" },
   { pattern: "/dashboard", view: "views/dashboard.js", cap: "chief", ws: "chief", title: "Tổng quan" },
   { pattern: "/canh-bao", view: "views/alerts.js", cap: "chief", ws: "chief", title: "Cảnh báo" },
-  { pattern: "/cong-no", view: "views/receivables.js", cap: "sales", ws: "sales", title: "Công nợ" },
-  { pattern: "/doi-chieu-npp", view: "views/npp.js", cap: "sales", ws: "sales", title: "Đối chiếu NPP" },
-  { pattern: "/khach/:id", view: "views/customer.js", cap: "sales", ws: "sales", title: "360° khách" },
-  { pattern: "/tien-ich", view: "views/utilities.js", cap: "sales", ws: "sales", title: "Tiện ích" },
+  { pattern: "/cong-no", view: "views/receivables.js", cap: "chief", ws: "chief", title: "Công nợ toàn bộ" },
+  { pattern: "/cong-no/:channel", view: "views/receivables.js", capFromChannel: true, title: "Công nợ kênh" },
+  { pattern: "/doi-chieu-npp", view: "views/npp.js", cap: "npp", ws: "npp", title: "Đối chiếu NPP" },
+  { pattern: "/khach/:id", view: "views/customer.js", cap: "salesany", title: "360° khách" },
+  { pattern: "/tien-ich", view: "views/utilities.js", cap: "salesany", title: "Tiện ích" },
   { pattern: "/cong-no-ncc", view: "views/payables.js", cap: "purchase", ws: "purchase", title: "Công nợ phải trả" },
   { pattern: "/ncc/:id", view: "views/supplier.js", cap: "purchase", ws: "purchase", title: "360° NCC" },
   { pattern: "/quy", view: "views/cash.js", cap: "gl", ws: "gl", title: "Sổ quỹ" },
@@ -84,8 +85,11 @@ async function route() {
     return;
   }
 
-  // Capability của route; với /vt/:key thì cap chính là key workspace.
-  const cap = matched.route.pattern === "/vt/:key" ? matched.params.key : matched.route.cap;
+  // Capability của route; /vt/:key → key workspace; /cong-no/:channel → theo kênh.
+  const CHANNEL_CAP = { npp: "npp", mt: "mt", khac: "travel", "tat-ca": "chief" };
+  let cap = matched.route.cap;
+  if (matched.route.pattern === "/vt/:key") cap = matched.params.key;
+  else if (matched.route.capFromChannel) cap = CHANNEL_CAP[matched.params.channel] || "chief";
   if (!hasCap(cap)) {
     setActiveNav(null);
     setHTML(view, html`<div class="kt-empty"><i class="fas fa-lock"></i><p>Bạn không có quyền xem chức năng này.<br><a href="#/">Về trang chủ</a></p></div>`);
@@ -93,7 +97,11 @@ async function route() {
   }
 
   // Highlight nav theo workspace của route.
-  const navKey = path === "/" ? "home" : (matched.route.pattern === "/vt/:key" ? matched.params.key : matched.route.ws);
+  const CHANNEL_WS = { npp: "npp", mt: "mt", khac: "travel", "tat-ca": "chief" };
+  let navKey = matched.route.ws;
+  if (path === "/") navKey = "home";
+  else if (matched.route.pattern === "/vt/:key") navKey = matched.params.key;
+  else if (matched.route.capFromChannel) navKey = CHANNEL_WS[matched.params.channel];
   setActiveNav(navKey || null);
   setHTML(view, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
 

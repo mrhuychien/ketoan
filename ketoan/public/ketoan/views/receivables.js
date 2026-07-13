@@ -4,11 +4,14 @@ import { html, setHTML, on } from "../lib/dom.js";
 import { formatVND, formatVNDShort, escapeHtml } from "../lib/format.js";
 import { navigate } from "../lib/router.js";
 
-export async function render({ container }) {
+const CHANNEL_LABEL = { npp: "kênh NPP", mt: "kênh MT", khac: "kênh Du lịch, Khác", "tat-ca": "toàn bộ" };
+
+export async function render({ container, params }) {
+  const channel = (params && params.channel) || "tat-ca";
   setHTML(container, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
   let summary, aging;
   try {
-    [summary, aging] = await Promise.all([api.arSummary(), api.aging()]);
+    [summary, aging] = await Promise.all([api.arSummary(channel), api.aging(channel)]);
   } catch (e) {
     setHTML(container, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
     return;
@@ -21,7 +24,7 @@ export async function render({ container }) {
     container,
     html`
       <div class="kt-view-head">
-        <div class="kt-view-title"><i class="fas fa-file-invoice-dollar"></i> Công nợ phải thu</div>
+        <div class="kt-view-title"><i class="fas fa-file-invoice-dollar"></i> Công nợ phải thu — ${CHANNEL_LABEL[channel] || channel}</div>
         <div class="kt-sub">${summary.count} khách · tổng ${formatVND(summary.total)}</div>
       </div>
 

@@ -23,7 +23,7 @@ def get_context(context):
 
     caps = capabilities()
     # Thứ tự workspace hiển thị (chỉ cái user có quyền).
-    order = ["sales", "purchase", "payroll", "gl", "chief"]
+    order = ["npp", "mt", "travel", "purchase", "payroll", "gl", "chief"]
     workspaces = [k for k in order if caps.get(k)]
     show_cash = can_view_cash()
 

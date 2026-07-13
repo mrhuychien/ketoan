@@ -11,19 +11,22 @@ Tất cả read-only, guard ở dòng đầu, SQL parameterized.
 import frappe
 from frappe.utils import flt, today, getdate
 
-from ketoan.api._guard import guard_sales, resolve_company, get_settings
+from ketoan.api._guard import (
+    guard_channel, guard_sales_any, allowed_channels, channel_group_clause,
+    resolve_company, get_settings, is_chief,
+)
 
 
 @frappe.whitelist()
-def get_ar_summary(company: str | None = None, limit: int = 200) -> dict:
-    """Bảng kê công nợ phải thu theo khách hàng + tổng.
-
-    Trả: {total, count, rows:[{customer, customer_name, customer_group,
-    outstanding, earliest_due, days_overdue}]}.
-    """
-    guard_sales()
+def get_ar_summary(company: str | None = None, limit: int = 200, channel: str = "tat-ca") -> dict:
+    """Bảng kê công nợ phải thu theo khách hàng + tổng, lọc theo KÊNH
+    (npp / mt / khac theo Customer Group; 'tat-ca' chỉ cho kế toán trưởng)."""
+    guard_channel(channel)
     company = resolve_company(company)
     limit = min(int(limit or 200), 1000)
+
+    params = {"company": company, "limit": limit}
+    ch_clause = channel_group_clause(channel, params, alias="c")
 
     # Gộp ở mức khách: tổng outstanding + chứng từ quá hạn lâu nhất.
     # Dùng SQL (group + aggregate) thay ORM cho gọn 1 round-trip.
@@ -39,11 +42,12 @@ def get_ar_summary(company: str | None = None, limit: int = 200) -> dict:
         WHERE si.docstatus = 1
           AND si.company = %(company)s
           AND si.outstanding_amount > 0
+          AND {ch}
         GROUP BY si.customer, si.customer_name, c.customer_group
         ORDER BY SUM(si.outstanding_amount) DESC
         LIMIT %(limit)s
-        """,
-        {"company": company, "limit": limit},
+        """.format(ch=ch_clause),
+        params,
         as_dict=True,
     )
 
@@ -54,16 +58,18 @@ def get_ar_summary(company: str | None = None, limit: int = 200) -> dict:
         total += r["outstanding"]
         r["days_overdue"] = (t - getdate(r["earliest_due"])).days if r["earliest_due"] else 0
 
-    return {"company": company, "total": total, "count": len(rows), "rows": rows}
+    return {"company": company, "channel": channel, "total": total, "count": len(rows), "rows": rows}
 
 
 @frappe.whitelist()
-def get_aging(company: str | None = None) -> dict:
-    """Tuổi nợ theo rổ cấu hình (Settings): trong hạn / 1-b1 / b1-b2 / b2-b3 / >b3."""
-    guard_sales()
+def get_aging(company: str | None = None, channel: str = "tat-ca") -> dict:
+    """Tuổi nợ theo rổ cấu hình (Settings), lọc theo kênh."""
+    guard_channel(channel)
     company = resolve_company(company)
     s = get_settings()
     b1, b2, b3 = int(s.aging_bucket_1 or 30), int(s.aging_bucket_2 or 60), int(s.aging_bucket_3 or 90)
+    params = {"company": company, "today": today(), "b1": b1, "b2": b2, "b3": b3}
+    ch_clause = channel_group_clause(channel, params, alias="c")
 
     # Bucket bằng CASE trên số ngày quá hạn (DATEDIFF), tham số hoá ngưỡng.
     row = frappe.db.sql(
@@ -76,13 +82,15 @@ def get_aging(company: str | None = None) -> dict:
           SUM(CASE WHEN d > %(b3)s             THEN o ELSE 0 END) AS over_amt,
           SUM(o) AS total_amt
         FROM (
-            SELECT outstanding_amount AS o,
-                   DATEDIFF(%(today)s, COALESCE(due_date, posting_date)) AS d
-            FROM `tabSales Invoice`
-            WHERE docstatus = 1 AND company = %(company)s AND outstanding_amount > 0
+            SELECT si.outstanding_amount AS o,
+                   DATEDIFF(%(today)s, COALESCE(si.due_date, si.posting_date)) AS d
+            FROM `tabSales Invoice` si
+            LEFT JOIN `tabCustomer` c ON c.name = si.customer
+            WHERE si.docstatus = 1 AND si.company = %(company)s AND si.outstanding_amount > 0
+              AND {ch}
         ) t
-        """,
-        {"company": company, "today": today(), "b1": b1, "b2": b2, "b3": b3},
+        """.format(ch=ch_clause),
+        params,
         as_dict=True,
     )[0]
 
@@ -93,13 +101,13 @@ def get_aging(company: str | None = None) -> dict:
         {"key": "b3", "label": f"{b2+1}–{b3} ngày", "amount": flt(row.b3_amt)},
         {"key": "over", "label": f">{b3} ngày", "amount": flt(row.over_amt)},
     ]
-    return {"company": company, "buckets": buckets, "total": flt(row.total_amt)}
+    return {"company": company, "channel": channel, "buckets": buckets, "total": flt(row.total_amt)}
 
 
 @frappe.whitelist()
 def get_customer_detail(customer: str, company: str | None = None) -> dict:
     """360° công nợ 1 khách: hóa đơn outstanding, hạn mức, khoản thu chưa khớp."""
-    guard_sales()
+    guard_sales_any()
     if not customer:
         frappe.throw("Thiếu mã khách hàng")
     company = resolve_company(company)
@@ -107,6 +115,16 @@ def get_customer_detail(customer: str, company: str | None = None) -> dict:
     info = frappe.db.get_value(
         "Customer", customer, ["customer_name", "customer_group", "territory"], as_dict=True
     ) or {}
+
+    # "Chỉ xem nếu liên quan": khách phải thuộc kênh user phụ trách.
+    if not is_chief():
+        st = get_settings()
+        npp_g = st.npp_customer_group or "NPP"
+        mt_g = st.get("mt_customer_group") or "MT"
+        grp = info.get("customer_group") or ""
+        ch = "npp" if grp == npp_g else ("mt" if grp == mt_g else "khac")
+        if ch not in allowed_channels():
+            frappe.throw("Khách hàng này thuộc kênh khác — bạn không có quyền xem", frappe.PermissionError)
 
     invoices = frappe.db.sql(
         """
@@ -156,12 +174,9 @@ def get_customer_detail(customer: str, company: str | None = None) -> dict:
 
 
 @frappe.whitelist()
-def get_dso(company: str | None = None) -> dict:
-    """DSO ước tính = tổng nợ / doanh thu kỳ × số ngày cửa sổ.
-
-    Doanh thu kỳ: Sales Invoice trong cửa sổ, LỌC is_opening và is_return.
-    """
-    guard_sales()
+def get_dso(company: str | None = None, channel: str = "tat-ca") -> dict:
+    """DSO ước tính = tổng nợ / doanh thu kỳ × số ngày cửa sổ (toàn bộ hoặc theo kênh)."""
+    guard_channel(channel)
     company = resolve_company(company)
     window = int(get_settings().dso_window_days or 365)
 
