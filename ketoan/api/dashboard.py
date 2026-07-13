@@ -8,14 +8,14 @@ Read-only, guard ở dòng đầu. Tái dùng method các phân hệ để trán
 import frappe
 from frappe.utils import flt, today
 
-from ketoan.api._guard import guard_view, resolve_company, is_manager, can_view_cash
+from ketoan.api._guard import guard_manager, resolve_company, is_manager, can_view_cash
 from ketoan.api import receivables, cash, alerts
 
 
 @frappe.whitelist()
 def get_overview(company: str | None = None) -> dict:
-    """Trả về toàn bộ thẻ KPI + danh sách cảnh báo cho trang chủ portal."""
-    guard_view()
+    """Trả về toàn bộ thẻ KPI + cảnh báo cho dashboard tổng hợp (Kế toán trưởng)."""
+    guard_manager()
     company = resolve_company(company)
     show_cash = can_view_cash()
 

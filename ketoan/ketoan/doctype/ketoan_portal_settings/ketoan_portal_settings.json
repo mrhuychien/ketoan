@@ -197,7 +197,19 @@
   },
   {
    "read": 1,
-   "role": "Ke Toan Cong No"
+   "role": "Ke Toan Ban Hang"
+  },
+  {
+   "read": 1,
+   "role": "Ke Toan Mua Hang"
+  },
+  {
+   "read": 1,
+   "role": "Ke Toan Tien Luong"
+  },
+  {
+   "read": 1,
+   "role": "Ke Toan Hach Toan"
   }
  ],
  "sort_field": "modified",

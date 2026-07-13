@@ -33,12 +33,20 @@ bench restart
 
 Mở portal tại: `https://<site>/ketoan`
 
-### Roles
-- `Ke Toan Cong No` — kế toán công nợ (xem công nợ/quỹ, cảnh báo, nhập sổ quỹ).
-- `Ke Toan Truong` — full quyền (thêm mua hàng & tài chính, cấu hình ngưỡng).
+### Vai trò (workspace) — 1 user chọn nhiều
+Nav portal tổ chức theo **vai trò**; mỗi vai trò 1 trang riêng gồm 3 mục
+*Tác nghiệp (deep-link Desk) · Báo cáo · Công cụ*, cô lập theo vai trò:
 
-Hai role được tạo tự động khi `install-app` (xem `ketoan/install.py`). Cấu hình ngưỡng
-cảnh báo tại **Ketoan Portal Settings** (Single).
+| Role | Bàn làm việc |
+|---|---|
+| `Ke Toan Ban Hang` | Công nợ phải thu, đối chiếu NPP, thu tiền khách |
+| `Ke Toan Mua Hang` | Công nợ phải trả, hóa đơn/thanh toán NCC |
+| `Ke Toan Tien Luong` | Tính lương (quét·duyệt·xuất Excel·in PDF) |
+| `Ke Toan Hach Toan` | Quỹ tiền mặt/ngân hàng, bút toán, nhập sao kê |
+| `Ke Toan Truong` | Tổng quan toàn phòng, cảnh báo, cấu hình (xem tất cả) |
+
+5 role tạo tự động khi `install-app`/`migrate` (xem `ketoan/install.py`). Kế toán trưởng
+(+ Accounts Manager/System Manager) đi qua mọi guard. Cấu hình tại **Ketoan Portal Settings**.
 
 ## Cấu trúc
 

@@ -101,6 +101,10 @@
   {
    "create": 1, "delete": 1, "read": 1, "write": 1,
    "role": "Accounts Manager"
+  },
+  {
+   "create": 1, "delete": 1, "print": 1, "read": 1, "report": 1, "write": 1,
+   "role": "Ke Toan Hach Toan"
   }
  ],
  "sort_field": "modified",

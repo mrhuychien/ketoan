@@ -1,14 +1,21 @@
-"""Install hooks for the Ketoan portal app.
+"""Install hooks — tạo hệ vai trò kế toán + cấp quyền cho Single Settings.
 
-Tạo 2 Role tác nghiệp và cấp quyền cho Single `Ketoan Portal Settings`.
-Mọi thao tác idempotent + bọc try/except + log_error: lỗi seed KHÔNG được làm
-chết `bench install-app`.
+5 vai trò: Kế toán bán hàng / mua hàng / tiền lương / hạch toán / trưởng.
+Idempotent + bọc try/except + log_error: lỗi seed KHÔNG được làm chết install.
 """
 
 import frappe
 
-# Role app + role chuẩn ERPNext mà nó kế thừa quyền đọc Accounts.
-PORTAL_ROLES = ("Ke Toan Cong No", "Ke Toan Truong")
+PORTAL_ROLES = (
+    "Ke Toan Ban Hang",
+    "Ke Toan Mua Hang",
+    "Ke Toan Tien Luong",
+    "Ke Toan Hach Toan",
+    "Ke Toan Truong",
+)
+
+# Role cũ đã bỏ (map người dùng sang role mới trước khi xóa nếu cần).
+LEGACY_ROLES = ("Ke Toan Cong No",)
 
 
 def after_install():
@@ -17,37 +24,26 @@ def after_install():
 
 
 def create_portal_roles():
-    """Tạo Role `Ke Toan Cong No` và `Ke Toan Truong` (desk access)."""
+    """Tạo 5 Role tác nghiệp (desk access)."""
     for role_name in PORTAL_ROLES:
         try:
             if not frappe.db.exists("Role", role_name):
-                frappe.get_doc(
-                    {
-                        "doctype": "Role",
-                        "role_name": role_name,
-                        "desk_access": 1,
-                    }
-                ).insert(ignore_permissions=True)
+                frappe.get_doc({"doctype": "Role", "role_name": role_name, "desk_access": 1}).insert(
+                    ignore_permissions=True
+                )
         except Exception:
             frappe.log_error(frappe.get_traceback(), f"ketoan: create role {role_name}")
 
 
 def grant_settings_permissions():
-    """Cấp quyền cho `Ketoan Portal Settings`:
-    - Ke Toan Cong No: chỉ đọc.
-    - Ke Toan Truong / Accounts Manager: đọc + ghi.
-    Dùng add_permission thay vì ship Custom DocPerm qua fixtures.
-    """
+    """Read cho mọi vai trò; Write cho Kế toán trưởng + Accounts Manager."""
     from frappe.permissions import add_permission, update_permission_property
 
     dt = "Ketoan Portal Settings"
     try:
-        # Read cho kế toán công nợ
-        add_permission(dt, "Ke Toan Cong No", 0)
-
-        # Read + Write cho kế toán trưởng & Accounts Manager
-        for role in ("Ke Toan Truong", "Accounts Manager"):
+        for role in PORTAL_ROLES:
             add_permission(dt, role, 0)
+        for role in ("Ke Toan Truong", "Accounts Manager"):
             update_permission_property(dt, role, 0, "write", 1)
     except Exception:
         frappe.log_error(frappe.get_traceback(), "ketoan: grant settings permissions")

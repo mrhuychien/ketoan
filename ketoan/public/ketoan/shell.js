@@ -1,38 +1,33 @@
-// shell.js — khung SPA: header, điều hướng, hash router, nạp view code-split.
+// shell.js — khung SPA: header, nav theo vai trò (workspace), hash router.
 import { parseHash, matchRoute, navigate } from "./lib/router.js";
 import { html, setHTML } from "./lib/dom.js";
 import { toast } from "./components/toast.js";
+import { myWorkspaces, getWorkspace } from "./lib/workspaces.js";
 
 const CTX = window.KETOAN_CONTEXT || {};
 const BASE = "/assets/ketoan/ketoan";
 const V = CTX.assetVersion || "";
 const withV = (p) => `${BASE}/${p}?v=${V}`;
 
-// route → file view (KHÔNG cho vào import map; mang ?v= khi dynamic import).
-const ROUTES = [
-  { pattern: "/", view: "views/dashboard.js", nav: "dashboard", title: "Tổng quan" },
-  { pattern: "/cong-no", view: "views/receivables.js", nav: "cong-no", title: "Công nợ" },
-  { pattern: "/doi-chieu-npp", view: "views/npp.js", nav: "npp", title: "Đối chiếu NPP" },
-  { pattern: "/khach/:id", view: "views/customer.js", nav: "cong-no", title: "360° khách" },
-  { pattern: "/quy", view: "views/cash.js", nav: "quy", title: "Sổ quỹ", cap: "cash" },
-  { pattern: "/nhap-sao-ke", view: "views/bankimport.js", nav: "quy", title: "Nhập sao kê", cap: "cash" },
-  { pattern: "/luong", view: "views/payroll.js", nav: "luong", title: "Tính lương", cap: "manager" },
-  { pattern: "/canh-bao", view: "views/alerts.js", nav: "canh-bao", title: "Cảnh báo" },
-  { pattern: "/tien-ich", view: "views/utilities.js", nav: "tien-ich", title: "Tiện ích" },
-];
-
-const CAPS = { cash: !!CTX.canViewCash, manager: !!CTX.isManager };
+const CAPS = CTX.caps || {};
 const hasCap = (cap) => !cap || !!CAPS[cap];
 
-const NAV_ITEMS = [
-  { key: "dashboard", path: "/", icon: "fa-gauge-high", label: "Tổng quan" },
-  { key: "cong-no", path: "/cong-no", icon: "fa-file-invoice-dollar", label: "Công nợ" },
-  { key: "npp", path: "/doi-chieu-npp", icon: "fa-handshake", label: "Đối chiếu NPP" },
-  { key: "quy", path: "/quy", icon: "fa-wallet", label: "Sổ quỹ", cap: "cash" },
-  { key: "luong", path: "/luong", icon: "fa-money-check-dollar", label: "Tính lương", cap: "manager" },
-  { key: "canh-bao", path: "/canh-bao", icon: "fa-triangle-exclamation", label: "Cảnh báo" },
-  { key: "tien-ich", path: "/tien-ich", icon: "fa-bolt", label: "Tiện ích" },
-].filter((n) => hasCap(n.cap));
+// route → view. `cap`: capability cần có. `ws`: workspace để highlight nav.
+const ROUTES = [
+  { pattern: "/", view: "views/home.js", title: "Trang chủ" },
+  { pattern: "/vt/:key", view: "views/workspace.js", title: "Workspace" },
+  { pattern: "/dashboard", view: "views/dashboard.js", cap: "chief", ws: "chief", title: "Tổng quan" },
+  { pattern: "/canh-bao", view: "views/alerts.js", cap: "chief", ws: "chief", title: "Cảnh báo" },
+  { pattern: "/cong-no", view: "views/receivables.js", cap: "sales", ws: "sales", title: "Công nợ" },
+  { pattern: "/doi-chieu-npp", view: "views/npp.js", cap: "sales", ws: "sales", title: "Đối chiếu NPP" },
+  { pattern: "/khach/:id", view: "views/customer.js", cap: "sales", ws: "sales", title: "360° khách" },
+  { pattern: "/tien-ich", view: "views/utilities.js", cap: "sales", ws: "sales", title: "Tiện ích" },
+  { pattern: "/quy", view: "views/cash.js", cap: "gl", ws: "gl", title: "Sổ quỹ" },
+  { pattern: "/nhap-sao-ke", view: "views/bankimport.js", cap: "gl", ws: "gl", title: "Nhập sao kê" },
+  { pattern: "/luong", view: "views/payroll.js", cap: "payroll", ws: "payroll", title: "Tính lương" },
+];
+
+const NAV_WS = myWorkspaces();
 
 function renderShell() {
   const root = document.getElementById("kt-root");
@@ -42,23 +37,24 @@ function renderShell() {
       <div class="kt-app">
         <header class="kt-header">
           <div class="kt-header-left">
-            <div class="kt-logo"><i class="fas fa-coins"></i></div>
+            <a class="kt-logo" href="#/"><i class="fas fa-calculator"></i></a>
             <div class="kt-header-title">
               <h1>Kế toán Tác nghiệp</h1>
-              <p>Bàn làm việc Công nợ &amp; Quỹ · ${CTX.company || ""}</p>
+              <p>${CTX.company || ""}</p>
             </div>
           </div>
           <div class="kt-header-right">
             <a class="kt-erp-link" href="/app" title="Mở ERPNext Desk"><i class="fas fa-up-right-from-square"></i> Desk</a>
             <div class="kt-user">
               <span class="kt-user-name">${CTX.fullName || CTX.user || ""}</span>
-              ${CTX.isManager ? html`<span class="kt-badge kt-badge--gold">Kế toán trưởng</span>` : ""}
+              ${CAPS.chief ? html`<span class="kt-badge kt-badge--gold">Kế toán trưởng</span>` : ""}
             </div>
           </div>
         </header>
         <nav class="kt-nav" id="kt-nav">
-          ${NAV_ITEMS.map(
-            (n) => html`<a class="kt-nav-item" data-nav="${n.key}" href="#${n.path}"><i class="fas ${n.icon}"></i><span>${n.label}</span></a>`
+          <a class="kt-nav-item" data-nav="home" href="#/"><i class="fas fa-house"></i><span>Trang chủ</span></a>
+          ${NAV_WS.map(
+            (w) => html`<a class="kt-nav-item" data-nav="${w.key}" href="#/vt/${w.key}"><i class="fas ${w.icon}"></i><span>${w.label}</span></a>`
           )}
         </nav>
         <main class="kt-main" id="kt-view"><div class="kt-boot"><div class="kt-spinner"></div></div></main>
@@ -82,21 +78,23 @@ async function route() {
   if (!view) return;
 
   if (!matched) {
-    setHTML(view, html`<div class="kt-empty"><i class="fas fa-compass"></i><p>Không tìm thấy trang. <a href="#/">Về tổng quan</a></p></div>`);
+    setHTML(view, html`<div class="kt-empty"><i class="fas fa-compass"></i><p>Không tìm thấy trang. <a href="#/">Về trang chủ</a></p></div>`);
     return;
   }
 
-  // Chặn truy cập màn hình theo capability (quỹ / quản lý).
-  if (!hasCap(matched.route.cap)) {
+  // Capability của route; với /vt/:key thì cap chính là key workspace.
+  const cap = matched.route.pattern === "/vt/:key" ? matched.params.key : matched.route.cap;
+  if (!hasCap(cap)) {
     setActiveNav(null);
-    setHTML(view, html`<div class="kt-empty"><i class="fas fa-lock"></i><p>Bạn không có quyền xem chức năng này.<br><a href="#/">Về tổng quan</a></p></div>`);
+    setHTML(view, html`<div class="kt-empty"><i class="fas fa-lock"></i><p>Bạn không có quyền xem chức năng này.<br><a href="#/">Về trang chủ</a></p></div>`);
     return;
   }
 
-  setActiveNav(matched.route.nav);
+  // Highlight nav theo workspace của route.
+  const navKey = path === "/" ? "home" : (matched.route.pattern === "/vt/:key" ? matched.params.key : matched.route.ws);
+  setActiveNav(navKey || null);
   setHTML(view, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
 
-  // dọn view trước (vd destroy chart)
   if (typeof currentCleanup === "function") {
     try { currentCleanup(); } catch (_) {}
     currentCleanup = null;

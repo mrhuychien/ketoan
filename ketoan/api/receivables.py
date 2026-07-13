@@ -11,7 +11,7 @@ Tất cả read-only, guard ở dòng đầu, SQL parameterized.
 import frappe
 from frappe.utils import flt, today, getdate
 
-from ketoan.api._guard import guard_view, resolve_company, get_settings
+from ketoan.api._guard import guard_sales, resolve_company, get_settings
 
 
 @frappe.whitelist()
@@ -21,7 +21,7 @@ def get_ar_summary(company: str | None = None, limit: int = 200) -> dict:
     Trả: {total, count, rows:[{customer, customer_name, customer_group,
     outstanding, earliest_due, days_overdue}]}.
     """
-    guard_view()
+    guard_sales()
     company = resolve_company(company)
     limit = min(int(limit or 200), 1000)
 
@@ -60,7 +60,7 @@ def get_ar_summary(company: str | None = None, limit: int = 200) -> dict:
 @frappe.whitelist()
 def get_aging(company: str | None = None) -> dict:
     """Tuổi nợ theo rổ cấu hình (Settings): trong hạn / 1-b1 / b1-b2 / b2-b3 / >b3."""
-    guard_view()
+    guard_sales()
     company = resolve_company(company)
     s = get_settings()
     b1, b2, b3 = int(s.aging_bucket_1 or 30), int(s.aging_bucket_2 or 60), int(s.aging_bucket_3 or 90)
@@ -99,7 +99,7 @@ def get_aging(company: str | None = None) -> dict:
 @frappe.whitelist()
 def get_customer_detail(customer: str, company: str | None = None) -> dict:
     """360° công nợ 1 khách: hóa đơn outstanding, hạn mức, khoản thu chưa khớp."""
-    guard_view()
+    guard_sales()
     if not customer:
         frappe.throw("Thiếu mã khách hàng")
     company = resolve_company(company)
@@ -161,7 +161,7 @@ def get_dso(company: str | None = None) -> dict:
 
     Doanh thu kỳ: Sales Invoice trong cửa sổ, LỌC is_opening và is_return.
     """
-    guard_view()
+    guard_sales()
     company = resolve_company(company)
     window = int(get_settings().dso_window_days or 365)
 

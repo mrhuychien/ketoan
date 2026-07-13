@@ -1,78 +1,112 @@
-"""Guard + context dùng chung cho mọi whitelisted method của portal.
+"""Guard + capability theo hệ phân quyền vai trò kế toán.
 
-Nguyên tắc: mọi method gọi `guard_view()` (hoặc `guard_manager()`) ở DÒNG ĐẦU.
-Quyền hiển thị ở SPA chỉ là tiện dụng — quyền thật kiểm ở đây.
+5 vai trò (1 user chọn nhiều): Kế toán bán hàng / mua hàng / tiền lương / hạch toán
+/ trưởng. Mỗi domain có guard riêng; Kế toán trưởng (+ Accounts Manager/System
+Manager) đi qua mọi guard. Mọi whitelisted method gọi guard ở DÒNG ĐẦU.
 """
 
 import frappe
 from frappe import _
 
-# Role được xem dữ liệu công nợ (phải thu) — gồm cả kế toán công nợ.
-VIEW_ROLES = {
-    "Ke Toan Cong No",
-    "Ke Toan Truong",
-    "Accounts User",
-    "Accounts Manager",
-    "System Manager",
-}
+ROLE_SALES = "Ke Toan Ban Hang"      # Kế toán bán hàng (công nợ phải thu)
+ROLE_PURCHASE = "Ke Toan Mua Hang"   # Kế toán mua hàng (công nợ phải trả)
+ROLE_PAYROLL = "Ke Toan Tien Luong"  # Kế toán tiền lương
+ROLE_GL = "Ke Toan Hach Toan"        # Kế toán hạch toán (quỹ/ngân hàng/bút toán)
+ROLE_CHIEF = "Ke Toan Truong"        # Kế toán trưởng (xem tất cả)
 
-# Role được xem/thao tác nghiệp vụ QUỸ-TIỀN (sổ quỹ, nhập sổ quỹ, cảnh báo quỹ âm).
-# KHÔNG gồm "Ke Toan Cong No" — kế toán công nợ chỉ xem công nợ.
-CASH_ROLES = {
-    "Ke Toan Truong",
-    "Accounts Manager",
-    "System Manager",
-}
+PORTAL_ROLES = (ROLE_SALES, ROLE_PURCHASE, ROLE_PAYROLL, ROLE_GL, ROLE_CHIEF)
 
-# Role quản lý (thấy field nhạy cảm, cấu hình, được submit nếu bật).
-MANAGER_ROLES = {
-    "Ke Toan Truong",
-    "Accounts Manager",
-    "System Manager",
-}
+# Vai trò "toàn quyền xem" — đi qua mọi guard.
+CHIEF_ROLES = {ROLE_CHIEF, "Accounts Manager", "System Manager"}
+
+# Mọi vai trò được vào portal (bất kỳ kế toán nào).
+VIEW_ROLES = set(PORTAL_ROLES) | {"Accounts User", "Accounts Manager", "System Manager"}
 
 
 def _roles() -> set:
     return set(frappe.get_roles())
 
 
-def is_manager() -> bool:
-    return bool(MANAGER_ROLES & _roles())
+def is_chief() -> bool:
+    return bool(CHIEF_ROLES & _roles())
 
 
-def can_view_cash() -> bool:
-    """Người dùng có được xem nghiệp vụ quỹ/tiền không (loại kế toán công nợ)."""
-    return bool(CASH_ROLES & _roles())
+def has_role(role: str) -> bool:
+    """User có vai trò này (hoặc là kế toán trưởng)."""
+    return role in _roles() or is_chief()
+
+
+def capabilities() -> dict:
+    """Cờ workspace user được thấy (chief thấy tất cả)."""
+    return {
+        "sales": has_role(ROLE_SALES),
+        "purchase": has_role(ROLE_PURCHASE),
+        "payroll": has_role(ROLE_PAYROLL),
+        "gl": has_role(ROLE_GL),
+        "chief": is_chief(),
+    }
+
+
+def _throw_login():
+    if frappe.session.user == "Guest":
+        frappe.throw(_("Vui lòng đăng nhập"), frappe.PermissionError)
 
 
 def guard_view() -> None:
-    """Chặn Guest + người không có role xem kế toán (công nợ)."""
-    if frappe.session.user == "Guest":
-        frappe.throw(_("Vui lòng đăng nhập"), frappe.PermissionError)
+    """Bất kỳ kế toán nào (đã đăng nhập, có 1 trong các vai trò)."""
+    _throw_login()
     if not (VIEW_ROLES & _roles()):
-        frappe.throw(_("Bạn không có quyền xem dữ liệu kế toán tác nghiệp"), frappe.PermissionError)
+        frappe.throw(_("Bạn không có quyền truy cập portal kế toán"), frappe.PermissionError)
 
 
+def _guard_role(role: str, msg: str) -> None:
+    _throw_login()
+    if not has_role(role):
+        frappe.throw(_(msg), frappe.PermissionError)
+
+
+def guard_sales() -> None:
+    _guard_role(ROLE_SALES, "Chỉ Kế toán bán hàng/trưởng mới được xem")
+
+
+def guard_purchase() -> None:
+    _guard_role(ROLE_PURCHASE, "Chỉ Kế toán mua hàng/trưởng mới được xem")
+
+
+def guard_payroll() -> None:
+    _guard_role(ROLE_PAYROLL, "Chỉ Kế toán tiền lương/trưởng mới được xem")
+
+
+def guard_gl() -> None:
+    """Nghiệp vụ quỹ / ngân hàng / bút toán → Kế toán hạch toán."""
+    _guard_role(ROLE_GL, "Chỉ Kế toán hạch toán/trưởng mới được xem nghiệp vụ quỹ/ngân hàng")
+
+
+# Alias tương thích ngược (cash trước đây).
 def guard_cash() -> None:
-    """Chặn người không có quyền nghiệp vụ quỹ/tiền (vd kế toán công nợ)."""
-    guard_view()
-    if not can_view_cash():
-        frappe.throw(_("Bạn không có quyền xem nghiệp vụ quỹ/tiền"), frappe.PermissionError)
+    guard_gl()
 
 
 def guard_manager() -> None:
-    guard_view()
-    if not is_manager():
-        frappe.throw(_("Chỉ kế toán trưởng/quản lý mới được thao tác này"), frappe.PermissionError)
+    _throw_login()
+    if not is_chief():
+        frappe.throw(_("Chỉ Kế toán trưởng/quản lý mới được thao tác này"), frappe.PermissionError)
+
+
+def can_view_cash() -> bool:
+    """Được xem nghiệp vụ quỹ/tiền (Kế toán hạch toán hoặc trưởng)."""
+    return has_role(ROLE_GL)
+
+
+def is_manager() -> bool:
+    return is_chief()
 
 
 def get_settings():
-    """Single Ketoan Portal Settings (cached)."""
     return frappe.get_cached_doc("Ketoan Portal Settings")
 
 
 def resolve_company(company: str | None = None) -> str:
-    """Trả về company hợp lệ: tham số → Settings → mặc định của user/hệ thống."""
     if company:
         return company
     settings = get_settings()
@@ -85,7 +119,6 @@ def resolve_company(company: str | None = None) -> str:
 
 
 def cash_account_types() -> tuple:
-    """Tuple account_type để lọc TK tiền theo cấu hình (cho mệnh đề IN %s)."""
     flt = get_settings().cash_bank_account_filter or "Cash and Bank"
     if flt == "Cash":
         return ("Cash",)

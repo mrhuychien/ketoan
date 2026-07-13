@@ -15,12 +15,16 @@ def get_context(context):
         frappe.local.flags.redirect_location = "/login?redirect-to=/ketoan"
         raise frappe.Redirect
 
-    from ketoan.api._guard import VIEW_ROLES, is_manager, can_view_cash, resolve_company, get_settings
+    from ketoan.api._guard import VIEW_ROLES, is_manager, can_view_cash, capabilities, resolve_company, get_settings
 
     roles = set(frappe.get_roles())
     if not (VIEW_ROLES & roles):
         frappe.throw(_("Bạn không có quyền truy cập portal kế toán tác nghiệp"), frappe.PermissionError)
 
+    caps = capabilities()
+    # Thứ tự workspace hiển thị (chỉ cái user có quyền).
+    order = ["sales", "purchase", "payroll", "gl", "chief"]
+    workspaces = [k for k in order if caps.get(k)]
     show_cash = can_view_cash()
 
     settings = get_settings()
@@ -39,6 +43,8 @@ def get_context(context):
         "isManager": is_manager(),
         "canViewCash": show_cash,
         "canUseCashbook": show_cash,
+        "caps": caps,
+        "workspaces": workspaces,
         "roles": sorted(roles),
         "company": company,
         "csrfToken": frappe.session.data.csrf_token if frappe.session.data else "",

@@ -19,7 +19,7 @@ from frappe.utils import (
     formatdate, money_in_words, escape_html,
 )
 
-from ketoan.api._guard import guard_view, resolve_company, get_settings
+from ketoan.api._guard import guard_sales, resolve_company, get_settings
 from ketoan.utils import je_remark_field, format_vnd
 
 
@@ -124,7 +124,7 @@ def _month_sales(company: str, names: tuple, first: str, last: str, cfg: dict) -
 @frappe.whitelist()
 def get_debts(company: str | None = None) -> dict:
     """Bảng đối chiếu công nợ NPP + chính sách thanh toán."""
-    guard_view()
+    guard_sales()
     company = resolve_company(company)
     cfg = _cfg()
     policy, tet_start = _policy(cfg)
@@ -253,7 +253,7 @@ def get_debts(company: str | None = None) -> dict:
 @frappe.whitelist()
 def get_discount_eligible(company: str | None = None, month: str | None = None) -> dict:
     """NPP đủ điều kiện chiết khấu trong THÁNG: doanh số tháng ≥ ngưỡng → % doanh số."""
-    guard_view()
+    guard_sales()
     company = resolve_company(company)
     cfg = _cfg()
     first, last, mkey = _month_range(month)
@@ -307,7 +307,7 @@ def create_discount_entries(customers, month: str | None = None, company: str | 
     Server tự tính chiết khấu từ doanh số tháng thật (không tin client). Khóa
     chống trùng theo marker [CK2-<customer>-<YYYY-MM>] trong trường remark.
     """
-    guard_view()
+    guard_sales()
     company = resolve_company(company)
     cfg = _cfg()
 
@@ -505,7 +505,7 @@ def _render_pdf_download(html: str, filename: str):
 @frappe.whitelist()
 def export_reconciliation(customer: str, from_date: str | None = None, to_date: str | None = None, company: str | None = None):
     """Xuất biên bản đối chiếu công nợ 1 khách ra PDF (download)."""
-    guard_view()
+    guard_sales()
     company = resolve_company(company)
     if not customer or not frappe.db.exists("Customer", customer):
         frappe.throw(_("Khách hàng không tồn tại"))
@@ -523,7 +523,7 @@ def export_reconciliation(customer: str, from_date: str | None = None, to_date: 
 @frappe.whitelist()
 def export_reconciliation_bulk(customers, from_date: str | None = None, to_date: str | None = None, company: str | None = None):
     """Xuất biên bản đối chiếu hàng loạt nhiều NPP vào 1 PDF (mỗi khách 1 trang)."""
-    guard_view()
+    guard_sales()
     company = resolve_company(company)
     if isinstance(customers, str):
         customers = json.loads(customers)
