@@ -89,6 +89,13 @@ export const api = {
   cashflow: (a) => callMethod(NS + "cash.get_cashflow", withCompany(a)),
   transactions: (a) => callMethod(NS + "cash.get_transactions", withCompany(a)),
 
+  // Payables (mua hàng)
+  apSummary: (a) => callMethod(NS + "payables.get_ap_summary", withCompany(a)),
+  apAging: (a) => callMethod(NS + "payables.get_aging", withCompany(a)),
+  apDueSchedule: (a) => callMethod(NS + "payables.get_due_schedule", withCompany(a)),
+  supplierDetail: (supplier, a) => callMethod(NS + "payables.get_supplier_detail", withCompany({ supplier, ...a })),
+  apControls: (a) => callMethod(NS + "payables.get_controls", withCompany(a)),
+
   // NPP reconciliation
   nppDebts: (a) => callMethod(NS + "npp.get_debts", withCompany(a)),
   nppDiscountEligible: (month, a) => callMethod(NS + "npp.get_discount_eligible", withCompany({ month, ...a })),

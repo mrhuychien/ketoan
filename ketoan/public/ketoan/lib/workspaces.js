@@ -41,12 +41,15 @@ export const WORKSPACES = [
         { label: "Đơn mua hàng (PO)", icon: "fa-file-lines", type: "desk", href: "/app/purchase-order" },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
-        { label: "Công nợ phải trả (Accounts Payable)", icon: "fa-table", type: "desk", href: "/app/accounts-payable" },
+        { label: "Công nợ phải trả + tuổi nợ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no-ncc" },
+        { label: "Accounts Payable (Desk)", icon: "fa-table", type: "desk", href: "/app/accounts-payable" },
         { label: "Purchase Register", icon: "fa-table", type: "desk", href: "/app/query-report/Purchase Register" },
         { label: "Sổ chi tiết NCC", icon: "fa-book", type: "desk", href: "/app/general-ledger?party_type=Supplier" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
-        { label: "Hóa đơn NCC chờ thanh toán", icon: "fa-clock", type: "desk", href: "/app/purchase-invoice?status=Unpaid" },
+        { label: "Lịch thanh toán đến hạn", icon: "fa-calendar-days", type: "route", route: "/cong-no-ncc" },
+        { label: "Kiểm soát: trùng HĐ NCC + khớp 3 chiều", icon: "fa-shield-halved", type: "route", route: "/cong-no-ncc" },
+        { label: "Hóa đơn NCC chờ thanh toán (Desk)", icon: "fa-clock", type: "desk", href: "/app/purchase-invoice?status=Unpaid" },
       ]},
     ],
   },
