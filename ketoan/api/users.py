@@ -10,7 +10,14 @@ import frappe
 from frappe import _
 
 from ketoan.api._guard import guard_manager
-from ketoan.install import PORTAL_ROLES
+from ketoan.install import PORTAL_ROLES, create_portal_roles
+
+
+def _ensure_roles_exist() -> None:
+    """Tạo role kênh còn thiếu (site cài trước khi bộ role đổi). Idempotent."""
+    missing = [r for r in PORTAL_ROLES if not frappe.db.exists("Role", r)]
+    if missing:
+        create_portal_roles()
 
 # Nhãn hiển thị cho từng role.
 ROLE_LABELS = {
@@ -39,6 +46,7 @@ def _assert_editable(user: str) -> None:
 def get_users() -> dict:
     """Danh sách System User đang bật + vai trò kế toán từng người."""
     guard_manager()
+    _ensure_roles_exist()
 
     users = frappe.get_all(
         "User",
@@ -74,6 +82,7 @@ def set_roles(user: str, roles) -> dict:
     roles: JSON list — chỉ chấp nhận role nằm trong PORTAL_ROLES.
     """
     guard_manager()
+    _ensure_roles_exist()
     if not user or not frappe.db.exists("User", user):
         frappe.throw(_("User không tồn tại"))
     _assert_editable(user)
