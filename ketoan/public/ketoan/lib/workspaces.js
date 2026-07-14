@@ -1,6 +1,26 @@
-// workspaces.js — cấu hình 5 workspace theo vai trò kế toán.
-// Mỗi workspace 3 mục: Tác nghiệp (deep-link Desk) / Báo cáo / Công cụ.
+// workspaces.js — cấu hình workspace (nghiệp vụ) theo vai trò kế toán.
+// Mỗi workspace: guide (hướng dẫn) + 3 mục Thực hiện / Báo cáo / Công cụ.
 // item.type: "desk" (href ra /app), "route" (route nội bộ #/...).
+
+const CTX = window.KETOAN_CONTEXT || {};
+
+// URL Sổ cái (General Ledger) với filter chuẩn: company + 30 ngày gần nhất
+// + Categorize by Voucher (Consolidated) + dimensions + default book entries.
+function glUrl() {
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 30);
+  const p = new URLSearchParams({
+    company: CTX.company || "",
+    from_date: fmt(from),
+    to_date: fmt(to),
+    categorize_by: "Categorize by Voucher (Consolidated)",
+    include_dimensions: "1",
+    include_default_book_entries: "1",
+  });
+  return "/app/query-report/General%20Ledger?" + p.toString();
+}
 
 export const WORKSPACES = [
   {
@@ -17,9 +37,8 @@ export const WORKSPACES = [
     ],
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
-        { label: "Lập hóa đơn bán", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice/new" },
-        { label: "Phiếu thu tiền", icon: "fa-money-bill-wave", type: "desk", href: "/app/payment-entry/new" },
-        { label: "Khách hàng NPP", icon: "fa-users", type: "desk", href: "/app/customer?customer_group=NPP" },
+        { label: "Hóa đơn bán hàng (Sales Invoice)", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice" },
+        { label: "Sổ cái (General Ledger)", icon: "fa-book", type: "desk", href: glUrl() },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
         { label: "Đối chiếu công nợ NPP (chính sách thường/Tết)", icon: "fa-handshake", type: "route", route: "/doi-chieu-npp" },
