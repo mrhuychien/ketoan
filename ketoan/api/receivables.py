@@ -170,7 +170,49 @@ def get_customer_detail(customer: str, company: str | None = None) -> dict:
         "over_limit": bool(credit_limit and outstanding > credit_limit),
         "unallocated_payment": unallocated,
         "invoices": invoices,
+        "tasks": _customer_tasks(customer, company),
     }
+
+
+def _customer_tasks(customer: str, company: str) -> dict:
+    """Việc cần xử lý với riêng 1 khách (bọc try/except từng đếm)."""
+    from ketoan.utils import je_remark_field
+
+    def cnt(sql, params):
+        try:
+            return int(frappe.db.sql(sql, params)[0][0] or 0)
+        except Exception:
+            return 0
+
+    tasks = {}
+    # Hàng trả lại đang xử lý (SI return nháp của khách).
+    tasks["pending_returns"] = cnt(
+        """SELECT COUNT(*) FROM `tabSales Invoice`
+           WHERE is_return = 1 AND docstatus = 0 AND company = %(company)s AND customer = %(customer)s""",
+        {"company": company, "customer": customer},
+    )
+    # Chiết khấu/KM đang treo (JE nháp marker CK2 có party = khách).
+    field = je_remark_field()
+    tasks["pending_discount"] = cnt(
+        f"""SELECT COUNT(DISTINCT je.name) FROM `tabJournal Entry` je
+            JOIN `tabJournal Entry Account` a ON a.parent = je.name
+            WHERE je.docstatus = 0 AND je.company = %(company)s
+              AND a.party_type = 'Customer' AND a.party = %(customer)s
+              AND je.`{field}` LIKE '%%[CK2-%%'""",
+        {"company": company, "customer": customer},
+    )
+    # Chưa xuất hóa đơn điện tử (60 ngày gần nhất).
+    if frappe.db.has_column("Sales Invoice", "vn_einvoice_number"):
+        tasks["missing_einvoice"] = cnt(
+            """SELECT COUNT(*) FROM `tabSales Invoice`
+               WHERE docstatus = 1 AND is_return = 0 AND company = %(company)s AND customer = %(customer)s
+                 AND posting_date >= DATE_SUB(%(today)s, INTERVAL 60 DAY)
+                 AND IFNULL(vn_einvoice_number, '') = ''""",
+            {"company": company, "customer": customer, "today": today()},
+        )
+    else:
+        tasks["missing_einvoice"] = 0
+    return tasks
 
 
 @frappe.whitelist()

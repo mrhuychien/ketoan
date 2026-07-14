@@ -198,6 +198,16 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-ws-meta { font-size: 11px; color: var(--kt-muted); margin-top: 8px; }
 .kt-ws-meta i { color: var(--kt-primary); margin-right: 4px; }
 
+/* ===== Việc cần xử lý (trang chủ) ===== */
+.kt-task-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+.kt-task-group { border: 1px solid var(--kt-border); border-radius: var(--kt-r-md); padding: 12px; background: var(--kt-bg-input); }
+.kt-task-group-title { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--kt-text-2); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.kt-task-group-title i { color: var(--kt-primary); }
+.kt-task-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--kt-border); border-radius: var(--kt-r-sm); background: #fff; margin-bottom: 6px; transition: border-color .12s, transform .12s; }
+.kt-task-item:last-child { margin-bottom: 0; }
+.kt-task-item:hover { border-color: var(--kt-primary); transform: translateX(2px); }
+.kt-task-label { flex: 1; font-size: 13px; font-weight: 600; color: var(--kt-text); }
+
 /* ===== Hướng dẫn nghiệp vụ ===== */
 .kt-guide { border-left: 4px solid var(--kt-primary); }
 .kt-guide-head { cursor: pointer; user-select: none; }

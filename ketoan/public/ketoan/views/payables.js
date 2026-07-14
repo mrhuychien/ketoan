@@ -6,7 +6,9 @@ import { navigate } from "../lib/router.js";
 
 const q = encodeURIComponent;
 
-export async function render({ container }) {
+const AP_TABS = ["ap", "due", "control"];
+
+export async function render({ container, query }) {
   setHTML(container, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
   let summary, aging;
   try {
@@ -16,7 +18,7 @@ export async function render({ container }) {
     return;
   }
 
-  const state = { tab: "ap", search: "" };
+  const state = { tab: query && AP_TABS.includes(query.tab) ? query.tab : "ap", search: "" };
   const maxAging = Math.max(1, ...aging.buckets.map((b) => b.amount));
 
   setHTML(
@@ -39,9 +41,9 @@ export async function render({ container }) {
       </div>
 
       <div class="kt-segment kt-mb" id="ap-tabs">
-        <button data-tab="ap" class="is-active">Công nợ NCC</button>
-        <button data-tab="due">Đến hạn thanh toán</button>
-        <button data-tab="control">Kiểm soát</button>
+        <button data-tab="ap" class="${state.tab === "ap" ? "is-active" : ""}">Công nợ NCC</button>
+        <button data-tab="due" class="${state.tab === "due" ? "is-active" : ""}">Đến hạn thanh toán</button>
+        <button data-tab="control" class="${state.tab === "control" ? "is-active" : ""}">Kiểm soát</button>
       </div>
       <div id="ap-tab-body"></div>
     `

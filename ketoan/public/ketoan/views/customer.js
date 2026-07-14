@@ -43,6 +43,8 @@ export async function render({ container, params }) {
         </div>
       </div>
 
+      ${customerTasksBlock(d)}
+
       <div class="kt-card kt-mb">
         <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-bolt"></i> Thao tác</div></div>
         <div class="kt-card-body" style="display:flex;gap:10px;flex-wrap:wrap">
@@ -80,6 +82,46 @@ export async function render({ container, params }) {
   if (exportBtn) exportBtn.addEventListener("click", () => openReconModal(d));
 
   renderCustomerFiles(container, d.customer);
+}
+
+// Khối "Việc cần xử lý với khách này" — nhóm theo nghiệp vụ.
+function customerTasksBlock(d) {
+  const t = d.tasks || {};
+  const overdueInv = (d.invoices || []).filter((i) => i.days_overdue > 0);
+  const overdueSum = overdueInv.reduce((s, i) => s + i.outstanding_amount, 0);
+
+  const items = [];
+  if (overdueInv.length)
+    items.push({ icon: "fa-hand-holding-dollar", label: `Cần thu/đối chiếu: ${overdueInv.length} hóa đơn quá hạn (${formatVND(overdueSum)})`, sev: "red", href: null });
+  if (t.missing_einvoice)
+    items.push({ icon: "fa-file-circle-exclamation", label: `Cần xuất hóa đơn điện tử: ${t.missing_einvoice} hóa đơn`, sev: "red", href: "#/doi-chieu-npp?tab=einvoice" });
+  if (t.pending_returns)
+    items.push({ icon: "fa-rotate-left", label: `Hàng trả lại đang xử lý: ${t.pending_returns} hồ sơ`, sev: "yellow", href: "#/doi-chieu-npp?tab=doitru" });
+  if (t.pending_discount)
+    items.push({ icon: "fa-percent", label: `Chiết khấu/KM đang treo: ${t.pending_discount} bút toán`, sev: "yellow", href: "#/doi-chieu-npp?tab=doitru" });
+  if (d.unallocated_payment > 0)
+    items.push({ icon: "fa-link-slash", label: `Khoản thu chưa khớp hóa đơn: ${formatVND(d.unallocated_payment)}`, sev: "yellow", href: `/app/payment-entry?party=${q(d.customer)}&unallocated_amount=[">",0]` });
+  if (d.over_limit)
+    items.push({ icon: "fa-user-shield", label: "Vượt hạn mức tín dụng — cân nhắc khóa đơn/thu hồi", sev: "red", href: null });
+
+  if (!items.length)
+    return html`<div class="kt-alert kt-alert--info kt-mb"><div class="kt-alert-title"><i class="fas fa-circle-check" style="color:var(--kt-success)"></i> Không có việc tồn đọng với khách này</div></div>`;
+
+  return html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+      <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-list-check"></i> Việc cần xử lý với khách này (${items.length})</div></div>
+      <div class="kt-card-body"><div class="kt-ws-items">
+        ${items.map((it) => {
+          const ico = html`<span class="kt-ws-item-ico" style="${it.sev === "red" ? "background:#fee2e2;color:#b91c1c" : "background:#fef3c7;color:#b45309"}"><i class="fas ${it.icon}"></i></span>`;
+          if (!it.href)
+            return html`<div class="kt-ws-item">${ico}<span class="kt-ws-item-label">${it.label}</span></div>`;
+          return html`<a class="kt-ws-item" href="${it.href}" target="${it.href.startsWith("/app") ? "_blank" : ""}">
+            ${ico}<span class="kt-ws-item-label">${it.label}</span>
+            <span class="kt-ws-item-go"><i class="fas fa-chevron-right"></i></span>
+          </a>`;
+        })}
+      </div></div>
+    </div>`;
 }
 
 // Khối "Hồ sơ khách hàng" — file đính kèm trên Customer (hợp đồng, phụ lục, ĐKKD...)

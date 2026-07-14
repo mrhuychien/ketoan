@@ -12,7 +12,9 @@ const STATUS = {
   negative: { cls: "gray", label: "Số dư âm" },
 };
 
-export async function render({ container }) {
+const NPP_TABS = ["debt", "due", "discount", "doitru", "einvoice"];
+
+export async function render({ container, query }) {
   setHTML(container, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
   let data;
   try {
@@ -22,7 +24,8 @@ export async function render({ container }) {
     return;
   }
 
-  const state = { tab: "debt", statusFilter: "all", search: "", debtSelected: new Set(), discountMonth: currentMonth(), discSelected: new Set(), discData: null };
+  const initTab = query && NPP_TABS.includes(query.tab) ? query.tab : "debt";
+  const state = { tab: initTab, statusFilter: "all", search: "", debtSelected: new Set(), discountMonth: currentMonth(), discSelected: new Set(), discData: null };
 
   setHTML(
     container,
@@ -44,11 +47,11 @@ export async function render({ container }) {
       </div>
 
       <div class="kt-segment kt-mb" id="npp-tabs">
-        <button data-tab="debt" class="is-active">Công nợ NPP</button>
-        <button data-tab="due">Đến hạn</button>
-        <button data-tab="discount">Chiết khấu</button>
-        <button data-tab="doitru">Đối trừ</button>
-        <button data-tab="einvoice">Chưa xuất HĐĐT</button>
+        <button data-tab="debt" class="${state.tab === "debt" ? "is-active" : ""}">Công nợ NPP</button>
+        <button data-tab="due" class="${state.tab === "due" ? "is-active" : ""}">Đến hạn</button>
+        <button data-tab="discount" class="${state.tab === "discount" ? "is-active" : ""}">Chiết khấu</button>
+        <button data-tab="doitru" class="${state.tab === "doitru" ? "is-active" : ""}">Đối trừ</button>
+        <button data-tab="einvoice" class="${state.tab === "einvoice" ? "is-active" : ""}">Chưa xuất HĐĐT</button>
       </div>
 
       <div id="npp-tab-body"></div>

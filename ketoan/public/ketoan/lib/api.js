@@ -77,6 +77,7 @@ export const api = {
 
   // Dashboard
   overview: (a) => callMethod(NS + "dashboard.get_overview", withCompany(a)),
+  tasks: (a) => callMethod(NS + "tasks.get_tasks", withCompany(a)),
 
   // Receivables (channel: npp | mt | khac | tat-ca)
   arSummary: (channel, a) => callMethod(NS + "receivables.get_ar_summary", withCompany({ channel: channel || "tat-ca", ...a })),
