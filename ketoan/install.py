@@ -70,27 +70,43 @@ BUSINESS_PERMS = {
         # DocType lương custom — bọc exists khi cấp.
         "SalaryDay": FULL_DOC,
         "SalaryProduct": FULL_DOC,
-        "Employee": ("read", "report"),
+        "Employee": ("read", "report", "print"),
         "Journal Entry": DRAFT_DOC,
+        # Module lương chuẩn (nếu dùng HRMS) — chỉ xem.
+        "Payroll Entry": ("read", "report"),
+        "Salary Slip": ("read", "report", "print"),
+        "Salary Structure": ("read",),
+        "Attendance": ("read", "report"),
+        "GL Entry": ("read", "report"),
+        "Account": ("read",),
     },
     "Ke Toan Hach Toan": {
         "Journal Entry": FULL_DOC,
         "Payment Entry": FULL_DOC,
         "GL Entry": ("read", "report"),
-        "Account": ("read", "report"),
-        "Bank Account": ("read",),
+        "Account": ("read", "report", "print"),
+        "Bank Account": ("read", "write", "create"),
+        "Bank Transaction": ("read", "write", "create", "report"),
+        "Mode of Payment": ("read",),
+        "Cost Center": ("read", "report"),
+        "Fiscal Year": ("read",),
+        "Currency Exchange": ("read",),
+        "Period Closing Voucher": ("read", "report"),
         "Address": ("read",),
         "Contact": ("read",),
         "Customer": ("read", "report"),
         "Supplier": ("read", "report"),
         "Payment Ledger Entry": ("read", "report"),
+        "Sales Invoice": ("read", "report", "print"),
+        "Purchase Invoice": ("read", "report", "print"),
     },
 }
-# Kế toán trưởng = hợp nhất mọi quyền trên.
+# Kế toán trưởng = hợp nhất mọi quyền trên + quyền khóa kỳ.
 _chief: dict = {}
 for _perms in BUSINESS_PERMS.values():
     for _dt, _rights in _perms.items():
         _chief[_dt] = tuple(sorted(set(_chief.get(_dt, ())) | set(_rights)))
+_chief["Period Closing Voucher"] = FULL_DOC
 BUSINESS_PERMS["Ke Toan Truong"] = _chief
 
 # Báo cáo chuẩn ERPNext cần thêm role vào Report.roles mới mở được.
@@ -102,6 +118,10 @@ REPORT_ROLES = {
     "Accounts Payable": ["Ke Toan Mua Hang", "Ke Toan Truong"],
     "Purchase Register": ["Ke Toan Mua Hang", "Ke Toan Truong"],
     "Trial Balance": ["Ke Toan Hach Toan", "Ke Toan Truong"],
+    "Cash Flow": ["Ke Toan Hach Toan", "Ke Toan Truong"],
+    "Balance Sheet": ["Ke Toan Truong"],
+    "Profit and Loss Statement": ["Ke Toan Truong"],
+    "Gross Profit": ["Ke Toan Truong"],
 }
 
 

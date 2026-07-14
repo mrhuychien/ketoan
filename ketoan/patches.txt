@@ -5,3 +5,4 @@ ketoan.patches.v0_0_1.create_portal_roles
 ketoan.patches.v0_0_1.set_portal_defaults
 ketoan.patches.v0_0_2.create_channel_roles
 ketoan.patches.v0_0_2.grant_business_permissions
+ketoan.patches.v0_0_3.regrant_permissions
