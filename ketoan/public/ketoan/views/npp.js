@@ -33,8 +33,11 @@ export async function render({ container, query }) {
     container,
     html`
       <div class="kt-view-head">
-        <div class="kt-view-title"><i class="fas fa-handshake"></i> Đối chiếu công nợ NPP</div>
-        <div class="kt-sub">${data.rows.length} NPP · nhóm "${escapeHtml(data.config.group)}"</div>
+        <div>
+          <div class="kt-view-title"><i class="fas fa-handshake"></i> Đối chiếu công nợ NPP</div>
+          <div class="kt-sub">${data.rows.length} NPP · nhóm "${escapeHtml(data.config.group)}"</div>
+        </div>
+        <a class="kt-btn kt-btn--outline kt-btn--sm" href="#/vt/npp"><i class="fas fa-book-open"></i> Hướng dẫn &amp; lối tắt</a>
       </div>
 
       <div class="kt-stats">
@@ -49,7 +52,7 @@ export async function render({ container, query }) {
       </div>
 
       <div class="kt-segment kt-mb" id="npp-tabs">
-        <button data-tab="debt" class="${state.tab === "debt" ? "is-active" : ""}">Công nợ NPP</button>
+        <button data-tab="debt" class="${state.tab === "debt" ? "is-active" : ""}">Công nợ &amp; chính sách</button>
         <button data-tab="due" class="${state.tab === "due" ? "is-active" : ""}">Đến hạn</button>
         <button data-tab="discount" class="${state.tab === "discount" ? "is-active" : ""}">Chiết khấu</button>
         <button data-tab="trahang" class="${state.tab === "trahang" ? "is-active" : ""}">Trả hàng</button>

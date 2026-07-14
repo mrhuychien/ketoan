@@ -25,6 +25,7 @@ export async function render({ container }) {
         <div class="kt-view-head">
           <div class="kt-view-title"><i class="fas fa-wallet"></i> Sổ quỹ &amp; dòng tiền</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <a class="kt-btn kt-btn--outline kt-btn--sm" href="#/vt/gl"><i class="fas fa-book-open"></i> Hướng dẫn &amp; lối tắt</a>
             <button class="kt-btn kt-btn--outline kt-btn--sm" id="kt-import-bank"><i class="fas fa-file-import"></i> Nhập từ file (sao kê)</button>
             <button class="kt-btn kt-btn--success kt-btn--sm" id="kt-new-cash"><i class="fas fa-plus"></i> Nhập sổ quỹ</button>
           </div>

@@ -1,8 +1,8 @@
-// views/workspace.js — trang 1 NGHIỆP VỤ: Hướng dẫn · KPI trực quan · Thực hiện · Báo cáo · Công cụ.
+// views/workspace.js — trang THAM KHẢO của 1 nghiệp vụ (/vt/:key):
+// Hướng dẫn nghiệp vụ + lối tắt (Thực hiện / Báo cáo / Công cụ).
+// Làm việc thật diễn ra ở trang `home` của workspace — có nút vào thẳng.
 import { html, setHTML } from "../lib/dom.js";
-import { getWorkspace } from "../lib/workspaces.js";
-import { api } from "../lib/api.js";
-import { formatVNDShort } from "../lib/format.js";
+import { getWorkspace, workHome } from "../lib/workspaces.js";
 
 export async function render({ container, params }) {
   const ws = getWorkspace(params.key);
@@ -18,8 +18,11 @@ export async function render({ container, params }) {
     container,
     html`
       <div class="kt-view-head">
-        <div class="kt-view-title"><i class="fas ${ws.icon}"></i> ${ws.label}</div>
-        <div class="kt-sub">${ws.desc}</div>
+        <div>
+          <div class="kt-view-title"><i class="fas ${ws.icon}"></i> ${ws.label} — hướng dẫn &amp; lối tắt</div>
+          <div class="kt-sub">${ws.desc}</div>
+        </div>
+        <a class="kt-btn kt-btn--primary kt-btn--sm" href="#${workHome(ws)}"><i class="fas fa-arrow-right"></i> Vào trang làm việc</a>
       </div>
 
       ${ws.guide && ws.guide.length
@@ -35,8 +38,6 @@ export async function render({ container, params }) {
             </div>
           </div>`
         : ""}
-
-      <div class="kt-stats" id="ws-kpi" style="display:none"></div>
 
       ${actions
         ? html`<div class="kt-card kt-mb">
@@ -70,65 +71,6 @@ export async function render({ container, params }) {
       try { localStorage.setItem(gKey, open ? "open" : "closed"); } catch (_) {}
     });
   }
-
-  loadKpis(ws.key, container.querySelector("#ws-kpi"));
-}
-
-/* ---- KPI trực quan theo nghiệp vụ (best-effort, lỗi thì ẩn) ---- */
-async function loadKpis(key, host) {
-  if (!host) return;
-  let cards = [];
-  try {
-    if (key === "npp" || key === "mt" || key === "travel") {
-      const ch = key === "npp" ? "npp" : key === "mt" ? "mt" : "khac";
-      const a = await api.aging(ch);
-      const overdue = a.buckets.filter((b) => b.key !== "current").reduce((s, b) => s + b.amount, 0);
-      cards.push({ label: "Công nợ kênh", value: formatVNDShort(a.total), cls: "is-grad", go: "#/cong-no/" + ch });
-      cards.push({ label: "Nợ quá hạn", value: formatVNDShort(overdue), cls: overdue > 0 ? "neg" : "pos", go: "#/cong-no/" + ch });
-      if (key === "npp") {
-        try {
-          const c = await api.doitruCases();
-          const pending = (c.counts.cho_hoadon || 0) + (c.counts.cho_duyet || 0);
-          cards.push({ label: "Đối trừ chờ xử lý", value: pending, cls: pending ? "warn" : "pos", go: "#/doi-chieu-npp" });
-        } catch (_) {}
-        try {
-          const e = await api.doitruMissingEinvoice();
-          if (e.supported) cards.push({ label: "Chưa xuất HĐĐT", value: e.rows.length, cls: e.rows.length ? "warn" : "pos", go: "#/doi-chieu-npp" });
-        } catch (_) {}
-      }
-    } else if (key === "purchase") {
-      const a = await api.apAging();
-      const overdue = a.buckets.filter((b) => b.key !== "current").reduce((s, b) => s + b.amount, 0);
-      cards.push({ label: "Còn phải trả", value: formatVNDShort(a.total), cls: "is-grad", go: "#/cong-no-ncc" });
-      cards.push({ label: "Quá hạn trả", value: formatVNDShort(overdue), cls: overdue > 0 ? "neg" : "pos", go: "#/cong-no-ncc" });
-    } else if (key === "gl") {
-      const b = await api.balances();
-      cards.push({ label: "Tổng số dư quỹ", value: formatVNDShort(b.total), cls: b.total < 0 ? "neg" : "is-grad", go: "#/quy" });
-      cards.push({ label: "Số TK tiền", value: b.rows.length, cls: "", go: "#/quy" });
-    } else if (key === "chief") {
-      const o = await api.overview();
-      cards.push({ label: "Tổng công nợ", value: formatVNDShort(o.cards.total_ar), cls: "is-grad", go: "#/cong-no" });
-      cards.push({ label: "Nợ quá hạn", value: formatVNDShort(o.cards.overdue), cls: "neg", go: "#/cong-no" });
-      if (o.cards.cash_total != null) cards.push({ label: "Số dư quỹ", value: formatVNDShort(o.cards.cash_total), cls: o.cards.cash_total < 0 ? "neg" : "pos", go: "#/quy" });
-      cards.push({ label: "Cảnh báo", value: o.alerts.length, cls: o.alerts.length ? "warn" : "pos", go: "#/canh-bao" });
-    }
-  } catch (_) {
-    return; // không có quyền/không dữ liệu → ẩn KPI, không phá trang
-  }
-  if (!cards.length) return;
-  host.style.display = "";
-  setHTML(
-    host,
-    html`${cards.map(
-      (c) => html`<div class="kt-stat is-link" data-go="${c.go || ""}">
-        <div class="kt-stat-label">${c.label}</div>
-        <div class="kt-stat-value ${c.cls || ""}">${c.value}</div>
-      </div>`
-    )}`
-  );
-  host.querySelectorAll("[data-go]").forEach((el) =>
-    el.addEventListener("click", () => { if (el.dataset.go) location.hash = el.dataset.go; })
-  );
 }
 
 function actionBtn(it) {

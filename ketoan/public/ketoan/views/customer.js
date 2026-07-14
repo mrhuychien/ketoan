@@ -3,6 +3,7 @@ import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
 import { formatVND, formatDate, escapeHtml } from "../lib/format.js";
 import { openModal } from "../components/modal.js";
+import { toast } from "../components/toast.js";
 
 const CTX = window.KETOAN_CONTEXT || {};
 const isManager = CTX.isManager;
@@ -24,7 +25,7 @@ export async function render({ container, params }) {
     html`
       <div class="kt-view-head">
         <div class="kt-view-title"><i class="fas fa-id-card-clip"></i> ${d.customer_name || d.customer}</div>
-        <a class="kt-btn kt-btn--outline kt-btn--sm" href="#/cong-no"><i class="fas fa-arrow-left"></i> Công nợ</a>
+        <button class="kt-btn kt-btn--outline kt-btn--sm" id="kt-back"><i class="fas fa-arrow-left"></i> Quay lại</button>
       </div>
 
       <div class="kt-stats">
@@ -62,6 +63,12 @@ export async function render({ container, params }) {
 
   const exportBtn = container.querySelector("#kt-export-recon");
   if (exportBtn) exportBtn.addEventListener("click", () => openReconModal(d));
+
+  // Quay lại trang trước (danh sách công nợ kênh / trang NPP...); không có lịch sử thì về trang chủ.
+  container.querySelector("#kt-back").addEventListener("click", () => {
+    if (history.length > 1) history.back();
+    else location.hash = "#/";
+  });
 
   renderLedger(container.querySelector("#kt-ledger"), d.customer);
   renderCustomerFiles(container, d.customer);
@@ -255,12 +262,19 @@ function openReconModal(d) {
       </div>`,
   });
   m.body.querySelector("#kt-rc-cancel").addEventListener("click", m.close);
-  m.body.querySelector("#kt-rc-go").addEventListener("click", () => {
+  const goBtn = m.body.querySelector("#kt-rc-go");
+  goBtn.addEventListener("click", async () => {
     const f = m.body.querySelector("#kt-rc-from").value;
     const t = m.body.querySelector("#kt-rc-to").value;
-    const url = "/api/method/ketoan.api.npp.export_reconciliation"
-      + `?customer=${q(d.customer)}&from_date=${q(f)}&to_date=${q(t)}&company=${q(CTX.company || "")}`;
-    window.open(url, "_blank");
-    m.close();
+    goBtn.disabled = true;
+    goBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tạo PDF…';
+    try {
+      await api.nppExportRecon(d.customer, f, t);
+      m.close();
+    } catch (e) {
+      toast(e.message, "error");
+      goBtn.disabled = false;
+      goBtn.innerHTML = '<i class="fas fa-download"></i> Tải PDF';
+    }
   });
 }

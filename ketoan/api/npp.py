@@ -19,7 +19,7 @@ from frappe.utils import (
     formatdate, money_in_words, escape_html,
 )
 
-from ketoan.api._guard import guard_npp, resolve_company, get_settings
+from ketoan.api._guard import guard_npp, guard_sales_any, resolve_company, get_settings
 from ketoan.utils import je_remark_field, format_vnd
 
 
@@ -504,11 +504,17 @@ def _render_pdf_download(html: str, filename: str):
 
 @frappe.whitelist()
 def export_reconciliation(customer: str, from_date: str | None = None, to_date: str | None = None, company: str | None = None):
-    """Xuất biên bản đối chiếu công nợ 1 khách ra PDF (download)."""
-    guard_npp()
+    """Xuất biên bản đối chiếu công nợ 1 khách ra PDF (download).
+
+    Mở cho mọi kế toán kênh bán hàng — nhưng khách phải thuộc kênh của mình
+    (dùng chung từ 360° khách: NPP, MT, Du lịch/Khác).
+    """
+    guard_sales_any()
     company = resolve_company(company)
     if not customer or not frappe.db.exists("Customer", customer):
         frappe.throw(_("Khách hàng không tồn tại"))
+    from ketoan.api.receivables import _assert_customer_channel
+    _assert_customer_channel(customer)
     from_date, to_date = (from_date or _recon_default_period(to_date)[0]), (to_date or today())
 
     cfg = _cfg()

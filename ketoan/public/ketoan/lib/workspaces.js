@@ -1,5 +1,8 @@
-// workspaces.js — cấu hình workspace (nghiệp vụ) theo vai trò kế toán.
-// Mỗi workspace: guide (hướng dẫn) + 3 mục Thực hiện / Báo cáo / Công cụ.
+// workspaces.js — cấu hình nghiệp vụ theo vai trò kế toán.
+// `home`: trang LÀM VIỆC chính của vai trò — nav & trang chủ trỏ thẳng vào đây.
+// guide + sections (Thực hiện / Báo cáo / Công cụ) hiển thị ở trang tham khảo
+// /vt/:key ("Hướng dẫn & lối tắt") — mỗi đích chỉ xuất hiện 1 lần, link vào tab
+// thì mang ?tab= để rơi đúng màn hình.
 // item.type: "desk" (href ra /app), "route" (route nội bộ #/...).
 
 const CTX = window.KETOAN_CONTEXT || {};
@@ -27,6 +30,7 @@ export const WORKSPACES = [
     key: "npp",
     label: "Kế toán NPP",
     icon: "fa-handshake",
+    home: "/doi-chieu-npp",
     desc: "Kênh nhà phân phối: đối chiếu công nợ, chính sách thu, chiết khấu",
     guide: [
       "Hàng đi: lập Sales Invoice cho NPP; điền số hóa đơn điện tử (vn_einvoice_number). Chưa điền = chưa xuất HĐ — theo dõi ở tab 'Chưa xuất HĐĐT'.",
@@ -38,17 +42,16 @@ export const WORKSPACES = [
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
         { label: "Hóa đơn bán hàng (Sales Invoice)", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice" },
-        { label: "Sổ cái (General Ledger)", icon: "fa-book", type: "desk", href: glUrl() },
+        { label: "Sổ cái (General Ledger, 30 ngày)", icon: "fa-book", type: "desk", href: glUrl() },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
-        { label: "Đối chiếu công nợ NPP (chính sách thường/Tết)", icon: "fa-handshake", type: "route", route: "/doi-chieu-npp" },
         { label: "Công nợ kênh NPP + tuổi nợ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no/npp" },
         { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/app/accounts-receivable" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
-        { label: "Chiết khấu 2% theo doanh số tháng", icon: "fa-percent", type: "route", route: "/doi-chieu-npp" },
-        { label: "Nhắc nợ Zalo / đến hạn", icon: "fa-comment-dots", type: "route", route: "/doi-chieu-npp" },
-        { label: "Xuất biên bản đối chiếu (PDF)", icon: "fa-file-pdf", type: "route", route: "/cong-no/npp" },
+        { label: "Chiết khấu theo doanh số tháng", icon: "fa-percent", type: "route", route: "/doi-chieu-npp?tab=discount" },
+        { label: "Nhắc nợ Zalo / đến hạn", icon: "fa-comment-dots", type: "route", route: "/doi-chieu-npp?tab=due" },
+        { label: "Xuất biên bản đối chiếu (PDF)", icon: "fa-file-pdf", type: "route", route: "/doi-chieu-npp?tab=debt" },
         { label: "Tìm khách → 360°", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
       ]},
     ],
@@ -57,11 +60,12 @@ export const WORKSPACES = [
     key: "mt",
     label: "Kế toán MT",
     icon: "fa-store",
+    home: "/cong-no/mt",
     desc: "Kênh MT (siêu thị/hiện đại): công nợ, đối chiếu, thu tiền",
     guide: [
       "Hàng đi: lập Sales Invoice cho khách MT; điền số hóa đơn điện tử khi phát hành.",
       "Thu tiền: Payment Entry gắn khách; theo dõi công nợ + tuổi nợ kênh MT.",
-      "Đối chiếu: xuất biên bản đối chiếu công nợ (PDF) gửi siêu thị định kỳ.",
+      "Đối chiếu: tìm khách trong Tiện ích → vào 360° khách → Xuất đối chiếu (PDF) gửi siêu thị định kỳ.",
     ],
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
@@ -75,8 +79,7 @@ export const WORKSPACES = [
         { label: "Sales Register", icon: "fa-table", type: "desk", href: "/app/query-report/Sales Register" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
-        { label: "Xuất biên bản đối chiếu (PDF)", icon: "fa-file-pdf", type: "route", route: "/cong-no/mt" },
-        { label: "Tìm khách → 360°", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
+        { label: "Tìm khách → 360° · xuất đối chiếu PDF", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
       ]},
     ],
   },
@@ -84,11 +87,12 @@ export const WORKSPACES = [
     key: "travel",
     label: "Kế toán Du lịch, Khác",
     icon: "fa-umbrella-beach",
+    home: "/cong-no/khac",
     desc: "Kênh du lịch & khách lẻ/khác: công nợ, thu tiền",
     guide: [
       "Hàng đi: lập Sales Invoice; điền số hóa đơn điện tử khi phát hành.",
       "Thu tiền: Payment Entry gắn khách; theo dõi công nợ + tuổi nợ kênh.",
-      "Đối chiếu: xuất biên bản đối chiếu công nợ (PDF) khi khách yêu cầu.",
+      "Đối chiếu: tìm khách trong Tiện ích → vào 360° khách → Xuất đối chiếu (PDF) khi khách yêu cầu.",
     ],
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
@@ -101,8 +105,7 @@ export const WORKSPACES = [
         { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/app/accounts-receivable" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
-        { label: "Xuất biên bản đối chiếu (PDF)", icon: "fa-file-pdf", type: "route", route: "/cong-no/khac" },
-        { label: "Tìm khách → 360°", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
+        { label: "Tìm khách → 360° · xuất đối chiếu PDF", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
       ]},
     ],
   },
@@ -110,6 +113,7 @@ export const WORKSPACES = [
     key: "purchase",
     label: "Kế toán mua hàng",
     icon: "fa-truck-field",
+    home: "/cong-no-ncc",
     desc: "Công nợ phải trả, hóa đơn NCC, thanh toán mua hàng",
     guide: [
       "Nhận hóa đơn NCC → tạo Purchase Invoice, LUÔN điền số hóa đơn NCC (bill_no) để hệ thống dò trùng.",
@@ -131,8 +135,8 @@ export const WORKSPACES = [
         { label: "Sổ chi tiết NCC", icon: "fa-book", type: "desk", href: "/app/general-ledger?party_type=Supplier" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
-        { label: "Lịch thanh toán đến hạn", icon: "fa-calendar-days", type: "route", route: "/cong-no-ncc" },
-        { label: "Kiểm soát: trùng HĐ NCC + khớp 3 chiều", icon: "fa-shield-halved", type: "route", route: "/cong-no-ncc" },
+        { label: "Lịch thanh toán đến hạn", icon: "fa-calendar-days", type: "route", route: "/cong-no-ncc?tab=due" },
+        { label: "Kiểm soát: trùng HĐ NCC + khớp 3 chiều", icon: "fa-shield-halved", type: "route", route: "/cong-no-ncc?tab=control" },
         { label: "Hóa đơn NCC chờ thanh toán (Desk)", icon: "fa-clock", type: "desk", href: "/app/purchase-invoice?status=Unpaid" },
       ]},
     ],
@@ -141,6 +145,7 @@ export const WORKSPACES = [
     key: "payroll",
     label: "Kế toán tiền lương",
     icon: "fa-money-check-dollar",
+    home: "/luong",
     desc: "Tính lương, duyệt phiếu lương, xuất bảng lương",
     guide: [
       "Trong kỳ: nhập phiếu công nhật (SalaryDay) và công khoán (SalaryProduct) dạng nháp.",
@@ -166,6 +171,7 @@ export const WORKSPACES = [
     key: "gl",
     label: "Kế toán hạch toán",
     icon: "fa-book",
+    home: "/quy",
     desc: "Quỹ tiền mặt & ngân hàng, bút toán, sổ cái",
     guide: [
       "Nhập sổ quỹ: phiếu thu/chi tiền mặt tạo NHÁP từ portal (kèm QR VietQR nếu chuyển khoản).",
@@ -176,11 +182,10 @@ export const WORKSPACES = [
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
         { label: "Bút toán (Journal Entry)", icon: "fa-pen-to-square", type: "desk", href: "/app/journal-entry/new" },
-        { label: "Nhập sổ quỹ nhanh", icon: "fa-money-bill-wave", type: "route", route: "/quy" },
+        { label: "Sổ quỹ & nhập phiếu thu chi", icon: "fa-wallet", type: "route", route: "/quy" },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
-        { label: "Sổ quỹ & dòng tiền", icon: "fa-wallet", type: "route", route: "/quy" },
-        { label: "Sổ cái (General Ledger)", icon: "fa-book", type: "desk", href: "/app/general-ledger" },
+        { label: "Sổ cái (General Ledger, 30 ngày)", icon: "fa-book", type: "desk", href: glUrl() },
         { label: "Bảng cân đối (Trial Balance)", icon: "fa-scale-balanced", type: "desk", href: "/app/query-report/Trial Balance" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
@@ -193,27 +198,25 @@ export const WORKSPACES = [
     key: "chief",
     label: "Kế toán trưởng",
     icon: "fa-user-tie",
-    desc: "Tổng quan toàn phòng, cảnh báo, cấu hình",
+    home: "/dashboard",
+    desc: "Tổng quan toàn phòng, duyệt hồ sơ, cảnh báo, cấu hình",
     guide: [
       "Mỗi sáng: xem Dashboard tổng hợp + Trung tâm cảnh báo (vượt hạn mức, quá hạn, khoản thu treo, quỹ âm).",
       "Duyệt hồ sơ đối trừ 'Chờ KTT duyệt' (trả hàng/chiết khấu đã đính kèm hóa đơn NPP) — submit để trừ công nợ.",
       "Phân quyền vai trò kế toán cho tài khoản (1 người nhiều vai trò).",
       "Cấu hình ngưỡng: tuổi nợ, chiết khấu, nhóm khách kênh... trong Ketoan Portal Settings.",
+      "Bàn làm việc của từng vai trò nằm ngay trên thanh điều hướng — bấm là vào thẳng.",
     ],
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
-        { label: "Bàn Kế toán NPP", icon: "fa-handshake", type: "route", route: "/vt/npp" },
-        { label: "Bàn Kế toán MT", icon: "fa-store", type: "route", route: "/vt/mt" },
-        { label: "Bàn Kế toán Du lịch, Khác", icon: "fa-umbrella-beach", type: "route", route: "/vt/travel" },
-        { label: "Bàn mua hàng", icon: "fa-truck-field", type: "route", route: "/vt/purchase" },
-        { label: "Bàn tiền lương", icon: "fa-money-check-dollar", type: "route", route: "/vt/payroll" },
-        { label: "Bàn hạch toán", icon: "fa-book", type: "route", route: "/vt/gl" },
+        { label: "Duyệt trả hàng NPP (chờ KTT)", icon: "fa-rotate-left", type: "route", route: "/doi-chieu-npp?tab=trahang" },
+        { label: "Duyệt bút toán JE (chờ KTT)", icon: "fa-stamp", type: "route", route: "/doi-chieu-npp?tab=butoan" },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
         { label: "Dashboard tổng hợp", icon: "fa-gauge-high", type: "route", route: "/dashboard" },
         { label: "Công nợ phải thu toàn bộ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no" },
         { label: "Trung tâm cảnh báo", icon: "fa-triangle-exclamation", type: "route", route: "/canh-bao" },
-        { label: "Sổ cái", icon: "fa-book", type: "desk", href: "/app/general-ledger" },
+        { label: "Sổ cái (General Ledger, 30 ngày)", icon: "fa-book", type: "desk", href: glUrl() },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
         { label: "Phân quyền vai trò kế toán", icon: "fa-user-shield", type: "route", route: "/phan-quyen" },
@@ -232,4 +235,9 @@ export function getWorkspace(key) {
 export function myWorkspaces() {
   const allowed = (window.KETOAN_CONTEXT && window.KETOAN_CONTEXT.workspaces) || [];
   return WORKSPACES.filter((w) => allowed.includes(w.key));
+}
+
+// Trang làm việc chính của 1 workspace (fallback về trang tham khảo /vt/:key).
+export function workHome(w) {
+  return w.home || "/vt/" + w.key;
 }

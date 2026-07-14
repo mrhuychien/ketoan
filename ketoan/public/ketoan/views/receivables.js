@@ -5,6 +5,8 @@ import { formatVND, formatVNDShort, escapeHtml } from "../lib/format.js";
 import { navigate } from "../lib/router.js";
 
 const CHANNEL_LABEL = { npp: "kênh NPP", mt: "kênh MT", khac: "kênh Du lịch, Khác", "tat-ca": "toàn bộ" };
+// Kênh → workspace có trang "Hướng dẫn & lối tắt" tương ứng.
+const CHANNEL_HELP = { npp: "npp", mt: "mt", khac: "travel" };
 
 export async function render({ container, params }) {
   const channel = (params && params.channel) || "tat-ca";
@@ -24,8 +26,13 @@ export async function render({ container, params }) {
     container,
     html`
       <div class="kt-view-head">
-        <div class="kt-view-title"><i class="fas fa-file-invoice-dollar"></i> Công nợ phải thu — ${CHANNEL_LABEL[channel] || channel}</div>
-        <div class="kt-sub">${summary.count} khách · tổng ${formatVND(summary.total)}</div>
+        <div>
+          <div class="kt-view-title"><i class="fas fa-file-invoice-dollar"></i> Công nợ phải thu — ${CHANNEL_LABEL[channel] || channel}</div>
+          <div class="kt-sub">${summary.count} khách · tổng ${formatVND(summary.total)}</div>
+        </div>
+        ${CHANNEL_HELP[channel]
+          ? html`<a class="kt-btn kt-btn--outline kt-btn--sm" href="#/vt/${CHANNEL_HELP[channel]}"><i class="fas fa-book-open"></i> Hướng dẫn &amp; lối tắt</a>`
+          : ""}
       </div>
 
       <div class="kt-card kt-mb">

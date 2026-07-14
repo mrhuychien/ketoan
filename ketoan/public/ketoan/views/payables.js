@@ -25,8 +25,11 @@ export async function render({ container, query }) {
     container,
     html`
       <div class="kt-view-head">
-        <div class="kt-view-title"><i class="fas fa-truck-field"></i> Công nợ phải trả</div>
-        <div class="kt-sub">${summary.count} NCC · tổng ${formatVND(summary.total)}</div>
+        <div>
+          <div class="kt-view-title"><i class="fas fa-truck-field"></i> Công nợ phải trả</div>
+          <div class="kt-sub">${summary.count} NCC · tổng ${formatVND(summary.total)}</div>
+        </div>
+        <a class="kt-btn kt-btn--outline kt-btn--sm" href="#/vt/purchase"><i class="fas fa-book-open"></i> Hướng dẫn &amp; lối tắt</a>
       </div>
 
       <div class="kt-card kt-mb">

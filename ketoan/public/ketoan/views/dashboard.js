@@ -24,8 +24,11 @@ export async function render({ container }) {
     container,
     html`
       <div class="kt-view-head">
-        <div class="kt-view-title"><i class="fas fa-gauge-high"></i> Tổng quan hôm nay</div>
-        <div class="kt-sub">Cập nhật ${escapeHtml(d.as_of)} · ${escapeHtml(d.company)}</div>
+        <div>
+          <div class="kt-view-title"><i class="fas fa-gauge-high"></i> Tổng quan hôm nay</div>
+          <div class="kt-sub">Cập nhật ${escapeHtml(d.as_of)} · ${escapeHtml(d.company)}</div>
+        </div>
+        <a class="kt-btn kt-btn--outline kt-btn--sm" href="#/vt/chief"><i class="fas fa-book-open"></i> Hướng dẫn &amp; lối tắt</a>
       </div>
 
       <div class="kt-stats">

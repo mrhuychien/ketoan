@@ -2,7 +2,7 @@
 import { parseHash, matchRoute, navigate } from "./lib/router.js";
 import { html, setHTML } from "./lib/dom.js";
 import { toast } from "./components/toast.js";
-import { myWorkspaces, getWorkspace } from "./lib/workspaces.js";
+import { myWorkspaces, workHome } from "./lib/workspaces.js";
 
 const CTX = window.KETOAN_CONTEXT || {};
 const BASE = "/assets/ketoan/ketoan";
@@ -15,7 +15,7 @@ const hasCap = (cap) => !cap || !!CAPS[cap];
 // route → view. `cap`: capability cần có. `ws`: workspace để highlight nav.
 const ROUTES = [
   { pattern: "/", view: "views/home.js", title: "Trang chủ" },
-  { pattern: "/vt/:key", view: "views/workspace.js", title: "Workspace" },
+  { pattern: "/vt/:key", view: "views/workspace.js", title: "Hướng dẫn & lối tắt" },
   { pattern: "/dashboard", view: "views/dashboard.js", cap: "chief", ws: "chief", title: "Tổng quan" },
   { pattern: "/phan-quyen", view: "views/roles.js", cap: "chief", ws: "chief", title: "Phân quyền" },
   { pattern: "/canh-bao", view: "views/alerts.js", cap: "chief", ws: "chief", title: "Cảnh báo" },
@@ -58,7 +58,7 @@ function renderShell() {
         <nav class="kt-nav" id="kt-nav">
           <a class="kt-nav-item" data-nav="home" href="#/"><i class="fas fa-house"></i><span>Trang chủ</span></a>
           ${NAV_WS.map(
-            (w) => html`<a class="kt-nav-item" data-nav="${w.key}" href="#/vt/${w.key}"><i class="fas ${w.icon}"></i><span>${w.label}</span></a>`
+            (w) => html`<a class="kt-nav-item" data-nav="${w.key}" href="#${workHome(w)}"><i class="fas ${w.icon}"></i><span>${w.label}</span></a>`
           )}
         </nav>
         <main class="kt-main" id="kt-view"><div class="kt-boot"><div class="kt-spinner"></div></div></main>
@@ -87,7 +87,7 @@ async function route() {
   }
 
   // Capability của route; /vt/:key → key workspace; /cong-no/:channel → theo kênh.
-  const CHANNEL_CAP = { npp: "npp", mt: "mt", khac: "travel", "tat-ca": "chief" };
+  const CHANNEL_CAP = { npp: "npp", mt: "mt", khac: "travel" };
   let cap = matched.route.cap;
   if (matched.route.pattern === "/vt/:key") cap = matched.params.key;
   else if (matched.route.capFromChannel) cap = CHANNEL_CAP[matched.params.channel] || "chief";
@@ -98,7 +98,7 @@ async function route() {
   }
 
   // Highlight nav theo workspace của route.
-  const CHANNEL_WS = { npp: "npp", mt: "mt", khac: "travel", "tat-ca": "chief" };
+  const CHANNEL_WS = { npp: "npp", mt: "mt", khac: "travel" };
   let navKey = matched.route.ws;
   if (path === "/") navKey = "home";
   else if (matched.route.pattern === "/vt/:key") navKey = matched.params.key;

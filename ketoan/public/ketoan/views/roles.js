@@ -7,7 +7,7 @@ export async function render({ container }) {
   setHTML(container, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
   let data;
   try {
-    data = await api.call("ketoan.api.users.get_users", {});
+    data = await api.usersList();
   } catch (e) {
     setHTML(container, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
     return;
@@ -86,7 +86,7 @@ export async function render({ container }) {
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
         try {
-          const res = await api.call("ketoan.api.users.set_roles", { user, roles: JSON.stringify(picked) });
+          const res = await api.usersSetRoles(user, picked);
           const u = data.users.find((x) => x.name === user);
           if (u) u.roles = res.roles;
           toast(`Đã lưu quyền cho ${user}`, "success");

@@ -84,7 +84,6 @@ export const api = {
   aging: (channel, a) => callMethod(NS + "receivables.get_aging", withCompany({ channel: channel || "tat-ca", ...a })),
   customerDetail: (customer, a) => callMethod(NS + "receivables.get_customer_detail", withCompany({ customer, ...a })),
   customerLedger: (customer, a) => callMethod(NS + "receivables.get_customer_ledger", withCompany({ customer, ...a })),
-  dso: (a) => callMethod(NS + "receivables.get_dso", withCompany(a)),
 
   // Cash
   balances: (a) => callMethod(NS + "cash.get_balances", withCompany(a)),
@@ -103,6 +102,7 @@ export const api = {
   nppDiscountEligible: (month, a) => callMethod(NS + "npp.get_discount_eligible", withCompany({ month, ...a })),
   nppCreateDiscount: (customers, month, a) => callMethod(NS + "npp.create_discount_entries", withCompany({ customers: JSON.stringify(customers), month, ...a })),
   nppExportBulk: (customers, from_date, to_date) => downloadPost(NS + "npp.export_reconciliation_bulk", withCompany({ customers: JSON.stringify(customers), from_date, to_date })),
+  nppExportRecon: (customer, from_date, to_date) => downloadPost(NS + "npp.export_reconciliation", withCompany({ customer, from_date, to_date })),
 
   // Đối trừ công nợ NPP
   doitruCases: (a) => callMethod(NS + "doitru.get_cases", withCompany(a)),
@@ -116,6 +116,10 @@ export const api = {
 
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
+
+  // Phân quyền user (chief)
+  usersList: () => callMethod(NS + "users.get_users", {}),
+  usersSetRoles: (user, roles) => callMethod(NS + "users.set_roles", { user, roles: JSON.stringify(roles) }),
 
   // Cashbook
   cashbookOptions: (a) => callMethod(NS + "cashbook.get_form_options", withCompany(a)),

@@ -1,6 +1,7 @@
-// views/home.js — trang chủ: VIỆC CẦN XỬ LÝ (nhóm theo nghiệp vụ) + danh mục nghiệp vụ.
+// views/home.js — trang chủ gọn: VIỆC CẦN XỬ LÝ (nhóm theo nghiệp vụ)
+// + dãy nút vào thẳng bàn làm việc của từng vai trò (kèm nút hướng dẫn nhỏ).
 import { html, setHTML } from "../lib/dom.js";
-import { myWorkspaces } from "../lib/workspaces.js";
+import { myWorkspaces, workHome } from "../lib/workspaces.js";
 import { api } from "../lib/api.js";
 
 const CTX = window.KETOAN_CONTEXT || {};
@@ -20,23 +21,23 @@ export async function render({ container }) {
     html`
       <div class="kt-view-head">
         <div class="kt-view-title"><i class="fas fa-house"></i> Xin chào, ${CTX.fullName || CTX.user || ""}</div>
-        <div class="kt-sub">Việc cần xử lý hôm nay + các nghiệp vụ của bạn</div>
+        <div class="kt-sub">Việc cần xử lý hôm nay + bàn làm việc của bạn</div>
       </div>
 
       <div id="home-tasks" class="kt-mb"><div class="kt-boot"><div class="kt-spinner"></div><p>Đang tổng hợp việc cần xử lý…</p></div></div>
 
       <div class="kt-view-head" style="margin-top:8px">
-        <div class="kt-view-title" style="font-size:15px"><i class="fas fa-layer-group"></i> Nghiệp vụ</div>
+        <div class="kt-view-title" style="font-size:15px"><i class="fas fa-briefcase"></i> Bàn làm việc</div>
       </div>
-      <div class="kt-ws-grid">
+      <div class="kt-home-roles">
         ${list.map(
-          (w) => html`<a class="kt-ws-card" href="#/vt/${w.key}">
-            <div class="kt-ws-ico"><i class="fas ${w.icon}"></i></div>
-            <div class="kt-ws-name">${w.label}</div>
-            <div class="kt-ws-desc">${w.desc}</div>
-            ${w.guide && w.guide.length ? html`<div class="kt-ws-meta"><i class="fas fa-book-open"></i> ${w.guide.length} bước hướng dẫn</div>` : ""}
-            <div class="kt-ws-go"><i class="fas fa-arrow-right"></i></div>
-          </a>`
+          (w) => html`<div class="kt-home-role">
+            <a class="kt-home-role-main" href="#${workHome(w)}">
+              <i class="fas ${w.icon}"></i><span>${w.label}</span>
+              <i class="fas fa-arrow-right kt-home-role-go"></i>
+            </a>
+            <a class="kt-home-role-help" href="#/vt/${w.key}" title="Hướng dẫn & lối tắt — ${w.label}"><i class="fas fa-book-open"></i></a>
+          </div>`
         )}
       </div>
     `

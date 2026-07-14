@@ -75,7 +75,7 @@ const HTML = `
 <div id="lpay-app"><div class="lpay-wrap">
   <header class="lpay-head">
     <h1 class="lpay-title">Tính lương tháng</h1>
-    <p class="lpay-sub">Quét &amp; duyệt phiếu lương, xuất Excel &amp; in PDF theo kỳ</p>
+    <p class="lpay-sub">Quét &amp; duyệt phiếu lương, xuất Excel &amp; in PDF theo kỳ · <a href="#/vt/payroll">Hướng dẫn &amp; lối tắt</a></p>
   </header>
   <section class="lpay-panel">
     <div class="lpay-period">
