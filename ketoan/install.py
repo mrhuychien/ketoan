@@ -109,6 +109,23 @@ for _perms in BUSINESS_PERMS.values():
 _chief["Period Closing Voucher"] = FULL_DOC
 BUSINESS_PERMS["Ke Toan Truong"] = _chief
 
+# Quyền NỀN Desk — cấp cho MỌI vai trò kế toán: không có thì Desk chặn ngay khi
+# mở trang ("không có quyền truy cập doctype ... tài liệu Trang/Page").
+BASELINE_DESK_PERMS = {
+    "Page": ("read",),            # mở các trang Desk
+    "Report": ("read",),          # mở màn báo cáo
+    "Company": ("read",),         # filter công ty
+    "Currency": ("read",),
+    "Fiscal Year": ("read",),
+    "Print Format": ("read",),    # in chứng từ
+    "Letter Head": ("read",),
+    "Terms and Conditions": ("read",),
+    "File": ("read", "write", "create"),  # đính kèm chứng từ
+    "UOM": ("read",),
+    "Territory": ("read",),
+    "Warehouse": ("read",),
+}
+
 # Báo cáo chuẩn ERPNext cần thêm role vào Report.roles mới mở được.
 REPORT_ROLES = {
     "General Ledger": ["Ke Toan NPP", "Ke Toan MT", "Ke Toan Du Lich", "Ke Toan Mua Hang", "Ke Toan Hach Toan", "Ke Toan Truong"],
@@ -165,18 +182,26 @@ def grant_business_permissions():
     """
     from frappe.permissions import add_permission, update_permission_property
 
+    def grant(role, doctype, rights):
+        try:
+            if not frappe.db.exists("DocType", doctype):
+                return
+            add_permission(doctype, role, 0)
+            for right in rights:
+                if right == "read":
+                    continue  # add_permission đã set read
+                update_permission_property(doctype, role, 0, right, 1)
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), f"ketoan perms: {role} @ {doctype}")
+
     for role, doc_perms in BUSINESS_PERMS.items():
         for doctype, rights in doc_perms.items():
-            try:
-                if not frappe.db.exists("DocType", doctype):
-                    continue
-                add_permission(doctype, role, 0)
-                for right in rights:
-                    if right == "read":
-                        continue  # add_permission đã set read
-                    update_permission_property(doctype, role, 0, right, 1)
-            except Exception:
-                frappe.log_error(frappe.get_traceback(), f"ketoan perms: {role} @ {doctype}")
+            grant(role, doctype, rights)
+
+    # Quyền nền Desk cho mọi vai trò.
+    for role in PORTAL_ROLES:
+        for doctype, rights in BASELINE_DESK_PERMS.items():
+            grant(role, doctype, rights)
 
     _grant_report_roles()
 
