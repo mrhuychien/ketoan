@@ -83,6 +83,7 @@ export const api = {
   arSummary: (channel, a) => callMethod(NS + "receivables.get_ar_summary", withCompany({ channel: channel || "tat-ca", ...a })),
   aging: (channel, a) => callMethod(NS + "receivables.get_aging", withCompany({ channel: channel || "tat-ca", ...a })),
   customerDetail: (customer, a) => callMethod(NS + "receivables.get_customer_detail", withCompany({ customer, ...a })),
+  customerLedger: (customer, a) => callMethod(NS + "receivables.get_customer_ledger", withCompany({ customer, ...a })),
   dso: (a) => callMethod(NS + "receivables.get_dso", withCompany(a)),
 
   // Cash

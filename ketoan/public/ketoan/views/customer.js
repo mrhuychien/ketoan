@@ -56,32 +56,90 @@ export async function render({ container, params }) {
         </div>
       </div>
 
-      <div class="kt-card">
-        <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-file-invoice"></i> Hóa đơn còn nợ (${d.invoices.length})</div></div>
-        <div class="kt-card-body">
-          <div class="kt-table-wrap"><table class="kt-table">
-            <thead><tr><th>Số HĐ</th><th>Ngày</th><th>Hạn TT</th><th class="num">Tổng</th><th class="num">Còn nợ</th><th>Tuổi nợ</th><th></th></tr></thead>
-            <tbody>
-              ${d.invoices.map(
-                (i) => html`<tr>
-                  <td>${i.name}</td><td>${formatDate(i.posting_date)}</td><td>${formatDate(i.due_date)}</td>
-                  <td class="num">${formatVND(i.grand_total)}</td><td class="num danger">${formatVND(i.outstanding_amount)}</td>
-                  <td>${i.days_overdue > 0 ? html`<span class="kt-badge kt-badge--red">quá ${i.days_overdue}n</span>` : html`<span class="kt-badge kt-badge--green">trong hạn</span>`}</td>
-                  <td class="num"><a class="kt-btn-icon" target="_blank" href="/app/sales-invoice/${q(i.name)}"><i class="fas fa-up-right-from-square"></i></a></td>
-                </tr>`
-              )}
-            </tbody>
-          </table></div>
-          ${d.invoices.length === 0 ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i><p>Không còn hóa đơn nợ</p></div>` : ""}
-        </div>
-      </div>
+      <div id="kt-ledger"></div>
     `
   );
 
   const exportBtn = container.querySelector("#kt-export-recon");
   if (exportBtn) exportBtn.addEventListener("click", () => openReconModal(d));
 
+  renderLedger(container.querySelector("#kt-ledger"), d.customer);
   renderCustomerFiles(container, d.customer);
+}
+
+/* ---- Sổ cái giao dịch + việc cần làm gắn từng chứng từ ---- */
+const LEDGER_PERIODS = [
+  { key: "90d", label: "90 ngày" },
+  { key: "ytd", label: "Năm nay" },
+  { key: "all", label: "Tất cả" },
+];
+
+function ledgerFrom(key) {
+  const t = new Date();
+  if (key === "90d") { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().slice(0, 10); }
+  if (key === "ytd") return t.getFullYear() + "-01-01";
+  return null;
+}
+
+async function renderLedger(host, customer, period = "ytd") {
+  setHTML(host, html`<div class="kt-card"><div class="kt-card-body"><div class="kt-spinner" style="width:26px;height:26px"></div></div></div>`);
+  let d;
+  try {
+    d = await api.customerLedger(customer, { from_date: ledgerFrom(period) });
+  } catch (e) {
+    setHTML(host, html`<div class="kt-card"><div class="kt-card-body kt-sub">${e.message}</div></div>`);
+    return;
+  }
+
+  setHTML(
+    host,
+    html`
+      <div class="kt-card">
+        <div class="kt-card-head">
+          <div class="kt-card-title"><i class="fas fa-book"></i> Giao dịch của khách (sổ cái)</div>
+          <div class="kt-segment" id="lg-period">
+            ${LEDGER_PERIODS.map((p) => html`<button data-p="${p.key}" class="${p.key === period ? "is-active" : ""}">${p.label}</button>`)}
+          </div>
+        </div>
+        <div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Ngày</th><th>Chứng từ</th><th class="num">Nợ (bán)</th><th class="num">Có (thu/giảm)</th><th class="num">Số dư</th><th>Việc cần làm</th><th></th></tr></thead>
+            <tbody>
+              ${d.from_date ? html`<tr class="kt-lg-open"><td>${formatDate(d.from_date)}</td><td><b>Dư đầu kỳ</b></td><td class="num"></td><td class="num"></td><td class="num"><b>${formatVND(d.opening)}</b></td><td></td><td></td></tr>` : ""}
+              ${d.rows.map((r) => ledgerRow(r))}
+              <tr class="kt-lg-total"><td></td><td><b>Cộng phát sinh</b></td>
+                <td class="num"><b>${formatVND(d.total_debit)}</b></td>
+                <td class="num"><b>${formatVND(d.total_credit)}</b></td>
+                <td class="num"><b>${formatVND(d.closing)}</b></td><td></td><td></td></tr>
+              ${d.drafts.length ? html`<tr><td colspan="7" style="background:var(--kt-bg-input);font-weight:700;font-size:11px;text-transform:uppercase;color:var(--kt-text-2)">Chứng từ nháp đang xử lý (chưa vào số dư)</td></tr>` : ""}
+              ${d.drafts.map((r) => ledgerRow(r))}
+            </tbody>
+          </table></div>
+          ${d.rows.length === 0 && !d.drafts.length ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có giao dịch trong kỳ</p></div>` : ""}
+        </div>
+      </div>
+    `
+  );
+
+  host.querySelector("#lg-period").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-p]");
+    if (b) renderLedger(host, customer, b.dataset.p);
+  });
+}
+
+function ledgerRow(r) {
+  const draft = r.docstatus === 0;
+  return html`<tr style="${draft ? "opacity:.85;background:#fffbeb" : ""}">
+    <td>${formatDate(r.posting_date)}</td>
+    <td>${r.voucher_no}<br><span class="kt-sub">${r.voucher_type}${draft ? html` <span class="kt-badge kt-badge--yellow">NHÁP</span>` : ""}</span></td>
+    <td class="num">${r.debit ? formatVND(r.debit) : ""}</td>
+    <td class="num">${r.credit ? formatVND(r.credit) : ""}</td>
+    <td class="num">${r.balance == null ? "—" : formatVND(r.balance)}</td>
+    <td>${(r.todos || []).length
+      ? (r.todos || []).map((td) => html`<span class="kt-badge kt-badge--${td.sev === "red" ? "red" : "yellow"}" style="margin:1px 2px 1px 0"><i class="fas ${td.icon}"></i> ${td.label}</span>`)
+      : html`<span class="kt-badge kt-badge--green"><i class="fas fa-check"></i> OK</span>`}</td>
+    <td class="num"><a class="kt-btn-icon" target="_blank" href="${r.route}" title="Mở trong ERPNext"><i class="fas fa-up-right-from-square"></i></a></td>
+  </tr>`;
 }
 
 // Khối "Việc cần xử lý với khách này" — nhóm theo nghiệp vụ.
