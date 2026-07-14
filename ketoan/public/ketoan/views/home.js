@@ -25,7 +25,7 @@ export async function render({ container }) {
     html`
       <div class="kt-view-head">
         <div class="kt-view-title"><i class="fas fa-house"></i> Xin chào, ${CTX.fullName || CTX.user || ""}</div>
-        <div class="kt-sub">Chọn bàn làm việc theo vai trò</div>
+        <div class="kt-sub">Chọn nghiệp vụ để xem hướng dẫn, thực hiện, báo cáo và công cụ</div>
       </div>
       <div class="kt-ws-grid">
         ${list.map(
@@ -33,6 +33,7 @@ export async function render({ container }) {
             <div class="kt-ws-ico"><i class="fas ${w.icon}"></i></div>
             <div class="kt-ws-name">${w.label}</div>
             <div class="kt-ws-desc">${w.desc}</div>
+            ${w.guide && w.guide.length ? html`<div class="kt-ws-meta"><i class="fas fa-book-open"></i> ${w.guide.length} bước hướng dẫn</div>` : ""}
             <div class="kt-ws-go"><i class="fas fa-arrow-right"></i></div>
           </a>`
         )}

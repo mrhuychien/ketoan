@@ -8,8 +8,15 @@ export const WORKSPACES = [
     label: "Kế toán NPP",
     icon: "fa-handshake",
     desc: "Kênh nhà phân phối: đối chiếu công nợ, chính sách thu, chiết khấu",
+    guide: [
+      "Hàng đi: lập Sales Invoice cho NPP; điền số hóa đơn điện tử (vn_einvoice_number). Chưa điền = chưa xuất HĐ — theo dõi ở tab 'Chưa xuất HĐĐT'.",
+      "Thu tiền: ghi nhận bằng Payment Entry; theo dõi khoản đến hạn/quá hạn ở tab 'Đến hạn' (ngày 5 & 20; mùa Tết cho nợ 50% HĐ từ 1/11) và nhắc nợ Zalo.",
+      "Trả hàng: bấm '+ Trả hàng' (tab Đối trừ) tạo hóa đơn trả về NHÁP → chờ NPP xuất hóa đơn → đính kèm vào chứng từ → KTT duyệt để trừ công nợ.",
+      "Chiết khấu/KM: tab 'Chiết khấu' kiểm tra doanh số tháng ≥ ngưỡng → tạo JE nháp → đính kèm hóa đơn NPP → KTT duyệt.",
+      "Hồ sơ NPP: hợp đồng, phụ lục thương mại, ĐKKD upload trong 360° khách (khối Hồ sơ khách hàng).",
+    ],
     sections: [
-      { title: "Tác nghiệp", icon: "fa-bolt", items: [
+      { title: "Thực hiện", icon: "fa-bolt", items: [
         { label: "Lập hóa đơn bán", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice/new" },
         { label: "Phiếu thu tiền", icon: "fa-money-bill-wave", type: "desk", href: "/app/payment-entry/new" },
         { label: "Khách hàng NPP", icon: "fa-users", type: "desk", href: "/app/customer?customer_group=NPP" },
@@ -32,8 +39,13 @@ export const WORKSPACES = [
     label: "Kế toán MT",
     icon: "fa-store",
     desc: "Kênh MT (siêu thị/hiện đại): công nợ, đối chiếu, thu tiền",
+    guide: [
+      "Hàng đi: lập Sales Invoice cho khách MT; điền số hóa đơn điện tử khi phát hành.",
+      "Thu tiền: Payment Entry gắn khách; theo dõi công nợ + tuổi nợ kênh MT.",
+      "Đối chiếu: xuất biên bản đối chiếu công nợ (PDF) gửi siêu thị định kỳ.",
+    ],
     sections: [
-      { title: "Tác nghiệp", icon: "fa-bolt", items: [
+      { title: "Thực hiện", icon: "fa-bolt", items: [
         { label: "Lập hóa đơn bán", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice/new" },
         { label: "Phiếu thu tiền", icon: "fa-money-bill-wave", type: "desk", href: "/app/payment-entry/new" },
         { label: "Khách hàng MT", icon: "fa-users", type: "desk", href: "/app/customer?customer_group=MT" },
@@ -54,8 +66,13 @@ export const WORKSPACES = [
     label: "Kế toán Du lịch, Khác",
     icon: "fa-umbrella-beach",
     desc: "Kênh du lịch & khách lẻ/khác: công nợ, thu tiền",
+    guide: [
+      "Hàng đi: lập Sales Invoice; điền số hóa đơn điện tử khi phát hành.",
+      "Thu tiền: Payment Entry gắn khách; theo dõi công nợ + tuổi nợ kênh.",
+      "Đối chiếu: xuất biên bản đối chiếu công nợ (PDF) khi khách yêu cầu.",
+    ],
     sections: [
-      { title: "Tác nghiệp", icon: "fa-bolt", items: [
+      { title: "Thực hiện", icon: "fa-bolt", items: [
         { label: "Lập hóa đơn bán", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice/new" },
         { label: "Phiếu thu tiền", icon: "fa-money-bill-wave", type: "desk", href: "/app/payment-entry/new" },
         { label: "Khách hàng", icon: "fa-users", type: "desk", href: "/app/customer" },
@@ -75,8 +92,14 @@ export const WORKSPACES = [
     label: "Kế toán mua hàng",
     icon: "fa-truck-field",
     desc: "Công nợ phải trả, hóa đơn NCC, thanh toán mua hàng",
+    guide: [
+      "Nhận hóa đơn NCC → tạo Purchase Invoice, LUÔN điền số hóa đơn NCC (bill_no) để hệ thống dò trùng.",
+      "Khớp 3 chiều PO – nhập kho – hóa đơn: kiểm tra hóa đơn thiếu liên kết Purchase Receipt ở tab 'Kiểm soát'.",
+      "Lịch thanh toán: tab 'Đến hạn' xem khoản quá hạn/sắp đến hạn → bấm lập phiếu chi ngay trên dòng.",
+      "Theo dõi cảnh báo trùng hóa đơn NCC (cùng NCC + cùng số HĐ) — lỗi nhập hoặc gian lận.",
+    ],
     sections: [
-      { title: "Tác nghiệp", icon: "fa-bolt", items: [
+      { title: "Thực hiện", icon: "fa-bolt", items: [
         { label: "Hóa đơn mua (Purchase Invoice)", icon: "fa-file-invoice", type: "desk", href: "/app/purchase-invoice/new" },
         { label: "Phiếu chi thanh toán", icon: "fa-money-bill-transfer", type: "desk", href: "/app/payment-entry/new" },
         { label: "Nhà cung cấp", icon: "fa-industry", type: "desk", href: "/app/supplier" },
@@ -100,8 +123,13 @@ export const WORKSPACES = [
     label: "Kế toán tiền lương",
     icon: "fa-money-check-dollar",
     desc: "Tính lương, duyệt phiếu lương, xuất bảng lương",
+    guide: [
+      "Trong kỳ: nhập phiếu công nhật (SalaryDay) và công khoán (SalaryProduct) dạng nháp.",
+      "Cuối kỳ: mở 'Tính lương tháng' → chọn kỳ → Quét phiếu → duyệt (submit) phiếu nháp.",
+      "Xuất 7 file Excel (tổng hợp, chuyển khoản NH, tiền mặt, bù trừ, bảng tổng hợp) và in bảng lương / phát lương PDF.",
+    ],
     sections: [
-      { title: "Tác nghiệp", icon: "fa-bolt", items: [
+      { title: "Thực hiện", icon: "fa-bolt", items: [
         { label: "Phiếu công nhật (SalaryDay)", icon: "fa-calendar-day", type: "desk", href: "/app/salaryday/new" },
         { label: "Phiếu công khoán (SalaryProduct)", icon: "fa-boxes-stacked", type: "desk", href: "/app/salaryproduct/new" },
         { label: "Payroll Entry", icon: "fa-file-invoice-dollar", type: "desk", href: "/app/payroll-entry" },
@@ -120,8 +148,14 @@ export const WORKSPACES = [
     label: "Kế toán hạch toán",
     icon: "fa-book",
     desc: "Quỹ tiền mặt & ngân hàng, bút toán, sổ cái",
+    guide: [
+      "Nhập sổ quỹ: phiếu thu/chi tiền mặt tạo NHÁP từ portal (kèm QR VietQR nếu chuyển khoản).",
+      "Nhập sao kê ngân hàng (.xlsx): upload → hệ thống lọc trùng + gợi ý TK đối ứng theo quy tắc map → tạo bút toán Bank Entry nháp.",
+      "Duyệt: kiểm tra và submit các Journal Entry nháp (kể cả JE nháp do kênh bán hàng tạo).",
+      "Theo dõi sổ quỹ & dòng tiền; đối chiếu số dư với sao kê cuối kỳ.",
+    ],
     sections: [
-      { title: "Tác nghiệp", icon: "fa-bolt", items: [
+      { title: "Thực hiện", icon: "fa-bolt", items: [
         { label: "Bút toán (Journal Entry)", icon: "fa-pen-to-square", type: "desk", href: "/app/journal-entry/new" },
         { label: "Nhập sổ quỹ nhanh", icon: "fa-money-bill-wave", type: "route", route: "/quy" },
       ]},
@@ -141,8 +175,14 @@ export const WORKSPACES = [
     label: "Kế toán trưởng",
     icon: "fa-user-tie",
     desc: "Tổng quan toàn phòng, cảnh báo, cấu hình",
+    guide: [
+      "Mỗi sáng: xem Dashboard tổng hợp + Trung tâm cảnh báo (vượt hạn mức, quá hạn, khoản thu treo, quỹ âm).",
+      "Duyệt hồ sơ đối trừ 'Chờ KTT duyệt' (trả hàng/chiết khấu đã đính kèm hóa đơn NPP) — submit để trừ công nợ.",
+      "Phân quyền vai trò kế toán cho tài khoản (1 người nhiều vai trò).",
+      "Cấu hình ngưỡng: tuổi nợ, chiết khấu, nhóm khách kênh... trong Ketoan Portal Settings.",
+    ],
     sections: [
-      { title: "Tác nghiệp", icon: "fa-bolt", items: [
+      { title: "Thực hiện", icon: "fa-bolt", items: [
         { label: "Bàn Kế toán NPP", icon: "fa-handshake", type: "route", route: "/vt/npp" },
         { label: "Bàn Kế toán MT", icon: "fa-store", type: "route", route: "/vt/mt" },
         { label: "Bàn Kế toán Du lịch, Khác", icon: "fa-umbrella-beach", type: "route", route: "/vt/travel" },

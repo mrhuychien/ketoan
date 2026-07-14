@@ -195,6 +195,25 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-ws-go { position: absolute; top: 20px; right: 20px; color: var(--kt-muted); }
 .kt-ws-card:hover .kt-ws-go { color: var(--kt-primary); }
 
+.kt-ws-meta { font-size: 11px; color: var(--kt-muted); margin-top: 8px; }
+.kt-ws-meta i { color: var(--kt-primary); margin-right: 4px; }
+
+/* ===== Hướng dẫn nghiệp vụ ===== */
+.kt-guide { border-left: 4px solid var(--kt-primary); }
+.kt-guide-head { cursor: pointer; user-select: none; }
+.kt-guide-steps { margin: 0; padding-left: 0; list-style: none; counter-reset: kt-step; }
+.kt-guide-steps li { counter-increment: kt-step; position: relative; padding: 8px 0 8px 40px; font-size: 13px; line-height: 1.6; color: var(--kt-text); }
+.kt-guide-steps li + li { border-top: 1px dashed var(--kt-border); }
+.kt-guide-steps li::before { content: counter(kt-step); position: absolute; left: 0; top: 8px; width: 26px; height: 26px; border-radius: 50%; background: var(--kt-grad); color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+
+/* ===== Nút thực hiện (action buttons) ===== */
+.kt-ws-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.kt-ws-action { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border: 1px solid var(--kt-border); border-radius: var(--kt-r-md); background: #fff; font-size: 13px; font-weight: 700; color: var(--kt-text); transition: transform .12s, border-color .12s, box-shadow .12s; }
+.kt-ws-action:hover { transform: translateY(-2px); border-color: var(--kt-primary); box-shadow: var(--kt-shadow-md); color: var(--kt-primary); }
+.kt-ws-action > i:first-child { width: 34px; height: 34px; border-radius: var(--kt-r-sm); background: var(--kt-grad); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; flex: none; }
+.kt-ws-action span { flex: 1; }
+.kt-ws-action-ext { color: var(--kt-muted); font-size: 11px; }
+
 /* ===== Workspace landing (3 sections) ===== */
 .kt-ws-sections { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
 .kt-ws-items { display: flex; flex-direction: column; gap: 8px; }
