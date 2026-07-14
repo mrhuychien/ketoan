@@ -12,7 +12,8 @@ const STATUS = {
   negative: { cls: "gray", label: "Số dư âm" },
 };
 
-const NPP_TABS = ["debt", "due", "discount", "doitru", "einvoice"];
+const NPP_TABS = ["debt", "due", "discount", "trahang", "butoan", "einvoice"];
+const LEGACY_TABS = { doitru: "trahang" };
 
 export async function render({ container, query }) {
   setHTML(container, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
@@ -24,7 +25,8 @@ export async function render({ container, query }) {
     return;
   }
 
-  const initTab = query && NPP_TABS.includes(query.tab) ? query.tab : "debt";
+  const qtab = query && (LEGACY_TABS[query.tab] || query.tab);
+  const initTab = qtab && NPP_TABS.includes(qtab) ? qtab : "debt";
   const state = { tab: initTab, statusFilter: "all", search: "", debtSelected: new Set(), discountMonth: currentMonth(), discSelected: new Set(), discData: null };
 
   setHTML(
@@ -50,7 +52,8 @@ export async function render({ container, query }) {
         <button data-tab="debt" class="${state.tab === "debt" ? "is-active" : ""}">Công nợ NPP</button>
         <button data-tab="due" class="${state.tab === "due" ? "is-active" : ""}">Đến hạn</button>
         <button data-tab="discount" class="${state.tab === "discount" ? "is-active" : ""}">Chiết khấu</button>
-        <button data-tab="doitru" class="${state.tab === "doitru" ? "is-active" : ""}">Đối trừ</button>
+        <button data-tab="trahang" class="${state.tab === "trahang" ? "is-active" : ""}">Trả hàng</button>
+        <button data-tab="butoan" class="${state.tab === "butoan" ? "is-active" : ""}">Bút toán JE</button>
         <button data-tab="einvoice" class="${state.tab === "einvoice" ? "is-active" : ""}">Chưa xuất HĐĐT</button>
       </div>
 
@@ -64,7 +67,8 @@ export async function render({ container, query }) {
     if (state.tab === "debt") renderDebt(body, data, state);
     else if (state.tab === "due") renderDue(body, data, state);
     else if (state.tab === "discount") renderDiscount(body, data, state);
-    else if (state.tab === "doitru") renderDoitru(body, data, state);
+    else if (state.tab === "trahang") renderReturns(body, data, state);
+    else if (state.tab === "butoan") renderJEs(body, data, state);
     else renderEinvoice(body);
   }
 
@@ -407,48 +411,33 @@ function monthOptions() {
   return out;
 }
 
-/* ---------- Tab 4: Đối trừ công nợ (trả hàng + chiết khấu chờ HĐ NPP) ---------- */
+/* ---------- Tab 4a/4b: Trả hàng & Bút toán JE (đối trừ công nợ) ---------- */
 const DT_STATUS = {
   cho_hoadon: { label: "Chờ hóa đơn NPP", cls: "yellow" },
   cho_duyet: { label: "Chờ KTT duyệt", cls: "red" },
   done: { label: "Đã trừ công nợ", cls: "green" },
 };
 
-async function renderDoitru(body, data, state) {
-  setHTML(body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
-  let d;
-  try { d = await api.doitruCases(); }
-  catch (e) { setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`); return; }
+function dtBadges(c) {
+  const st = DT_STATUS[c.status] || DT_STATUS.cho_hoadon;
+  return {
+    att: c.attachments
+      ? html`<span class="kt-badge kt-badge--green"><i class="fas fa-paperclip"></i> ${c.attachments}</span>`
+      : html`<span class="kt-badge kt-badge--yellow">chưa có</span>`,
+    status: html`<span class="kt-badge kt-badge--${st.cls}">${st.label}</span>`,
+  };
+}
 
-  setHTML(
-    body,
-    html`
-      <div class="kt-alert kt-alert--info">
-        <div class="kt-alert-title"><i class="fas fa-circle-info"></i> Quy trình đối trừ</div>
-        <div class="kt-alert-hint">Chứng từ NHÁP chưa đính kèm = <b>chờ hóa đơn NPP</b> → đính kèm hóa đơn = <b>chờ KTT duyệt</b> → KTT submit = <b>đã trừ công nợ</b>.</div>
-      </div>
-      <div class="kt-card">
-        <div class="kt-card-head">
-          <div class="kt-card-title"><i class="fas fa-right-left"></i> Hồ sơ đối trừ ·
-            <span class="kt-badge kt-badge--yellow">${d.counts.cho_hoadon} chờ HĐ</span>
-            <span class="kt-badge kt-badge--red">${d.counts.cho_duyet} chờ duyệt</span>
-            <span class="kt-badge kt-badge--green">${d.counts.done} xong</span></div>
-          <button class="kt-btn kt-btn--primary kt-btn--sm" id="dt-new-return"><i class="fas fa-rotate-left"></i> + Trả hàng</button>
-        </div>
-        <div class="kt-card-body">
-          <div class="kt-table-wrap"><table class="kt-table">
-            <thead><tr><th>Loại</th><th>Chứng từ</th><th>NPP</th><th>Ngày</th><th class="num">Giá trị</th><th>HĐ NPP</th><th>Trạng thái</th><th></th></tr></thead>
-            <tbody>${d.cases.map((c) => doitruRow(c, d.can_approve))}</tbody>
-          </table></div>
-          ${d.cases.length === 0 ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Chưa có hồ sơ đối trừ</p></div>` : ""}
-        </div>
-      </div>
-    `
-  );
+function dtActions(c, canApprove) {
+  const draft = c.status !== "done";
+  return html`
+    ${draft ? html`<button class="kt-btn-icon dt-upload" title="Đính kèm hóa đơn NPP" data-dt="${c.doctype}" data-name="${c.name}"><i class="fas fa-paperclip"></i></button>` : ""}
+    ${draft && canApprove && c.status === "cho_duyet" ? html`<button class="kt-btn kt-btn--success kt-btn--sm dt-approve" data-dt="${c.doctype}" data-name="${c.name}">Duyệt</button>` : ""}
+    <a class="kt-btn-icon" target="_blank" href="${c.route}" title="Mở trong ERPNext"><i class="fas fa-up-right-from-square"></i></a>`;
+}
 
-  body.querySelector("#dt-new-return").addEventListener("click", () => openNewReturn(body, data, state));
-
-  // Upload hóa đơn NPP vào chứng từ nháp.
+// Gắn handler upload + duyệt cho các nút trong body; reload() gọi lại render tab.
+function bindDtActions(body, reload) {
   body.querySelectorAll(".dt-upload").forEach((btn) =>
     btn.addEventListener("click", () => {
       const input = document.createElement("input");
@@ -463,7 +452,7 @@ async function renderDoitru(body, data, state) {
           try {
             await api.doitruUpload(btn.dataset.dt, btn.dataset.name, file.name, reader.result);
             toast("Đã đính kèm hóa đơn NPP", "success");
-            renderDoitru(body, data, state);
+            reload();
           } catch (e) { toast(e.message, "error"); btn.disabled = false; }
         };
         reader.readAsDataURL(file);
@@ -471,8 +460,6 @@ async function renderDoitru(body, data, state) {
       input.click();
     })
   );
-
-  // KTT duyệt (submit).
   body.querySelectorAll(".dt-approve").forEach((btn) =>
     btn.addEventListener("click", async () => {
       if (!confirm(`Duyệt & ghi sổ ${btn.dataset.name}? Thao tác này trừ công nợ NPP.`)) return;
@@ -480,28 +467,104 @@ async function renderDoitru(body, data, state) {
       try {
         await api.doitruApprove(btn.dataset.dt, btn.dataset.name);
         toast("Đã duyệt — công nợ được trừ", "success");
-        renderDoitru(body, data, state);
+        reload();
       } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.innerHTML = "Duyệt"; }
     })
   );
 }
 
-function doitruRow(c, canApprove) {
-  const st = DT_STATUS[c.status] || DT_STATUS.cho_hoadon;
-  const draft = c.status !== "done";
-  return html`<tr>
-    <td>${c.loai === "Trả hàng" ? html`<span class="kt-badge kt-badge--gray"><i class="fas fa-rotate-left"></i> Trả hàng</span>` : html`<span class="kt-badge kt-badge--gray"><i class="fas fa-percent"></i> Chiết khấu</span>`}</td>
-    <td>${c.name}${c.against ? html`<br><span class="kt-sub">gốc: ${c.against}</span>` : ""}</td>
-    <td>${c.label}</td><td>${c.date || "—"}</td>
-    <td class="num">${formatVND(c.amount)}</td>
-    <td>${c.attachments ? html`<span class="kt-badge kt-badge--green"><i class="fas fa-paperclip"></i> ${c.attachments}</span>` : html`<span class="kt-badge kt-badge--yellow">chưa có</span>`}</td>
-    <td><span class="kt-badge kt-badge--${st.cls}">${st.label}</span></td>
-    <td class="num" style="white-space:nowrap">
-      ${draft ? html`<button class="kt-btn-icon dt-upload" title="Đính kèm hóa đơn NPP" data-dt="${c.doctype}" data-name="${c.name}"><i class="fas fa-paperclip"></i></button>` : ""}
-      ${draft && canApprove && c.status === "cho_duyet" ? html`<button class="kt-btn kt-btn--success kt-btn--sm dt-approve" data-dt="${c.doctype}" data-name="${c.name}">Duyệt</button>` : ""}
-      <a class="kt-btn-icon" target="_blank" href="${c.route}" title="Mở trong ERPNext"><i class="fas fa-up-right-from-square"></i></a>
-    </td>
-  </tr>`;
+function dtCountBadges(c) {
+  return html`
+    <span class="kt-badge kt-badge--yellow">${c.cho_hoadon} chờ HĐ</span>
+    <span class="kt-badge kt-badge--red">${c.cho_duyet} chờ duyệt</span>
+    <span class="kt-badge kt-badge--green">${c.done} xong</span>`;
+}
+
+/* --- Tab: TRẢ HÀNG --- */
+async function renderReturns(body, data, state) {
+  setHTML(body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let d;
+  try { d = await api.doitruCases(); }
+  catch (e) { setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`); return; }
+
+  setHTML(
+    body,
+    html`
+      <div class="kt-alert kt-alert--info">
+        <div class="kt-alert-title"><i class="fas fa-circle-info"></i> Quy trình trả hàng</div>
+        <div class="kt-alert-hint">Tạo SI trả về NHÁP → chờ NPP xuất hóa đơn → <b>đính kèm</b> vào chứng từ → <b>KTT duyệt</b> (submit) → trừ công nợ.</div>
+      </div>
+      <div class="kt-card">
+        <div class="kt-card-head">
+          <div class="kt-card-title"><i class="fas fa-rotate-left"></i> Hàng trả lại · ${dtCountBadges(d.returns_counts)}</div>
+          <button class="kt-btn kt-btn--primary kt-btn--sm" id="dt-new-return"><i class="fas fa-plus"></i> Trả hàng</button>
+        </div>
+        <div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Chứng từ</th><th>NPP</th><th>Ngày</th><th class="num">Giá trị</th><th>HĐ NPP</th><th>Trạng thái</th><th></th></tr></thead>
+            <tbody>${d.returns.map((c) => {
+              const b = dtBadges(c);
+              return html`<tr>
+                <td>${c.name}${c.against ? html`<br><span class="kt-sub">gốc: ${c.against}</span>` : ""}</td>
+                <td>${c.label}</td><td>${c.date || "—"}</td>
+                <td class="num">${formatVND(c.amount)}</td>
+                <td>${b.att}</td><td>${b.status}</td>
+                <td class="num" style="white-space:nowrap">${dtActions(c, d.can_approve)}</td>
+              </tr>`;
+            })}</tbody>
+          </table></div>
+          ${d.returns.length === 0 ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Chưa có hồ sơ trả hàng</p></div>` : ""}
+        </div>
+      </div>
+    `
+  );
+
+  body.querySelector("#dt-new-return").addEventListener("click", () => openNewReturn(body, data, state));
+  bindDtActions(body, () => renderReturns(body, data, state));
+}
+
+/* --- Tab: BÚT TOÁN JE (chiết khấu, thưởng, hỗ trợ...) --- */
+async function renderJEs(body, data, state) {
+  setHTML(body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let d;
+  try { d = await api.doitruCases(); }
+  catch (e) { setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`); return; }
+
+  setHTML(
+    body,
+    html`
+      <div class="kt-alert kt-alert--info">
+        <div class="kt-alert-title"><i class="fas fa-circle-info"></i> Bút toán JE gắn khách NPP</div>
+        <div class="kt-alert-hint">Gồm chiết khấu, thưởng, hỗ trợ, điều chỉnh... JE NHÁP → chờ NPP xuất hóa đơn → <b>đính kèm</b> → <b>KTT duyệt</b> → trừ công nợ. (Chiết khấu tạo từ tab "Chiết khấu"; JE khác tạo trong Desk.)</div>
+      </div>
+      <div class="kt-card">
+        <div class="kt-card-head">
+          <div class="kt-card-title"><i class="fas fa-pen-to-square"></i> Bút toán JE · ${dtCountBadges(d.je_counts)}</div>
+          <a class="kt-btn kt-btn--primary kt-btn--sm" target="_blank" href="/app/journal-entry/new"><i class="fas fa-plus"></i> Bút toán JE (Desk)</a>
+        </div>
+        <div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Chứng từ</th><th>NPP</th><th>Loại</th><th>Ngày</th><th class="num">Giá trị</th><th>HĐ NPP</th><th>Trạng thái</th><th></th></tr></thead>
+            <tbody>${d.jes.map((c) => {
+              const b = dtBadges(c);
+              return html`<tr>
+                <td title="${c.remark || ""}">${c.name}</td>
+                <td>${c.label}</td>
+                <td><span class="kt-badge kt-badge--gray">${c.purpose}</span></td>
+                <td>${c.date || "—"}</td>
+                <td class="num">${formatVND(c.amount)}</td>
+                <td>${b.att}</td><td>${b.status}</td>
+                <td class="num" style="white-space:nowrap">${dtActions(c, d.can_approve)}</td>
+              </tr>`;
+            })}</tbody>
+          </table></div>
+          ${d.jes.length === 0 ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có bút toán JE gắn khách NPP</p></div>` : ""}
+        </div>
+      </div>
+    `
+  );
+
+  bindDtActions(body, () => renderJEs(body, data, state));
 }
 
 function openNewReturn(body, data, state) {
@@ -548,7 +611,7 @@ function openNewReturn(body, data, state) {
       toast(`Đã tạo ${res.name} (nháp)`, "success");
       m.close();
       window.open(res.route, "_blank");
-      renderDoitru(body, data, state);
+      renderReturns(body, data, state);
     } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> Tạo nháp'; }
   });
 }

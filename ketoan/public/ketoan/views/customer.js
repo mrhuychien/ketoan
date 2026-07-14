@@ -154,9 +154,9 @@ function customerTasksBlock(d) {
   if (t.missing_einvoice)
     items.push({ icon: "fa-file-circle-exclamation", label: `Cần xuất hóa đơn điện tử: ${t.missing_einvoice} hóa đơn`, sev: "red", href: "#/doi-chieu-npp?tab=einvoice" });
   if (t.pending_returns)
-    items.push({ icon: "fa-rotate-left", label: `Hàng trả lại đang xử lý: ${t.pending_returns} hồ sơ`, sev: "yellow", href: "#/doi-chieu-npp?tab=doitru" });
-  if (t.pending_discount)
-    items.push({ icon: "fa-percent", label: `Chiết khấu/KM đang treo: ${t.pending_discount} bút toán`, sev: "yellow", href: "#/doi-chieu-npp?tab=doitru" });
+    items.push({ icon: "fa-rotate-left", label: `Hàng trả lại đang xử lý: ${t.pending_returns} hồ sơ`, sev: "yellow", href: "#/doi-chieu-npp?tab=trahang" });
+  if (t.pending_je)
+    items.push({ icon: "fa-pen-to-square", label: `Bút toán JE đang treo (CK, thưởng, hỗ trợ...): ${t.pending_je}`, sev: "yellow", href: "#/doi-chieu-npp?tab=butoan" });
   if (d.unallocated_payment > 0)
     items.push({ icon: "fa-link-slash", label: `Khoản thu chưa khớp hóa đơn: ${formatVND(d.unallocated_payment)}`, sev: "yellow", href: `/app/payment-entry?party=${q(d.customer)}&unallocated_amount=[">",0]` });
   if (d.over_limit)

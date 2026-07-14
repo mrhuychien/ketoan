@@ -67,14 +67,16 @@ def get_tasks(company: str | None = None) -> dict:
                  AND c.customer_group = %(group)s""",
             {"company": company, "group": npp_group},
         )
-        items.append({"label": "Cần xử lý hàng trả lại", "count": n, "route": "/doi-chieu-npp?tab=doitru", "severity": "warning"})
-        # Chiết khấu/KM đang treo (JE nháp mang marker CK2)
+        items.append({"label": "Cần xử lý hàng trả lại", "count": n, "route": "/doi-chieu-npp?tab=trahang", "severity": "warning"})
+        # Bút toán JE đang treo (chiết khấu, thưởng, hỗ trợ... — JE nháp gắn khách NPP)
         n = _count(
-            f"""SELECT COUNT(*) FROM `tabJournal Entry`
-                WHERE docstatus = 0 AND company = %(company)s AND `{field}` LIKE '%%[CK2-%%'""",
-            {"company": company},
+            """SELECT COUNT(DISTINCT je.name) FROM `tabJournal Entry` je
+               JOIN `tabJournal Entry Account` a ON a.parent = je.name AND a.party_type = 'Customer'
+               JOIN `tabCustomer` c ON c.name = a.party AND c.customer_group = %(group)s
+               WHERE je.docstatus = 0 AND je.company = %(company)s""",
+            {"company": company, "group": npp_group},
         )
-        items.append({"label": "Cần hoàn tất chiết khấu, khuyến mại", "count": n, "route": "/doi-chieu-npp?tab=doitru", "severity": "warning"})
+        items.append({"label": "Cần hoàn tất bút toán JE (chiết khấu, thưởng, hỗ trợ...)", "count": n, "route": "/doi-chieu-npp?tab=butoan", "severity": "warning"})
         # Cần xuất hóa đơn điện tử
         if has_einv:
             n = _count(
@@ -91,6 +93,7 @@ def get_tasks(company: str | None = None) -> dict:
         n = _overdue_customers(company, "npp", b1)
         items.append({"label": f"Cần đối chiếu / thu công nợ (quá {b1} ngày)", "count": n, "route": "/doi-chieu-npp?tab=due", "severity": "danger"})
         add("Kế toán NPP", "fa-handshake", "npp", items)
+        del items  # tránh dùng nhầm ở nhóm sau
 
     # ── Kênh MT / Du lịch, Khác ─────────────────────────────────────────────
     if caps.get("mt"):
@@ -163,13 +166,16 @@ def get_tasks(company: str | None = None) -> dict:
             {"company": company},
         )
         n2 = _count(
-            f"""SELECT COUNT(*) FROM `tabJournal Entry` je
-                WHERE je.docstatus = 0 AND je.company = %(company)s AND je.`{field}` LIKE '%%[CK2-%%'
-                  AND EXISTS (SELECT 1 FROM `tabFile` f
-                              WHERE f.attached_to_doctype='Journal Entry' AND f.attached_to_name=je.name)""",
-            {"company": company},
+            """SELECT COUNT(DISTINCT je.name) FROM `tabJournal Entry` je
+               JOIN `tabJournal Entry Account` a ON a.parent = je.name AND a.party_type = 'Customer'
+               JOIN `tabCustomer` c ON c.name = a.party AND c.customer_group = %(group)s
+               WHERE je.docstatus = 0 AND je.company = %(company)s
+                 AND EXISTS (SELECT 1 FROM `tabFile` f
+                             WHERE f.attached_to_doctype='Journal Entry' AND f.attached_to_name=je.name)""",
+            {"company": company, "group": npp_group},
         )
-        items.append({"label": "Hồ sơ đối trừ chờ KTT duyệt", "count": n1 + n2, "route": "/doi-chieu-npp?tab=doitru", "severity": "danger"})
+        items.append({"label": "Trả hàng chờ KTT duyệt", "count": n1, "route": "/doi-chieu-npp?tab=trahang", "severity": "danger"})
+        items.append({"label": "Bút toán JE chờ KTT duyệt", "count": n2, "route": "/doi-chieu-npp?tab=butoan", "severity": "danger"})
         try:
             from ketoan.api.alerts import get_alerts
             items.append({"label": "Cảnh báo tác nghiệp", "count": len(get_alerts(company)["alerts"]), "route": "/canh-bao", "severity": "warning"})

@@ -191,14 +191,12 @@ def _customer_tasks(customer: str, company: str) -> dict:
            WHERE is_return = 1 AND docstatus = 0 AND company = %(company)s AND customer = %(customer)s""",
         {"company": company, "customer": customer},
     )
-    # Chiết khấu/KM đang treo (JE nháp marker CK2 có party = khách).
-    field = je_remark_field()
-    tasks["pending_discount"] = cnt(
-        f"""SELECT COUNT(DISTINCT je.name) FROM `tabJournal Entry` je
-            JOIN `tabJournal Entry Account` a ON a.parent = je.name
-            WHERE je.docstatus = 0 AND je.company = %(company)s
-              AND a.party_type = 'Customer' AND a.party = %(customer)s
-              AND je.`{field}` LIKE '%%[CK2-%%'""",
+    # Bút toán JE đang treo (chiết khấu, thưởng, hỗ trợ... — JE nháp có party = khách).
+    tasks["pending_je"] = cnt(
+        """SELECT COUNT(DISTINCT je.name) FROM `tabJournal Entry` je
+           JOIN `tabJournal Entry Account` a ON a.parent = je.name
+           WHERE je.docstatus = 0 AND je.company = %(company)s
+             AND a.party_type = 'Customer' AND a.party = %(customer)s""",
         {"company": company, "customer": customer},
     )
     # Chưa xuất hóa đơn điện tử (60 ngày gần nhất).
@@ -406,24 +404,25 @@ def get_customer_ledger(customer: str, company: str | None = None,
     from ketoan.utils import je_remark_field
     fieldr = je_remark_field()
     je_drafts = frappe.db.sql(
-        f"""SELECT DISTINCT je.name, je.posting_date, je.total_debit
+        f"""SELECT DISTINCT je.name, je.posting_date, je.total_debit, je.`{fieldr}` AS remark
             FROM `tabJournal Entry` je
             JOIN `tabJournal Entry Account` a ON a.parent = je.name
             WHERE je.docstatus = 0 AND je.company = %(company)s
               AND a.party_type = 'Customer' AND a.party = %(customer)s
-              AND je.`{fieldr}` LIKE '%%[CK2-%%'
             LIMIT 50""",
         {"company": company, "customer": customer},
         as_dict=True,
     )
     for x in je_drafts:
         has_att = frappe.db.exists("File", {"attached_to_doctype": "Journal Entry", "attached_to_name": x.name})
+        is_ck = "[CK2-" in (x.remark or "")
+        vt = "Bút toán JE (chiết khấu)" if is_ck else "Bút toán JE (thưởng/hỗ trợ...)"
         drafts.append({
-            "posting_date": str(x.posting_date), "voucher_type": "JE chiết khấu",
+            "posting_date": str(x.posting_date), "voucher_type": vt,
             "voucher_no": x.name, "debit": 0, "credit": flt(x.total_debit),
             "balance": None, "docstatus": 0,
-            "todos": [{"icon": "fa-percent",
-                       "label": "Chờ KTT duyệt chiết khấu" if has_att else "Chờ hóa đơn NPP (chiết khấu)",
+            "todos": [{"icon": "fa-percent" if is_ck else "fa-gift",
+                       "label": "Chờ KTT duyệt bút toán" if has_att else "Chờ hóa đơn NPP (bút toán JE)",
                        "sev": "red" if has_att else "yellow"}],
             "route": f"/app/journal-entry/{x.name}",
         })

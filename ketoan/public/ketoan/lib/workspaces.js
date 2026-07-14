@@ -31,8 +31,8 @@ export const WORKSPACES = [
     guide: [
       "Hàng đi: lập Sales Invoice cho NPP; điền số hóa đơn điện tử (vn_einvoice_number). Chưa điền = chưa xuất HĐ — theo dõi ở tab 'Chưa xuất HĐĐT'.",
       "Thu tiền: ghi nhận bằng Payment Entry; theo dõi khoản đến hạn/quá hạn ở tab 'Đến hạn' (ngày 5 & 20; mùa Tết cho nợ 50% HĐ từ 1/11) và nhắc nợ Zalo.",
-      "Trả hàng: bấm '+ Trả hàng' (tab Đối trừ) tạo hóa đơn trả về NHÁP → chờ NPP xuất hóa đơn → đính kèm vào chứng từ → KTT duyệt để trừ công nợ.",
-      "Chiết khấu/KM: tab 'Chiết khấu' kiểm tra doanh số tháng ≥ ngưỡng → tạo JE nháp → đính kèm hóa đơn NPP → KTT duyệt.",
+      "Trả hàng: tab 'Trả hàng' bấm '+ Trả hàng' tạo hóa đơn trả về NHÁP → chờ NPP xuất hóa đơn → đính kèm vào chứng từ → KTT duyệt để trừ công nợ.",
+      "Bút toán JE (chiết khấu, thưởng, hỗ trợ...): chiết khấu tạo từ tab 'Chiết khấu', JE khác tạo trong Desk → theo dõi ở tab 'Bút toán JE' → đính kèm hóa đơn NPP → KTT duyệt.",
       "Hồ sơ NPP: hợp đồng, phụ lục thương mại, ĐKKD upload trong 360° khách (khối Hồ sơ khách hàng).",
     ],
     sections: [

@@ -1,8 +1,9 @@
-"""Whitelisted methods — Đối trừ công nợ NPP (trả hàng + chiết khấu) & HĐĐT.
+"""Whitelisted methods — Đối trừ công nợ NPP (TÁCH 2 nhóm) & HĐĐT.
 
 Không DocType riêng — vòng đời bám chứng từ gốc:
-- Trả hàng  = Sales Invoice is_return NHÁP (tạo từ hóa đơn gốc).
-- Chiết khấu = Journal Entry nháp mang marker [CK2-...] (flow sẵn có).
+- TRẢ HÀNG   = Sales Invoice is_return NHÁP (tạo từ hóa đơn gốc).
+- BÚT TOÁN JE = Journal Entry nháp có dòng party Customer thuộc nhóm NPP
+  (chiết khấu [CK2-...], thưởng, hỗ trợ, điều chỉnh...).
 Trạng thái suy ra: nháp chưa đính kèm = "Chờ hóa đơn NPP"; nháp có đính kèm =
 "Chờ KTT duyệt"; đã submit = "Đã trừ công nợ". KTT duyệt (submit) qua approve_case.
 
@@ -41,14 +42,15 @@ def _status(docstatus: int, attachments: int) -> str:
 
 @frappe.whitelist()
 def get_cases(company: str | None = None, days: int = 90) -> dict:
-    """Danh sách hồ sơ đối trừ: SI trả về + JE chiết khấu (nháp + đã submit gần đây)."""
+    """Hồ sơ đối trừ TÁCH 2 nhóm: `returns` (SI trả về) và `jes` (bút toán JE:
+    chiết khấu, thưởng, hỗ trợ...). `counts` gộp chung để tương thích KPI cũ."""
     guard_npp()
     company = resolve_company(company)
     days = min(int(days or 90), 365)
     since = add_days(today(), -days)
     group = get_settings().npp_customer_group or "NPP"
 
-    # Trả hàng: SI is_return của khách nhóm NPP.
+    # ── TRẢ HÀNG: SI is_return của khách nhóm NPP ───────────────────────────
     si_rows = frappe.db.sql(
         """
         SELECT si.name, si.customer, si.customer_name, si.posting_date,
@@ -66,38 +68,10 @@ def get_cases(company: str | None = None, days: int = 90) -> dict:
     )
     si_att = _attach_counts("Sales Invoice", [r.name for r in si_rows])
 
-    # Chiết khấu: JE mang marker [CK2- trong field remark.
-    field = je_remark_field()
-    je_rows = frappe.db.sql(
-        f"""
-        SELECT name, posting_date, total_debit, docstatus, `{field}` AS remark
-        FROM `tabJournal Entry`
-        WHERE company = %(company)s AND docstatus < 2
-          AND `{field}` LIKE '%%[CK2-%%'
-          AND (docstatus = 0 OR posting_date >= %(since)s)
-        ORDER BY modified DESC
-        LIMIT 200
-        """,
-        {"company": company, "since": since},
-        as_dict=True,
-    )
-    je_att = _attach_counts("Journal Entry", [r.name for r in je_rows])
-    # Đối tượng khách của JE (dòng có party Customer).
-    parties = {}
-    if je_rows:
-        for p in frappe.get_all(
-            "Journal Entry Account",
-            filters={"parent": ["in", [r.name for r in je_rows]], "party_type": "Customer"},
-            fields=["parent", "party"],
-            limit=1000,
-        ):
-            parties.setdefault(p.parent, p.party)
-
-    cases = []
+    returns = []
     for r in si_rows:
         att = si_att.get(r.name, 0)
-        cases.append({
-            "loai": "Trả hàng",
+        returns.append({
             "doctype": "Sales Invoice",
             "name": r.name,
             "customer": r.customer,
@@ -109,30 +83,66 @@ def get_cases(company: str | None = None, days: int = 90) -> dict:
             "status": _status(r.docstatus, att),
             "route": f"/app/sales-invoice/{r.name}",
         })
+
+    # ── BÚT TOÁN JE: mọi JE có dòng party Customer thuộc nhóm NPP ──────────
+    # (không chỉ marker [CK2-] — gồm cả thưởng, hỗ trợ, điều chỉnh công nợ).
+    field = je_remark_field()
+    je_rows = frappe.db.sql(
+        f"""
+        SELECT je.name, MIN(a.party) AS party, MIN(c.customer_name) AS party_name,
+               je.posting_date, je.total_debit, je.docstatus, je.`{field}` AS remark
+        FROM `tabJournal Entry` je
+        JOIN `tabJournal Entry Account` a ON a.parent = je.name AND a.party_type = 'Customer'
+        JOIN `tabCustomer` c ON c.name = a.party AND c.customer_group = %(group)s
+        WHERE je.company = %(company)s AND je.docstatus < 2
+          AND (je.docstatus = 0 OR je.posting_date >= %(since)s)
+        GROUP BY je.name, je.posting_date, je.total_debit, je.docstatus, je.`{field}`
+        ORDER BY je.modified DESC
+        LIMIT 200
+        """,
+        {"company": company, "group": group, "since": since},
+        as_dict=True,
+    )
+    je_att = _attach_counts("Journal Entry", [r.name for r in je_rows])
+
+    jes = []
     for r in je_rows:
         att = je_att.get(r.name, 0)
-        cust = parties.get(r.name)
-        cases.append({
-            "loai": "Chiết khấu",
+        remark = r.remark or ""
+        purpose = "Chiết khấu" if "[CK2-" in remark else "Thưởng/Hỗ trợ/Khác"
+        jes.append({
             "doctype": "Journal Entry",
             "name": r.name,
-            "customer": cust,
-            "label": cust or (r.remark or "")[:40],
+            "customer": r.party,
+            "label": r.party_name or r.party,
             "date": str(r.posting_date) if r.posting_date else None,
             "amount": flt(r.total_debit),
-            "against": None,
+            "purpose": purpose,
+            "remark": remark[:120],
             "attachments": att,
             "status": _status(r.docstatus, att),
             "route": f"/app/journal-entry/{r.name}",
         })
 
     order = {"cho_hoadon": 0, "cho_duyet": 1, "done": 2}
-    cases.sort(key=lambda x: (order.get(x["status"], 9), x["date"] or ""), reverse=False)
-    counts = {"cho_hoadon": 0, "cho_duyet": 0, "done": 0}
-    for x in cases:
-        counts[x["status"]] = counts.get(x["status"], 0) + 1
+    for lst in (returns, jes):
+        lst.sort(key=lambda x: (order.get(x["status"], 9), x["date"] or ""))
 
-    return {"company": company, "cases": cases, "counts": counts, "can_approve": is_chief()}
+    def tally(lst):
+        c = {"cho_hoadon": 0, "cho_duyet": 0, "done": 0}
+        for x in lst:
+            c[x["status"]] = c.get(x["status"], 0) + 1
+        return c
+
+    rc, jc = tally(returns), tally(jes)
+    counts = {k: rc[k] + jc[k] for k in rc}  # gộp — tương thích KPI cũ
+
+    return {
+        "company": company,
+        "returns": returns, "jes": jes,
+        "returns_counts": rc, "je_counts": jc, "counts": counts,
+        "can_approve": is_chief(),
+    }
 
 
 @frappe.whitelist()
