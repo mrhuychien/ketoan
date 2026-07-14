@@ -14,10 +14,13 @@ from ketoan.install import PORTAL_ROLES, create_portal_roles
 
 
 def _ensure_roles_exist() -> None:
-    """Tạo role kênh còn thiếu (site cài trước khi bộ role đổi). Idempotent."""
+    """Tạo role còn thiếu + cấp quyền nghiệp vụ đi kèm (site chưa migrate). Idempotent."""
     missing = [r for r in PORTAL_ROLES if not frappe.db.exists("Role", r)]
     if missing:
+        from ketoan.install import grant_business_permissions
+
         create_portal_roles()
+        grant_business_permissions()
 
 # Nhãn hiển thị cho từng role.
 ROLE_LABELS = {

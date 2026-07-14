@@ -20,9 +20,95 @@ PORTAL_ROLES = (
 LEGACY_ROLES = ("Ke Toan Cong No", "Ke Toan Ban Hang")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Ma trận quyền nghiệp vụ: Role → DocType → các quyền được cấp.
+# Cấp bằng add_permission/update_permission_property (KHÔNG ship DocPerm fixtures).
+# ═══════════════════════════════════════════════════════════════════════════
+
+FULL_DOC = ("read", "write", "create", "submit", "cancel", "amend", "print", "email", "report")
+DRAFT_DOC = ("read", "write", "create", "print", "report")  # nháp — không submit/cancel
+READ_DOC = ("read", "report", "print")
+
+# Quyền chung cho 1 kế toán kênh bán hàng (NPP/MT/Du lịch):
+# SI đầy đủ (xem/sửa/ghi sổ/hủy) · JE nháp · thu tiền · xem sổ cái/khách/địa chỉ.
+_SALES_CHANNEL_PERMS = {
+    "Sales Invoice": FULL_DOC,
+    "Journal Entry": DRAFT_DOC,
+    "Payment Entry": ("read", "write", "create", "submit", "print", "report"),
+    "Customer": ("read", "write", "report", "print"),
+    "Address": ("read", "write", "create"),
+    "Contact": ("read", "write", "create"),
+    "GL Entry": ("read", "report"),
+    "Account": ("read",),
+    "Payment Ledger Entry": ("read", "report"),
+    "Sales Order": READ_DOC,
+    "Delivery Note": ("read", "report"),
+    "Customer Group": ("read",),
+    "Item": ("read",),
+}
+
+BUSINESS_PERMS = {
+    "Ke Toan NPP": _SALES_CHANNEL_PERMS,
+    "Ke Toan MT": _SALES_CHANNEL_PERMS,
+    "Ke Toan Du Lich": _SALES_CHANNEL_PERMS,
+    "Ke Toan Mua Hang": {
+        "Purchase Invoice": FULL_DOC,
+        "Journal Entry": DRAFT_DOC,
+        "Payment Entry": ("read", "write", "create", "submit", "print", "report"),
+        "Supplier": ("read", "write", "report", "print"),
+        "Address": ("read", "write", "create"),
+        "Contact": ("read", "write", "create"),
+        "GL Entry": ("read", "report"),
+        "Account": ("read",),
+        "Payment Ledger Entry": ("read", "report"),
+        "Purchase Order": READ_DOC,
+        "Purchase Receipt": ("read", "report"),
+        "Supplier Group": ("read",),
+        "Item": ("read",),
+    },
+    "Ke Toan Tien Luong": {
+        # DocType lương custom — bọc exists khi cấp.
+        "SalaryDay": FULL_DOC,
+        "SalaryProduct": FULL_DOC,
+        "Employee": ("read", "report"),
+        "Journal Entry": DRAFT_DOC,
+    },
+    "Ke Toan Hach Toan": {
+        "Journal Entry": FULL_DOC,
+        "Payment Entry": FULL_DOC,
+        "GL Entry": ("read", "report"),
+        "Account": ("read", "report"),
+        "Bank Account": ("read",),
+        "Address": ("read",),
+        "Contact": ("read",),
+        "Customer": ("read", "report"),
+        "Supplier": ("read", "report"),
+        "Payment Ledger Entry": ("read", "report"),
+    },
+}
+# Kế toán trưởng = hợp nhất mọi quyền trên.
+_chief: dict = {}
+for _perms in BUSINESS_PERMS.values():
+    for _dt, _rights in _perms.items():
+        _chief[_dt] = tuple(sorted(set(_chief.get(_dt, ())) | set(_rights)))
+BUSINESS_PERMS["Ke Toan Truong"] = _chief
+
+# Báo cáo chuẩn ERPNext cần thêm role vào Report.roles mới mở được.
+REPORT_ROLES = {
+    "General Ledger": ["Ke Toan NPP", "Ke Toan MT", "Ke Toan Du Lich", "Ke Toan Mua Hang", "Ke Toan Hach Toan", "Ke Toan Truong"],
+    "Accounts Receivable": ["Ke Toan NPP", "Ke Toan MT", "Ke Toan Du Lich", "Ke Toan Truong"],
+    "Accounts Receivable Summary": ["Ke Toan NPP", "Ke Toan MT", "Ke Toan Du Lich", "Ke Toan Truong"],
+    "Sales Register": ["Ke Toan NPP", "Ke Toan MT", "Ke Toan Du Lich", "Ke Toan Truong"],
+    "Accounts Payable": ["Ke Toan Mua Hang", "Ke Toan Truong"],
+    "Purchase Register": ["Ke Toan Mua Hang", "Ke Toan Truong"],
+    "Trial Balance": ["Ke Toan Hach Toan", "Ke Toan Truong"],
+}
+
+
 def after_install():
     create_portal_roles()
     grant_settings_permissions()
+    grant_business_permissions()
 
 
 def create_portal_roles():
@@ -49,3 +135,47 @@ def grant_settings_permissions():
             update_permission_property(dt, role, 0, "write", 1)
     except Exception:
         frappe.log_error(frappe.get_traceback(), "ketoan: grant settings permissions")
+
+
+def grant_business_permissions():
+    """Cấp quyền DocType nghiệp vụ theo BUSINESS_PERMS + mở Report chuẩn.
+
+    Idempotent: add_permission bỏ qua nếu đã có; update_permission_property chỉ set 1.
+    Mỗi DocType bọc try/except (DocType lương custom có thể chưa cài).
+    """
+    from frappe.permissions import add_permission, update_permission_property
+
+    for role, doc_perms in BUSINESS_PERMS.items():
+        for doctype, rights in doc_perms.items():
+            try:
+                if not frappe.db.exists("DocType", doctype):
+                    continue
+                add_permission(doctype, role, 0)
+                for right in rights:
+                    if right == "read":
+                        continue  # add_permission đã set read
+                    update_permission_property(doctype, role, 0, right, 1)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), f"ketoan perms: {role} @ {doctype}")
+
+    _grant_report_roles()
+
+
+def _grant_report_roles():
+    """Thêm role vào Report.roles để mở được báo cáo chuẩn (GL, AR, ...). Idempotent."""
+    for report, roles in REPORT_ROLES.items():
+        try:
+            if not frappe.db.exists("Report", report):
+                continue
+            doc = frappe.get_doc("Report", report)
+            have = {r.role for r in (doc.roles or [])}
+            changed = False
+            for role in roles:
+                if role not in have and frappe.db.exists("Role", role):
+                    doc.append("roles", {"role": role})
+                    changed = True
+            if changed:
+                doc.flags.ignore_permissions = True
+                doc.save(ignore_permissions=True)
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), f"ketoan report roles: {report}")
