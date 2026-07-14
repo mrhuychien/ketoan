@@ -157,8 +157,9 @@ export const WORKSPACES = [
         { label: "Sổ cái", icon: "fa-book", type: "desk", href: "/app/general-ledger" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
+        { label: "Phân quyền vai trò kế toán", icon: "fa-user-shield", type: "route", route: "/phan-quyen" },
         { label: "Cấu hình portal (Settings)", icon: "fa-gear", type: "desk", href: "/app/ketoan-portal-settings" },
-        { label: "Vai trò người dùng", icon: "fa-user-shield", type: "desk", href: "/app/user" },
+        { label: "Quản lý user (Desk)", icon: "fa-users-gear", type: "desk", href: "/app/user" },
       ]},
     ],
   },
