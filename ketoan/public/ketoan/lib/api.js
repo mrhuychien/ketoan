@@ -102,6 +102,16 @@ export const api = {
   nppCreateDiscount: (customers, month, a) => callMethod(NS + "npp.create_discount_entries", withCompany({ customers: JSON.stringify(customers), month, ...a })),
   nppExportBulk: (customers, from_date, to_date) => downloadPost(NS + "npp.export_reconciliation_bulk", withCompany({ customers: JSON.stringify(customers), from_date, to_date })),
 
+  // Đối trừ công nợ NPP
+  doitruCases: (a) => callMethod(NS + "doitru.get_cases", withCompany(a)),
+  doitruReturnSources: (customer) => callMethod(NS + "doitru.get_return_sources", withCompany({ customer })),
+  doitruCreateReturn: (invoice) => callMethod(NS + "doitru.create_return", withCompany({ invoice })),
+  doitruUpload: (doctype, name, filename, content) => callMethod(NS + "doitru.upload_invoice_attachment", { doctype, name, filename, content }),
+  doitruApprove: (doctype, name) => callMethod(NS + "doitru.approve_case", { doctype, name }),
+  doitruMissingEinvoice: (a) => callMethod(NS + "doitru.get_missing_einvoice", withCompany(a)),
+  customerFiles: (customer) => callMethod(NS + "doitru.get_customer_files", { customer }),
+  customerFileUpload: (customer, filename, content) => callMethod(NS + "doitru.upload_customer_file", { customer, filename, content }),
+
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
 

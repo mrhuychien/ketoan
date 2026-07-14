@@ -47,6 +47,8 @@ export async function render({ container }) {
         <button data-tab="debt" class="is-active">Công nợ NPP</button>
         <button data-tab="due">Đến hạn</button>
         <button data-tab="discount">Chiết khấu</button>
+        <button data-tab="doitru">Đối trừ</button>
+        <button data-tab="einvoice">Chưa xuất HĐĐT</button>
       </div>
 
       <div id="npp-tab-body"></div>
@@ -58,7 +60,9 @@ export async function render({ container }) {
   function renderTab() {
     if (state.tab === "debt") renderDebt(body, data, state);
     else if (state.tab === "due") renderDue(body, data, state);
-    else renderDiscount(body, data, state);
+    else if (state.tab === "discount") renderDiscount(body, data, state);
+    else if (state.tab === "doitru") renderDoitru(body, data, state);
+    else renderEinvoice(body);
   }
 
   container.querySelector("#npp-tabs").addEventListener("click", (e) => {
@@ -398,6 +402,187 @@ function monthOptions() {
     d.setMonth(d.getMonth() - 1);
   }
   return out;
+}
+
+/* ---------- Tab 4: Đối trừ công nợ (trả hàng + chiết khấu chờ HĐ NPP) ---------- */
+const DT_STATUS = {
+  cho_hoadon: { label: "Chờ hóa đơn NPP", cls: "yellow" },
+  cho_duyet: { label: "Chờ KTT duyệt", cls: "red" },
+  done: { label: "Đã trừ công nợ", cls: "green" },
+};
+
+async function renderDoitru(body, data, state) {
+  setHTML(body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let d;
+  try { d = await api.doitruCases(); }
+  catch (e) { setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`); return; }
+
+  setHTML(
+    body,
+    html`
+      <div class="kt-alert kt-alert--info">
+        <div class="kt-alert-title"><i class="fas fa-circle-info"></i> Quy trình đối trừ</div>
+        <div class="kt-alert-hint">Chứng từ NHÁP chưa đính kèm = <b>chờ hóa đơn NPP</b> → đính kèm hóa đơn = <b>chờ KTT duyệt</b> → KTT submit = <b>đã trừ công nợ</b>.</div>
+      </div>
+      <div class="kt-card">
+        <div class="kt-card-head">
+          <div class="kt-card-title"><i class="fas fa-right-left"></i> Hồ sơ đối trừ ·
+            <span class="kt-badge kt-badge--yellow">${d.counts.cho_hoadon} chờ HĐ</span>
+            <span class="kt-badge kt-badge--red">${d.counts.cho_duyet} chờ duyệt</span>
+            <span class="kt-badge kt-badge--green">${d.counts.done} xong</span></div>
+          <button class="kt-btn kt-btn--primary kt-btn--sm" id="dt-new-return"><i class="fas fa-rotate-left"></i> + Trả hàng</button>
+        </div>
+        <div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Loại</th><th>Chứng từ</th><th>NPP</th><th>Ngày</th><th class="num">Giá trị</th><th>HĐ NPP</th><th>Trạng thái</th><th></th></tr></thead>
+            <tbody>${d.cases.map((c) => doitruRow(c, d.can_approve))}</tbody>
+          </table></div>
+          ${d.cases.length === 0 ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Chưa có hồ sơ đối trừ</p></div>` : ""}
+        </div>
+      </div>
+    `
+  );
+
+  body.querySelector("#dt-new-return").addEventListener("click", () => openNewReturn(body, data, state));
+
+  // Upload hóa đơn NPP vào chứng từ nháp.
+  body.querySelectorAll(".dt-upload").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".pdf,.jpg,.jpeg,.png,.xml";
+      input.onchange = () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async () => {
+          btn.disabled = true;
+          try {
+            await api.doitruUpload(btn.dataset.dt, btn.dataset.name, file.name, reader.result);
+            toast("Đã đính kèm hóa đơn NPP", "success");
+            renderDoitru(body, data, state);
+          } catch (e) { toast(e.message, "error"); btn.disabled = false; }
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    })
+  );
+
+  // KTT duyệt (submit).
+  body.querySelectorAll(".dt-approve").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      if (!confirm(`Duyệt & ghi sổ ${btn.dataset.name}? Thao tác này trừ công nợ NPP.`)) return;
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      try {
+        await api.doitruApprove(btn.dataset.dt, btn.dataset.name);
+        toast("Đã duyệt — công nợ được trừ", "success");
+        renderDoitru(body, data, state);
+      } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.innerHTML = "Duyệt"; }
+    })
+  );
+}
+
+function doitruRow(c, canApprove) {
+  const st = DT_STATUS[c.status] || DT_STATUS.cho_hoadon;
+  const draft = c.status !== "done";
+  return html`<tr>
+    <td>${c.loai === "Trả hàng" ? html`<span class="kt-badge kt-badge--gray"><i class="fas fa-rotate-left"></i> Trả hàng</span>` : html`<span class="kt-badge kt-badge--gray"><i class="fas fa-percent"></i> Chiết khấu</span>`}</td>
+    <td>${c.name}${c.against ? html`<br><span class="kt-sub">gốc: ${c.against}</span>` : ""}</td>
+    <td>${c.label}</td><td>${c.date || "—"}</td>
+    <td class="num">${formatVND(c.amount)}</td>
+    <td>${c.attachments ? html`<span class="kt-badge kt-badge--green"><i class="fas fa-paperclip"></i> ${c.attachments}</span>` : html`<span class="kt-badge kt-badge--yellow">chưa có</span>`}</td>
+    <td><span class="kt-badge kt-badge--${st.cls}">${st.label}</span></td>
+    <td class="num" style="white-space:nowrap">
+      ${draft ? html`<button class="kt-btn-icon dt-upload" title="Đính kèm hóa đơn NPP" data-dt="${c.doctype}" data-name="${c.name}"><i class="fas fa-paperclip"></i></button>` : ""}
+      ${draft && canApprove && c.status === "cho_duyet" ? html`<button class="kt-btn kt-btn--success kt-btn--sm dt-approve" data-dt="${c.doctype}" data-name="${c.name}">Duyệt</button>` : ""}
+      <a class="kt-btn-icon" target="_blank" href="${c.route}" title="Mở trong ERPNext"><i class="fas fa-up-right-from-square"></i></a>
+    </td>
+  </tr>`;
+}
+
+function openNewReturn(body, data, state) {
+  const npps = data.rows;
+  const m = openModal({
+    title: "Tạo hồ sơ trả hàng",
+    icon: "fa-rotate-left",
+    maxWidth: 520,
+    body: html`
+      <div class="kt-field"><label><i class="fas fa-user"></i> NPP *</label>
+        <select id="nr-customer" class="kt-select"><option value="">— Chọn NPP —</option>
+          ${npps.map((r) => html`<option value="${r.customer}">${r.customer_name}</option>`)}</select></div>
+      <div class="kt-field"><label><i class="fas fa-file-invoice"></i> Hóa đơn gốc *</label>
+        <select id="nr-invoice" class="kt-select" disabled><option value="">— Chọn NPP trước —</option></select></div>
+      <p class="kt-sub">Tạo Sales Invoice trả về NHÁP từ hóa đơn gốc (chỉnh số lượng/tiền trong Desk nếu trả một phần).</p>
+      <div class="kt-modal-actions">
+        <button class="kt-btn kt-btn--outline" id="nr-cancel">Hủy</button>
+        <button class="kt-btn kt-btn--primary" id="nr-go" disabled><i class="fas fa-plus"></i> Tạo nháp</button>
+      </div>`,
+  });
+  const $sel = (id) => m.body.querySelector(id);
+  $sel("#nr-cancel").addEventListener("click", m.close);
+
+  $sel("#nr-customer").addEventListener("change", async () => {
+    const cust = $sel("#nr-customer").value;
+    const inv = $sel("#nr-invoice");
+    inv.disabled = true; inv.innerHTML = '<option value="">Đang tải…</option>';
+    if (!cust) return;
+    try {
+      const rows = await api.doitruReturnSources(cust);
+      inv.innerHTML = '<option value="">— Chọn hóa đơn —</option>' +
+        rows.map((r) => `<option value="${r.name}">${r.name} · ${r.posting_date} · ${formatVND(r.grand_total)}</option>`).join("");
+      inv.disabled = false;
+    } catch (e) { toast(e.message, "error"); }
+  });
+  $sel("#nr-invoice").addEventListener("change", () => { $sel("#nr-go").disabled = !$sel("#nr-invoice").value; });
+
+  $sel("#nr-go").addEventListener("click", async () => {
+    const invoice = $sel("#nr-invoice").value;
+    const btn = $sel("#nr-go");
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tạo…';
+    try {
+      const res = await api.doitruCreateReturn(invoice);
+      toast(`Đã tạo ${res.name} (nháp)`, "success");
+      m.close();
+      window.open(res.route, "_blank");
+      renderDoitru(body, data, state);
+    } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> Tạo nháp'; }
+  });
+}
+
+/* ---------- Tab 5: Hàng đi chưa xuất HĐĐT ---------- */
+async function renderEinvoice(body) {
+  setHTML(body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let d;
+  try { d = await api.doitruMissingEinvoice(); }
+  catch (e) { setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`); return; }
+
+  if (!d.supported) {
+    setHTML(body, html`<div class="kt-empty"><i class="fas fa-plug-circle-xmark"></i><p>${d.note || "Site chưa có field vn_einvoice_number"}</p></div>`);
+    return;
+  }
+  setHTML(
+    body,
+    html`
+      <div class="kt-card">
+        <div class="kt-card-head">
+          <div class="kt-card-title"><i class="fas fa-file-circle-exclamation"></i> Hóa đơn bán chưa xuất HĐĐT (${d.rows.length})</div>
+          <span class="kt-sub">Quy ước: chưa điền số HĐĐT (vn_einvoice_number) = chưa xuất · tổng ${formatVND(d.total)}</span>
+        </div>
+        <div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Hóa đơn</th><th>NPP</th><th>Ngày</th><th class="num">Giá trị</th><th></th></tr></thead>
+            <tbody>${d.rows.map(
+              (r) => html`<tr><td>${r.name}</td><td>${r.customer_name}</td><td>${r.posting_date}</td>
+                <td class="num">${formatVND(r.grand_total)}</td>
+                <td class="num"><a class="kt-btn-icon" target="_blank" href="/app/sales-invoice/${r.name}"><i class="fas fa-up-right-from-square"></i></a></td></tr>`
+            )}</tbody>
+          </table></div>
+          ${d.rows.length === 0 ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i><p>Tất cả hàng đi đã xuất HĐĐT 👍</p></div>` : ""}
+        </div>
+      </div>
+    `
+  );
 }
 
 /* ---------- helpers ---------- */

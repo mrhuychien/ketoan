@@ -78,6 +78,60 @@ export async function render({ container, params }) {
 
   const exportBtn = container.querySelector("#kt-export-recon");
   if (exportBtn) exportBtn.addEventListener("click", () => openReconModal(d));
+
+  renderCustomerFiles(container, d.customer);
+}
+
+// Khối "Hồ sơ khách hàng" — file đính kèm trên Customer (hợp đồng, phụ lục, ĐKKD...)
+async function renderCustomerFiles(container, customer) {
+  const host = document.createElement("div");
+  host.className = "kt-card";
+  host.style.marginTop = "16px";
+  container.appendChild(host);
+  setHTML(host, html`<div class="kt-card-body"><div class="kt-spinner" style="width:24px;height:24px"></div></div>`);
+
+  async function load() {
+    let files;
+    try { files = await api.customerFiles(customer); }
+    catch (e) { setHTML(host, html`<div class="kt-card-body kt-sub">${e.message}</div>`); return; }
+    setHTML(
+      host,
+      html`
+        <div class="kt-card-head">
+          <div class="kt-card-title"><i class="fas fa-folder-open"></i> Hồ sơ khách hàng (${files.length})</div>
+          <button class="kt-btn kt-btn--outline kt-btn--sm" id="cf-upload"><i class="fas fa-upload"></i> Tải hồ sơ lên</button>
+        </div>
+        <div class="kt-card-body">
+          ${files.length
+            ? html`<div class="kt-table-wrap"><table class="kt-table"><tbody>
+                ${files.map(
+                  (f) => html`<tr><td><i class="fas fa-file-lines" style="color:var(--kt-primary)"></i> ${f.file_name}</td>
+                    <td>${(f.creation || "").slice(0, 10)}</td>
+                    <td class="num"><a class="kt-btn-icon" target="_blank" href="${f.file_url}" title="Mở file"><i class="fas fa-download"></i></a></td></tr>`
+                )}
+              </tbody></table></div>`
+            : html`<div class="kt-sub">Chưa có hồ sơ (hợp đồng, phụ lục thương mại, ĐKKD...). Bấm "Tải hồ sơ lên".</div>`}
+        </div>
+      `
+    );
+    host.querySelector("#cf-upload").addEventListener("click", () => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx";
+      input.onchange = () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try { await api.customerFileUpload(customer, file.name, reader.result); load(); }
+          catch (e) { alert(e.message); }
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    });
+  }
+  load();
 }
 
 function openReconModal(d) {
