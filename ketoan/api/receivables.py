@@ -210,6 +210,13 @@ def _customer_tasks(customer: str, company: str) -> dict:
         )
     else:
         tasks["missing_einvoice"] = 0
+    # Hồ sơ pháp lý: chưa có file nào đính kèm trên Customer (hợp đồng, ĐKKD...).
+    try:
+        tasks["missing_docs"] = 0 if frappe.db.exists(
+            "File", {"attached_to_doctype": "Customer", "attached_to_name": customer}
+        ) else 1
+    except Exception:
+        tasks["missing_docs"] = 0
     return tasks
 
 
@@ -326,7 +333,8 @@ def get_customer_ledger(customer: str, company: str | None = None,
     from_clause = "AND gle.posting_date >= %(from)s" if from_date else ""
     rows = frappe.db.sql(
         f"""SELECT MIN(gle.posting_date) AS posting_date, gle.voucher_type, gle.voucher_no,
-                   SUM(gle.debit) AS debit, SUM(gle.credit) AS credit
+                   SUM(gle.debit) AS debit, SUM(gle.credit) AS credit,
+                   GROUP_CONCAT(DISTINCT gle.against SEPARATOR ', ') AS against
             FROM `tabGL Entry` gle JOIN `tabAccount` acc ON acc.name = gle.account
             WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
               AND gle.party_type = 'Customer' AND gle.party = %(customer)s
@@ -383,6 +391,7 @@ def get_customer_ledger(customer: str, company: str | None = None,
             "posting_date": str(r.posting_date), "voucher_type": r.voucher_type,
             "voucher_no": r.voucher_no, "debit": flt(r.debit), "credit": flt(r.credit),
             "balance": running, "docstatus": 1, "todos": todos,
+            "against": (r.against or "")[:140],
             "route": f"/app/{frappe.scrub(r.voucher_type).replace('_', '-')}/{r.voucher_no}",
         })
 
@@ -395,7 +404,7 @@ def get_customer_ledger(customer: str, company: str | None = None,
         drafts.append({
             "posting_date": str(x.posting_date), "voucher_type": "Sales Invoice (trả hàng)",
             "voucher_no": x.name, "debit": 0, "credit": abs(flt(x.grand_total)),
-            "balance": None, "docstatus": 0,
+            "balance": None, "docstatus": 0, "kind": "return", "against": "",
             "todos": [{"icon": "fa-rotate-left",
                        "label": "Chờ KTT duyệt trả hàng" if has_att else "Chờ hóa đơn NPP (trả hàng)",
                        "sev": "red" if has_att else "yellow"}],
@@ -404,7 +413,12 @@ def get_customer_ledger(customer: str, company: str | None = None,
     from ketoan.utils import je_remark_field
     fieldr = je_remark_field()
     je_drafts = frappe.db.sql(
-        f"""SELECT DISTINCT je.name, je.posting_date, je.total_debit, je.`{fieldr}` AS remark
+        f"""SELECT DISTINCT je.name, je.posting_date, je.total_debit, je.`{fieldr}` AS remark,
+                   (SELECT GROUP_CONCAT(DISTINCT a2.account SEPARATOR ', ')
+                    FROM `tabJournal Entry Account` a2
+                    WHERE a2.parent = je.name
+                      AND NOT (IFNULL(a2.party_type, '') = 'Customer'
+                               AND IFNULL(a2.party, '') = %(customer)s)) AS against
             FROM `tabJournal Entry` je
             JOIN `tabJournal Entry Account` a ON a.parent = je.name
             WHERE je.docstatus = 0 AND je.company = %(company)s
@@ -420,7 +434,7 @@ def get_customer_ledger(customer: str, company: str | None = None,
         drafts.append({
             "posting_date": str(x.posting_date), "voucher_type": vt,
             "voucher_no": x.name, "debit": 0, "credit": flt(x.total_debit),
-            "balance": None, "docstatus": 0,
+            "balance": None, "docstatus": 0, "kind": "je", "against": (x.against or "")[:140],
             "todos": [{"icon": "fa-percent" if is_ck else "fa-gift",
                        "label": "Chờ KTT duyệt bút toán" if has_att else "Chờ hóa đơn NPP (bút toán JE)",
                        "sev": "red" if has_att else "yellow"}],

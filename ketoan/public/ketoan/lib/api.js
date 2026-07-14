@@ -111,6 +111,8 @@ export const api = {
   doitruUpload: (doctype, name, filename, content) => callMethod(NS + "doitru.upload_invoice_attachment", { doctype, name, filename, content }),
   doitruApprove: (doctype, name) => callMethod(NS + "doitru.approve_case", { doctype, name }),
   doitruMissingEinvoice: (a) => callMethod(NS + "doitru.get_missing_einvoice", withCompany(a)),
+  doitruJeOptions: () => callMethod(NS + "doitru.get_je_options", withCompany()),
+  doitruCreateJe: (a) => callMethod(NS + "doitru.create_je", withCompany(a)),
   customerFiles: (customer) => callMethod(NS + "doitru.get_customer_files", { customer }),
   customerFileUpload: (customer, filename, content) => callMethod(NS + "doitru.upload_customer_file", { customer, filename, content }),
 

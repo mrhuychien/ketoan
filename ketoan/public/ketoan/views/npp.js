@@ -51,6 +51,8 @@ export async function render({ container, query }) {
           <div class="kt-stat-sub">${policyDesc(data)}</div></div>
       </div>
 
+      <div id="npp-tasks" class="kt-mb" style="display:none"></div>
+
       <div class="kt-segment kt-mb" id="npp-tabs">
         <button data-tab="debt" class="${state.tab === "debt" ? "is-active" : ""}">Công nợ &amp; chính sách</button>
         <button data-tab="due" class="${state.tab === "due" ? "is-active" : ""}">Đến hạn</button>
@@ -90,6 +92,30 @@ export async function render({ container, query }) {
   });
 
   renderTab();
+  loadNppTasks(container.querySelector("#npp-tasks"));
+}
+
+// Việc cần xử lý của trang này: gom mọi item (NPP + KTT) trỏ về /doi-chieu-npp.
+async function loadNppTasks(host) {
+  if (!host) return;
+  let d;
+  try { d = await api.tasks(); } catch (_) { return; }
+  const items = [];
+  (d.groups || []).forEach((g) =>
+    (g.items || []).forEach((it) => { if (it.route && it.route.startsWith("/doi-chieu-npp")) items.push(it); })
+  );
+  if (!items.length) return;
+  host.style.display = "";
+  setHTML(
+    host,
+    html`<div class="kt-card"><div class="kt-card-body kt-task-chips">
+      <span class="kt-task-chips-title"><i class="fas fa-list-check"></i> Việc cần xử lý</span>
+      ${items.map(
+        (it) => html`<a class="kt-task-chip kt-task-chip--${it.severity || "warning"}" href="#${it.route}">
+          ${it.label} <b>${it.count}</b></a>`
+      )}
+    </div></div>`
+  );
 }
 
 function policyDesc(d) {
@@ -538,12 +564,15 @@ async function renderJEs(body, data, state) {
     html`
       <div class="kt-alert kt-alert--info">
         <div class="kt-alert-title"><i class="fas fa-circle-info"></i> Bút toán JE gắn khách NPP</div>
-        <div class="kt-alert-hint">Gồm chiết khấu, thưởng, hỗ trợ, điều chỉnh... JE NHÁP → chờ NPP xuất hóa đơn → <b>đính kèm</b> → <b>KTT duyệt</b> → trừ công nợ. (Chiết khấu tạo từ tab "Chiết khấu"; JE khác tạo trong Desk.)</div>
+        <div class="kt-alert-hint">Gồm chiết khấu, thưởng, hỗ trợ, điều chỉnh... JE NHÁP → chờ NPP xuất hóa đơn → <b>đính kèm</b> → <b>KTT duyệt</b> → trừ công nợ. (Chiết khấu tạo từ tab "Chiết khấu"; thưởng/hỗ trợ bấm "+ Bút toán JE".)</div>
       </div>
       <div class="kt-card">
         <div class="kt-card-head">
           <div class="kt-card-title"><i class="fas fa-pen-to-square"></i> Bút toán JE · ${dtCountBadges(d.je_counts)}</div>
-          <a class="kt-btn kt-btn--primary kt-btn--sm" target="_blank" href="/app/journal-entry/new"><i class="fas fa-plus"></i> Bút toán JE (Desk)</a>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="kt-btn kt-btn--primary kt-btn--sm" id="dt-new-je"><i class="fas fa-plus"></i> Bút toán JE</button>
+            <a class="kt-btn-icon" target="_blank" href="/app/journal-entry/new" title="Tạo JE phức tạp trong Desk"><i class="fas fa-up-right-from-square"></i></a>
+          </div>
         </div>
         <div class="kt-card-body">
           <div class="kt-table-wrap"><table class="kt-table">
@@ -567,7 +596,83 @@ async function renderJEs(body, data, state) {
     `
   );
 
+  body.querySelector("#dt-new-je").addEventListener("click", () => openNewJE(body, data, state));
   bindDtActions(body, () => renderJEs(body, data, state));
+}
+
+// Modal tạo Bút toán JE ngay trên portal (thưởng, hỗ trợ, điều chỉnh...) + upload HĐ.
+async function openNewJE(body, data, state) {
+  let opts;
+  try { opts = await api.doitruJeOptions(); }
+  catch (e) { toast(e.message, "error"); return; }
+
+  const m = openModal({
+    title: "Tạo bút toán JE (nháp)",
+    icon: "fa-pen-to-square",
+    maxWidth: 560,
+    body: html`
+      <div class="kt-field"><label><i class="fas fa-user"></i> NPP *</label>
+        <select id="nj-customer" class="kt-select"><option value="">— Chọn NPP —</option>
+          ${opts.customers.map((c) => html`<option value="${c.name}">${c.customer_name || c.name}</option>`)}</select></div>
+      <div class="kt-row2">
+        <div class="kt-field"><label><i class="fas fa-money-bill-wave"></i> Số tiền *</label>
+          <input type="number" id="nj-amount" class="kt-input" min="1" step="1000" placeholder="VD: 5000000"></div>
+        <div class="kt-field"><label><i class="fas fa-calendar"></i> Ngày hạch toán</label>
+          <input type="date" id="nj-date" class="kt-input" value="${opts.today}"></div>
+      </div>
+      <div class="kt-field"><label><i class="fas fa-tag"></i> Loại</label>
+        <select id="nj-type" class="kt-select">
+          <option value="Thưởng">Thưởng</option><option value="Hỗ trợ">Hỗ trợ</option>
+          <option value="Điều chỉnh">Điều chỉnh công nợ</option><option value="Khác">Khác</option>
+        </select></div>
+      <div class="kt-field"><label><i class="fas fa-pen"></i> Diễn giải *</label>
+        <input type="text" id="nj-remark" class="kt-input" placeholder="VD: Thưởng trưng bày quý 2/2026"></div>
+      <div class="kt-field"><label><i class="fas fa-book"></i> TK chi phí (Nợ) *</label>
+        <select id="nj-account" class="kt-select">
+          ${opts.expense_accounts.map((a) => html`<option value="${a.name}" ${a.name === opts.default_expense_account ? "selected" : ""}>${a.name}</option>`)}
+        </select></div>
+      <div class="kt-field"><label><i class="fas fa-paperclip"></i> Hóa đơn NPP (đính kèm — tùy chọn)</label>
+        <input type="file" id="nj-file" class="kt-input" accept=".pdf,.jpg,.jpeg,.png,.xml"></div>
+      <p class="kt-sub">Hạch toán: <b>Nợ</b> TK chi phí / <b>Có</b> ${opts.receivable_account || "TK phải thu"} (party = NPP). Tạo NHÁP → đính kèm HĐ NPP → KTT duyệt → trừ công nợ.</p>
+      <div class="kt-modal-actions">
+        <button class="kt-btn kt-btn--outline" id="nj-cancel">Hủy</button>
+        <button class="kt-btn kt-btn--primary" id="nj-go"><i class="fas fa-plus"></i> Tạo nháp</button>
+      </div>`,
+  });
+  const $f = (id) => m.body.querySelector(id);
+  $f("#nj-cancel").addEventListener("click", m.close);
+
+  $f("#nj-go").addEventListener("click", () => {
+    const customer = $f("#nj-customer").value;
+    const amount = parseFloat($f("#nj-amount").value || "0");
+    const remark = ($f("#nj-remark").value || "").trim();
+    if (!customer) { toast("Chọn NPP", "warning"); return; }
+    if (!(amount > 0)) { toast("Nhập số tiền > 0", "warning"); return; }
+    if (!remark) { toast("Nhập diễn giải", "warning"); return; }
+
+    const btn = $f("#nj-go");
+    const args = {
+      customer, amount,
+      remark: `[${$f("#nj-type").value}] ${remark}`,
+      expense_account: $f("#nj-account").value,
+      posting_date: $f("#nj-date").value,
+    };
+    const submit = async () => {
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tạo…';
+      try {
+        const res = await api.doitruCreateJe(args);
+        toast(`Đã tạo ${res.name} (nháp)`, "success");
+        m.close();
+        renderJEs(body, data, state);
+      } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> Tạo nháp'; }
+    };
+    const file = $f("#nj-file").files && $f("#nj-file").files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => { args.filename = file.name; args.content = reader.result; submit(); };
+      reader.readAsDataURL(file);
+    } else submit();
+  });
 }
 
 function openNewReturn(body, data, state) {

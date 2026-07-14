@@ -196,6 +196,15 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-home-role-help { display: flex; align-items: center; padding: 0 12px; background: var(--kt-bg-card); border: 1px solid var(--kt-border); border-left: 0; border-radius: 0 var(--kt-r-lg) var(--kt-r-lg) 0; color: var(--kt-text-2); box-shadow: var(--kt-shadow); transition: color .12s, border-color .12s; }
 .kt-home-role-help:hover { color: var(--kt-primary); border-color: var(--kt-primary); }
 
+/* ===== Việc cần xử lý dạng chip (trên trang làm việc) ===== */
+.kt-task-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.kt-task-chips-title { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--kt-text-2); display: flex; align-items: center; gap: 6px; margin-right: 4px; }
+.kt-task-chips-title i { color: var(--kt-primary); }
+.kt-task-chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--kt-border); background: var(--kt-bg-input); font-size: 12px; font-weight: 600; color: var(--kt-text); transition: border-color .12s, transform .12s; }
+.kt-task-chip:hover { border-color: var(--kt-primary); transform: translateY(-1px); }
+.kt-task-chip b { font-size: 12px; padding: 1px 7px; border-radius: 999px; background: var(--kt-warning); color: #fff; }
+.kt-task-chip--danger b { background: var(--kt-danger); }
+
 /* ===== Việc cần xử lý (trang chủ) ===== */
 .kt-task-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; align-items: start; }
 .kt-task-group { border: 1px solid var(--kt-border); border-radius: var(--kt-r-md); padding: 12px; background: var(--kt-bg-input); }

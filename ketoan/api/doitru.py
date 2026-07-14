@@ -180,6 +180,95 @@ def create_return(invoice: str, company: str | None = None) -> dict:
 
 
 @frappe.whitelist()
+def get_je_options(company: str | None = None) -> dict:
+    """Dữ liệu cho modal tạo Bút toán JE trên portal: danh sách NPP + TK chi phí."""
+    guard_npp()
+    company = resolve_company(company)
+    s = get_settings()
+    group = s.npp_customer_group or "NPP"
+    customers = frappe.get_all(
+        "Customer",
+        filters={"customer_group": group, "disabled": 0},
+        fields=["name", "customer_name"],
+        order_by="customer_name asc",
+        limit=500,
+    )
+    expense_accounts = frappe.get_all(
+        "Account",
+        filters={"company": company, "is_group": 0, "root_type": "Expense"},
+        fields=["name", "account_name"],
+        order_by="name asc",
+        limit=500,
+    )
+    receivable = s.receivable_account or frappe.db.get_value("Company", company, "default_receivable_account")
+    return {
+        "customers": customers,
+        "expense_accounts": expense_accounts,
+        "default_expense_account": s.discount_expense_account or "",
+        "receivable_account": receivable or "",
+        "today": today(),
+    }
+
+
+@frappe.whitelist()
+def create_je(customer: str, amount, remark: str, expense_account: str | None = None,
+              posting_date: str | None = None, company: str | None = None,
+              filename: str | None = None, content: str | None = None) -> dict:
+    """Tạo Bút toán JE NHÁP từ portal (thưởng, hỗ trợ, điều chỉnh...):
+    Nợ TK chi phí / Có TK phải thu (party = NPP). Kèm đính kèm hóa đơn nếu có.
+    Đi tiếp quy trình đối trừ: đính kèm HĐ NPP → KTT duyệt → trừ công nợ."""
+    guard_npp()
+    company = resolve_company(company)
+    s = get_settings()
+    group = s.npp_customer_group or "NPP"
+
+    amount = flt(amount)
+    if amount <= 0:
+        frappe.throw(_("Số tiền phải lớn hơn 0"))
+    if not (remark or "").strip():
+        frappe.throw(_("Nhập diễn giải cho bút toán"))
+    if not customer or frappe.db.get_value("Customer", customer, "customer_group") != group:
+        frappe.throw(_("Khách không thuộc nhóm NPP"))
+
+    expense_account = expense_account or s.discount_expense_account
+    if not expense_account:
+        frappe.throw(_("Chưa chọn TK chi phí (hoặc cấu hình mặc định trong Ketoan Portal Settings)"))
+    acc = frappe.db.get_value("Account", expense_account, ["company", "is_group"], as_dict=True)
+    if not acc or acc.company != company or acc.is_group:
+        frappe.throw(_("TK chi phí không hợp lệ với công ty đang chọn"))
+
+    receivable = s.receivable_account or frappe.db.get_value("Company", company, "default_receivable_account")
+    if not receivable:
+        frappe.throw(_("Chưa cấu hình TK phải thu (Ketoan Portal Settings hoặc Company)"))
+
+    je = frappe.new_doc("Journal Entry")
+    je.voucher_type = "Journal Entry"
+    je.posting_date = posting_date or today()
+    je.company = company
+    je.set(je_remark_field(), f"{remark.strip()} — {customer}")
+    je.append("accounts", {"account": expense_account, "debit_in_account_currency": amount})
+    je.append("accounts", {
+        "account": receivable, "credit_in_account_currency": amount,
+        "party_type": "Customer", "party": customer,
+    })
+    je.insert()  # NHÁP — tôn trọng quyền create Journal Entry của user
+
+    if content:
+        b64 = (content or "").split(",")[-1]
+        frappe.get_doc({
+            "doctype": "File",
+            "attached_to_doctype": "Journal Entry",
+            "attached_to_name": je.name,
+            "file_name": filename or "hoa-don-npp.pdf",
+            "is_private": 1,
+            "content": b64,
+            "decode": True,
+        }).save()
+
+    return {"name": je.name, "route": f"/app/journal-entry/{je.name}"}
+
+
+@frappe.whitelist()
 def upload_invoice_attachment(doctype: str, name: str, filename: str, content: str) -> dict:
     """Đính kèm hóa đơn NPP (file base64) vào chứng từ NHÁP (SI return / JE chiết khấu)."""
     guard_npp()

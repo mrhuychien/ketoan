@@ -51,9 +51,6 @@ export async function render({ container, params }) {
         <div class="kt-card-body" style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="kt-btn kt-btn--primary kt-btn--sm" id="kt-export-recon"><i class="fas fa-file-pdf"></i> Xuất đối chiếu (PDF)</button>
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/customer/${q(d.customer)}"><i class="fas fa-up-right-from-square"></i> Mở khách</a>
-          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/general-ledger?party_type=Customer&party=${q(d.customer)}"><i class="fas fa-book"></i> Sổ cái</a>
-          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/payment-entry?party=${q(d.customer)}"><i class="fas fa-money-bill-wave"></i> Phiếu thu</a>
-          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/sales-invoice?customer=${q(d.customer)}&status=Overdue"><i class="fas fa-file-invoice"></i> HĐ quá hạn</a>
         </div>
       </div>
 
@@ -110,16 +107,16 @@ async function renderLedger(host, customer, period = "ytd") {
         </div>
         <div class="kt-card-body">
           <div class="kt-table-wrap"><table class="kt-table">
-            <thead><tr><th>Ngày</th><th>Chứng từ</th><th class="num">Nợ (bán)</th><th class="num">Có (thu/giảm)</th><th class="num">Số dư</th><th>Việc cần làm</th><th></th></tr></thead>
+            <thead><tr><th>Ngày</th><th>Chứng từ</th><th>TK đối ứng</th><th class="num">Nợ (bán)</th><th class="num">Có (thu/giảm)</th><th class="num">Số dư</th><th>Việc cần làm</th><th></th></tr></thead>
             <tbody>
-              ${d.from_date ? html`<tr class="kt-lg-open"><td>${formatDate(d.from_date)}</td><td><b>Dư đầu kỳ</b></td><td class="num"></td><td class="num"></td><td class="num"><b>${formatVND(d.opening)}</b></td><td></td><td></td></tr>` : ""}
+              ${d.from_date ? html`<tr class="kt-lg-open"><td>${formatDate(d.from_date)}</td><td><b>Dư đầu kỳ</b></td><td></td><td class="num"></td><td class="num"></td><td class="num"><b>${formatVND(d.opening)}</b></td><td></td><td></td></tr>` : ""}
               ${d.rows.map((r) => ledgerRow(r))}
-              <tr class="kt-lg-total"><td></td><td><b>Cộng phát sinh</b></td>
+              <tr class="kt-lg-total"><td></td><td><b>Cộng phát sinh</b></td><td></td>
                 <td class="num"><b>${formatVND(d.total_debit)}</b></td>
                 <td class="num"><b>${formatVND(d.total_credit)}</b></td>
                 <td class="num"><b>${formatVND(d.closing)}</b></td><td></td><td></td></tr>
-              ${d.drafts.length ? html`<tr><td colspan="7" style="background:var(--kt-bg-input);font-weight:700;font-size:11px;text-transform:uppercase;color:var(--kt-text-2)">Chứng từ nháp đang xử lý (chưa vào số dư)</td></tr>` : ""}
-              ${d.drafts.map((r) => ledgerRow(r))}
+              ${draftSection(d.drafts.filter((r) => r.kind === "return"), "Hàng trả lại chưa xử lý (nháp — chưa vào số dư)")}
+              ${draftSection(d.drafts.filter((r) => r.kind !== "return"), "Bút toán JE đang treo (nháp — chưa vào số dư)")}
             </tbody>
           </table></div>
           ${d.rows.length === 0 && !d.drafts.length ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có giao dịch trong kỳ</p></div>` : ""}
@@ -134,11 +131,20 @@ async function renderLedger(host, customer, period = "ytd") {
   });
 }
 
+// Nhóm chứng từ nháp trong sổ cái (Hàng trả lại / Bút toán JE) — có dòng tiêu đề riêng.
+function draftSection(rows, title) {
+  if (!rows.length) return "";
+  return html`
+    <tr><td colspan="8" style="background:var(--kt-bg-input);font-weight:700;font-size:11px;text-transform:uppercase;color:var(--kt-text-2)">${title} · ${rows.length}</td></tr>
+    ${rows.map((r) => ledgerRow(r))}`;
+}
+
 function ledgerRow(r) {
   const draft = r.docstatus === 0;
   return html`<tr style="${draft ? "opacity:.85;background:#fffbeb" : ""}">
     <td>${formatDate(r.posting_date)}</td>
     <td>${r.voucher_no}<br><span class="kt-sub">${r.voucher_type}${draft ? html` <span class="kt-badge kt-badge--yellow">NHÁP</span>` : ""}</span></td>
+    <td style="font-size:11px;color:var(--kt-text-2);max-width:180px">${r.against || "—"}</td>
     <td class="num">${r.debit ? formatVND(r.debit) : ""}</td>
     <td class="num">${r.credit ? formatVND(r.credit) : ""}</td>
     <td class="num">${r.balance == null ? "—" : formatVND(r.balance)}</td>
@@ -161,13 +167,15 @@ function customerTasksBlock(d) {
   if (t.missing_einvoice)
     items.push({ icon: "fa-file-circle-exclamation", label: `Cần xuất hóa đơn điện tử: ${t.missing_einvoice} hóa đơn`, sev: "red", href: "#/doi-chieu-npp?tab=einvoice" });
   if (t.pending_returns)
-    items.push({ icon: "fa-rotate-left", label: `Hàng trả lại đang xử lý: ${t.pending_returns} hồ sơ`, sev: "yellow", href: "#/doi-chieu-npp?tab=trahang" });
+    items.push({ icon: "fa-rotate-left", label: `Hàng trả lại chưa xử lý: ${t.pending_returns} hồ sơ`, sev: "yellow", href: "#/doi-chieu-npp?tab=trahang" });
   if (t.pending_je)
     items.push({ icon: "fa-pen-to-square", label: `Bút toán JE đang treo (CK, thưởng, hỗ trợ...): ${t.pending_je}`, sev: "yellow", href: "#/doi-chieu-npp?tab=butoan" });
   if (d.unallocated_payment > 0)
     items.push({ icon: "fa-link-slash", label: `Khoản thu chưa khớp hóa đơn: ${formatVND(d.unallocated_payment)}`, sev: "yellow", href: `/app/payment-entry?party=${q(d.customer)}&unallocated_amount=[">",0]` });
   if (d.over_limit)
     items.push({ icon: "fa-user-shield", label: "Vượt hạn mức tín dụng — cân nhắc khóa đơn/thu hồi", sev: "red", href: null });
+  if (t.missing_docs)
+    items.push({ icon: "fa-file-signature", label: "Bổ sung hợp đồng, pháp lý — chưa có hồ sơ đính kèm (tải lên ở khối Hồ sơ khách hàng bên dưới)", sev: "yellow", href: null });
 
   if (!items.length)
     return html`<div class="kt-alert kt-alert--info kt-mb"><div class="kt-alert-title"><i class="fas fa-circle-check" style="color:var(--kt-success)"></i> Không có việc tồn đọng với khách này</div></div>`;
