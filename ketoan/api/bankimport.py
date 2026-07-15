@@ -133,21 +133,36 @@ def _suggest_bank_account(company: str) -> str | None:
 
 @frappe.whitelist()
 def get_import_options(company: str | None = None) -> dict:
-    """TK ngân hàng (Bank) + TK đối ứng gợi ý + TK ngân hàng đề xuất (112)."""
+    """TK ngân hàng (Bank) + TK đối ứng + TK ngân hàng đề xuất (112).
+
+    counter_accounts kèm account_number và XẾP THEO TẦN SUẤT DÙNG (số dòng
+    Journal Entry Account 12 tháng gần nhất) — client hiện top trước, gõ để tìm.
+    """
     guard_cash()
     company = resolve_company(company)
     bank_accounts = frappe.get_all(
         "Account",
         filters={"company": company, "account_type": ["in", ["Bank", "Cash"]], "is_group": 0, "disabled": 0},
-        fields=["name", "account_name", "account_type"],
+        fields=["name", "account_name", "account_number", "account_type"],
         order_by="account_type, name",
     )
-    counter_accounts = frappe.get_all(
-        "Account",
-        filters={"company": company, "is_group": 0, "disabled": 0},
-        fields=["name", "account_name", "root_type", "account_type"],
-        order_by="root_type, name",
-        limit=1000,
+    counter_accounts = frappe.db.sql(
+        """
+        SELECT a.name, a.account_name, a.account_number, a.root_type, a.account_type,
+               COALESCE(u.cnt, 0) AS usage_count
+        FROM `tabAccount` a
+        LEFT JOIN (
+            SELECT account, COUNT(*) AS cnt
+            FROM `tabJournal Entry Account`
+            WHERE docstatus < 2 AND creation >= DATE_SUB(NOW(), INTERVAL 365 DAY)
+            GROUP BY account
+        ) u ON u.account = a.name
+        WHERE a.company = %(company)s AND a.is_group = 0 AND a.disabled = 0
+        ORDER BY COALESCE(u.cnt, 0) DESC, a.account_number ASC, a.name ASC
+        LIMIT 1000
+        """,
+        {"company": company},
+        as_dict=True,
     )
     return {
         "company": company,
@@ -155,6 +170,37 @@ def get_import_options(company: str | None = None) -> dict:
         "counter_accounts": counter_accounts,
         "suggested_bank": _suggest_bank_account(company),
     }
+
+
+@frappe.whitelist()
+def search_party(party_type: str, txt: str = "", limit: int = 15) -> list:
+    """Tìm đối tượng cho TK phải thu/phải trả (giống chọn Party khi bút toán trên
+    Desk): Customer/Supplier đang hoạt động, hay dùng (JE 12 tháng) lên trước."""
+    guard_cash()
+    if party_type not in ("Customer", "Supplier"):
+        frappe.throw(_("Loại đối tượng không hợp lệ"))
+    label = "customer_name" if party_type == "Customer" else "supplier_name"
+    limit = max(1, min(int(limit or 15), 50))
+    like = "%" + (txt or "").strip() + "%"
+    return frappe.db.sql(
+        f"""
+        SELECT p.name, p.`{label}` AS label, COALESCE(u.cnt, 0) AS usage_count
+        FROM `tab{party_type}` p
+        LEFT JOIN (
+            SELECT party, COUNT(*) AS cnt
+            FROM `tabJournal Entry Account`
+            WHERE party_type = %(pt)s AND docstatus < 2
+              AND creation >= DATE_SUB(NOW(), INTERVAL 365 DAY)
+            GROUP BY party
+        ) u ON u.party = p.name
+        WHERE IFNULL(p.disabled, 0) = 0
+          AND (p.name LIKE %(like)s OR p.`{label}` LIKE %(like)s)
+        ORDER BY COALESCE(u.cnt, 0) DESC, p.`{label}` ASC
+        LIMIT {limit}
+        """,
+        {"pt": party_type, "like": like},
+        as_dict=True,
+    )
 
 
 @frappe.whitelist()
@@ -226,8 +272,16 @@ def parse_statement(content: str, company: str | None = None) -> dict:
         if t["duplicate"]:
             dup_count += 1
 
-    # Gợi ý TK đối ứng theo quy tắc map đã lưu.
+    # Gợi ý TK đối ứng theo quy tắc map đã lưu — bỏ rule trỏ TK không còn dùng
+    # được với company này (đã disable / group / company khác).
     rules = _load_rules(company)
+    _acc_ok = {}
+    def _usable(acc):
+        if acc not in _acc_ok:
+            row = frappe.db.get_value("Account", acc, ["company", "is_group", "disabled"], as_dict=True)
+            _acc_ok[acc] = bool(row and row.company == company and not row.is_group and not row.disabled)
+        return _acc_ok[acc]
+    rules = [r for r in rules if _usable(r.counter_account)]
     suggested = 0
     for t in txns:
         r = _match_rule(t["content"], t["direction"], rules)

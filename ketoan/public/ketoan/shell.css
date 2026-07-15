@@ -196,6 +196,16 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-home-role-help { display: flex; align-items: center; padding: 0 12px; background: var(--kt-bg-card); border: 1px solid var(--kt-border); border-left: 0; border-radius: 0 var(--kt-r-lg) var(--kt-r-lg) 0; color: var(--kt-text-2); box-shadow: var(--kt-shadow); transition: color .12s, border-color .12s; }
 .kt-home-role-help:hover { color: var(--kt-primary); border-color: var(--kt-primary); }
 
+/* ===== Combobox (ô chọn có tìm kiếm) ===== */
+.kt-combo { display: block; }
+.kt-combo-input { width: 100%; min-width: 180px; }
+.kt-combo-panel { position: fixed; z-index: 1050; background: var(--kt-bg-card); border: 1px solid var(--kt-border); border-radius: var(--kt-r-md); box-shadow: var(--kt-shadow-md); max-height: 340px; overflow-y: auto; }
+.kt-combo-item { padding: 8px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 1px; }
+.kt-combo-item b { font-size: 13px; font-weight: 600; }
+.kt-combo-item span { font-size: 11px; color: var(--kt-text-2); }
+.kt-combo-item:hover, .kt-combo-item.is-active { background: var(--kt-bg-input); }
+.kt-combo-empty, .kt-combo-more { padding: 8px 12px; font-size: 11.5px; color: var(--kt-muted); }
+
 /* ===== Việc cần xử lý dạng chip (trên trang làm việc) ===== */
 .kt-task-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .kt-task-chips-title { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--kt-text-2); display: flex; align-items: center; gap: 6px; margin-right: 4px; }

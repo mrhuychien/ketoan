@@ -132,6 +132,7 @@ export const api = {
   bankParse: (content, a) => callMethod(NS + "bankimport.parse_statement", withCompany({ content, ...a })),
   bankImport: (rows, bank_account, a) => callMethod(NS + "bankimport.import_transactions", withCompany({ rows: JSON.stringify(rows), bank_account, ...a })),
   bankGetRules: (a) => callMethod(NS + "bankimport.get_rules", withCompany(a)),
+  bankSearchParty: (party_type, txt) => callMethod(NS + "bankimport.search_party", { party_type, txt: txt || "", limit: 50 }),
   bankSaveRule: (a) => callMethod(NS + "bankimport.save_rule", withCompany(a)),
   bankDeleteRule: (name) => callMethod(NS + "bankimport.delete_rule", { name }),
 };
