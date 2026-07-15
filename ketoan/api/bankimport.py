@@ -2,11 +2,12 @@
 
 - parse_statement: đọc file .xlsx (cột: Số tham chiếu / Ngày / Ghi nợ / Ghi có /
   Số dư / Nội dung), trả danh sách giao dịch + cờ trùng (đã nhập trước đó).
-- import_transactions: tạo Journal Entry (Bank Entry) cho các dòng đã chọn —
-  Ghi có (tiền vào) → Nợ TK ngân hàng / Có TK đối ứng; Ghi nợ (tiền ra) → ngược lại.
-  DRAFT, chống trùng bằng marker [BANKIMP-<key>] ghi trong field remark.
+- import_transactions: tạo Journal Entry (voucher_type "Journal Entry") cho các
+  dòng đã chọn và GHI SỔ (submit) luôn — Ghi có (tiền vào) → Nợ TK ngân hàng /
+  Có TK đối ứng; Ghi nợ (tiền ra) → ngược lại. Ghi chú người dùng tự nhập đưa
+  vào field remark, kèm marker chống trùng [BANKIMP-<key>].
 
-TK ngân hàng (112) do người dùng chọn. Read trừ import (ghi DRAFT). Guard quỹ.
+TK ngân hàng (112) do người dùng chọn. Guard quỹ.
 """
 
 import base64
@@ -300,9 +301,11 @@ def parse_statement(content: str, company: str | None = None) -> dict:
 
 @frappe.whitelist()
 def import_transactions(rows, bank_account: str, company: str | None = None) -> dict:
-    """Tạo Journal Entry (Bank Entry) DRAFT cho các giao dịch đã chọn.
+    """Tạo Journal Entry cho các giao dịch đã chọn và SUBMIT (ghi sổ) luôn.
 
-    rows: JSON list {key, date, debit, credit, content, counter_account, party?}.
+    rows: JSON list {key, date, debit, credit, content, counter_account,
+    party?, remark?}. remark (ghi chú tự nhập) ghi vào field remark của JE;
+    submit lỗi thì vẫn giữ bản nháp và báo lại lý do.
     """
     guard_cash()
     company = resolve_company(company)
@@ -362,10 +365,12 @@ def import_transactions(rows, bank_account: str, company: str | None = None) -> 
             party_type = "Customer" if cacc.account_type == "Receivable" else "Supplier"
 
         je = frappe.new_doc("Journal Entry")
-        je.voucher_type = "Bank Entry"
+        je.voucher_type = "Journal Entry"
         je.posting_date = r.get("date")
         je.company = company
-        je.set(field, f"[BANKIMP-{key}] {(r.get('content') or '')[:240]}")
+        # Ghi chú tự nhập (nếu có) thay cho nội dung sao kê; luôn kèm marker chống trùng.
+        note = (r.get("remark") or "").strip() or (r.get("content") or "")
+        je.set(field, f"[BANKIMP-{key}] {note[:240]}")
 
         bank_line = {"account": bank_account}
         counter_line = {"account": counter}
@@ -385,12 +390,26 @@ def import_transactions(rows, bank_account: str, company: str | None = None) -> 
 
         try:
             je.insert()
-            existing.add(key)
-            created.append({"key": key, "name": je.name, "route": f"/desk/journal-entry/{je.name}"})
         except Exception as e:
             skipped.append({"key": key, "reason": str(e)[:120]})
+            continue
+        existing.add(key)
+        row_out = {"key": key, "name": je.name, "route": f"/desk/journal-entry/{je.name}"}
+        try:
+            je.submit()
+            row_out["docstatus"] = 1
+        except Exception as e:
+            # Đã tạo nháp nhưng ghi sổ lỗi (kỳ khóa, thiếu quyền submit...) — giữ nháp để xử lý trong Desk.
+            row_out["docstatus"] = 0
+            row_out["note"] = str(e)[:120]
+        created.append(row_out)
 
-    return {"created": created, "skipped": skipped, "count": len(created)}
+    submitted = sum(1 for c in created if c.get("docstatus") == 1)
+    return {
+        "created": created, "skipped": skipped,
+        "count": len(created), "submitted": submitted,
+        "draft_count": len(created) - submitted,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════

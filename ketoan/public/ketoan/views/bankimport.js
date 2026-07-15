@@ -58,7 +58,7 @@ export async function render({ container }) {
             <div class="kt-field"><label><i class="fas fa-file-excel"></i> File sao kê (.xlsx)</label>
               <input type="file" id="bi-file" class="kt-input" accept=".xlsx"></div>
           </div>
-          <p class="kt-sub">Cột: Số tham chiếu · Ngày · Ghi nợ (tiền ra) · Ghi có (tiền vào) · Số dư · Nội dung. Giao dịch đã nhập trước sẽ tự lọc trùng. TK đối ứng: gõ số TK hoặc tên (không cần dấu) để tìm.</p>
+          <p class="kt-sub">Cột: Số tham chiếu · Ngày · Ghi nợ (tiền ra) · Ghi có (tiền vào) · Số dư · Nội dung. Giao dịch đã nhập trước sẽ tự lọc trùng. TK đối ứng: gõ số TK hoặc tên (không cần dấu). Ghi chú sửa được trước khi ghi sổ — bút toán Journal Entry được <b>submit ngay</b> khi bấm "Tạo &amp; ghi sổ".</p>
         </div>
       </div>
 
@@ -96,6 +96,7 @@ export async function render({ container }) {
           t.counter_account = t.suggested_counter || "";
           t.last_counter = t.counter_account; // TK đã CHỐT gần nhất (giữ party khi gõ tìm lại)
           t.party = t.suggested_party || "";
+          t.remark = (t.content || "").slice(0, 240); // ghi chú (remark) — sửa tự do trước khi ghi sổ
           t.checked = false;
         });
         renderTable();
@@ -128,7 +129,7 @@ export async function render({ container }) {
               <button class="kt-btn kt-btn--outline kt-btn--sm" id="bi-rules"><i class="fas fa-sliders"></i> Quy tắc map</button>
               <div id="bi-default-host" style="min-width:230px"></div>
               <button class="kt-btn kt-btn--outline kt-btn--sm" id="bi-apply">Áp dụng TK cho dòng chọn</button>
-              <button class="kt-btn kt-btn--success kt-btn--sm" id="bi-create"><i class="fas fa-file-circle-plus"></i> Tạo bút toán (<span id="bi-count">0</span>)</button>
+              <button class="kt-btn kt-btn--success kt-btn--sm" id="bi-create"><i class="fas fa-file-circle-plus"></i> Tạo &amp; ghi sổ (<span id="bi-count">0</span>)</button>
             </div>
           </div>
           <div class="kt-card-body">
@@ -136,7 +137,8 @@ export async function render({ container }) {
               <thead><tr>
                 <th><input type="checkbox" id="bi-all"></th>
                 <th>Ngày</th><th>Nội dung</th><th class="num">Tiền ra</th><th class="num">Tiền vào</th>
-                <th style="min-width:210px">TK đối ứng</th><th style="min-width:190px">Đối tượng</th><th>Trạng thái</th><th></th>
+                <th style="min-width:210px">TK đối ứng</th><th style="min-width:190px">Đối tượng</th>
+                <th style="min-width:200px">Ghi chú (remark)</th><th>Trạng thái</th><th></th>
               </tr></thead>
               <tbody>${txns.map((t) => txnRow(t))}</tbody>
             </table></div>
@@ -183,6 +185,14 @@ export async function render({ container }) {
       b.addEventListener("click", () => {
         const t = state.txns.find((x) => x.key === b.dataset.key);
         if (t) openSaveRule(t, t.counter_account, t.party);
+      })
+    );
+
+    // Ghi chú (remark) từng dòng — lưu vào state để sống qua re-render.
+    result.querySelectorAll(".bi-remark").forEach((inp) =>
+      inp.addEventListener("input", () => {
+        const t = state.txns.find((x) => x.key === inp.dataset.key);
+        if (t) t.remark = inp.value;
       })
     );
 
@@ -260,20 +270,26 @@ export async function render({ container }) {
       toast(`${needParty.length} dòng dùng TK phải thu/phải trả nhưng chưa chọn đối tượng (KH/NCC)`, "warning");
       return;
     }
+    if (!confirm(`Tạo & GHI SỔ (submit) ${picks.length} bút toán Journal Entry?\nBút toán vào sổ ngay — muốn sửa phải hủy (cancel) trong Desk.`)) return;
 
     const btn = result.querySelector("#bi-create");
-    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tạo...';
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang ghi sổ...';
     try {
-      const rows = picks.map((t) => ({ ...t, party: t.party || "" }));
+      const rows = picks.map((t) => ({ ...t, party: t.party || "", remark: (t.remark || "").trim() }));
       const res = await api.bankImport(rows, bankAccount);
       const createdKeys = new Set(res.created.map((c) => c.key));
       state.txns.forEach((t) => { if (createdKeys.has(t.key)) t.created = true; });
-      toast(`Đã tạo ${res.count} bút toán` + (res.skipped.length ? ` · bỏ qua ${res.skipped.length}` : ""), "success");
+      toast(`Đã ghi sổ ${res.submitted}/${res.count} bút toán` + (res.skipped.length ? ` · bỏ qua ${res.skipped.length}` : ""), "success");
+      if (res.draft_count) {
+        const drafts = res.created.filter((c) => c.docstatus === 0);
+        toast(`${res.draft_count} bút toán chỉ tạo được NHÁP (ghi sổ lỗi) — mở Desk kiểm tra: ${drafts.map((c) => c.name).join(", ").slice(0, 120)}`, "warning");
+        console.warn("Nháp chưa ghi sổ:", drafts);
+      }
       if (res.skipped.length) console.warn("Bỏ qua:", res.skipped);
       renderTable();
     } catch (e) {
       toast(e.message, "error");
-      btn.disabled = false; btn.innerHTML = '<i class="fas fa-file-circle-plus"></i> Tạo bút toán';
+      btn.disabled = false; btn.innerHTML = '<i class="fas fa-file-circle-plus"></i> Tạo & ghi sổ';
     }
   }
 
@@ -420,6 +436,7 @@ export async function render({ container }) {
       <td class="num ${t.credit ? "pos" : ""}">${t.credit ? formatVND(t.credit) : ""}</td>
       <td>${disabled ? "—" : html`<div class="bi-counter-host" data-key="${t.key}"></div>`}</td>
       <td>${disabled ? "—" : html`<div class="bi-party-host" data-key="${t.key}"></div>`}</td>
+      <td>${disabled ? "—" : html`<input class="kt-input bi-remark" data-key="${t.key}" value="${t.remark || ""}" maxlength="240" placeholder="Diễn giải ghi vào bút toán…">`}</td>
       <td>${status}${t.suggested_rule && !disabled ? html` <span class="kt-badge kt-badge--green" title="Gợi ý từ quy tắc: ${t.suggested_rule}">💡</span>` : ""}</td>
       <td>${disabled ? "" : html`<button class="kt-btn-icon bi-saverule" data-key="${t.key}" title="Lưu quy tắc từ dòng này"><i class="fas fa-floppy-disk"></i></button>`}</td>
     </tr>`;
