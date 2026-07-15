@@ -222,6 +222,7 @@ export const WORKSPACES = [
         { label: "Duyệt bút toán JE (chờ KTT)", icon: "fa-stamp", type: "route", route: "/doi-chieu-npp?tab=butoan" },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
+        { label: "Giám sát phòng kế toán (toàn bộ chỉ số + Pricing Rule)", icon: "fa-tower-observation", type: "route", route: "/giam-sat" },
         { label: "Dashboard tổng hợp", icon: "fa-gauge-high", type: "route", route: "/dashboard" },
         { label: "Công nợ phải thu toàn bộ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no" },
         { label: "Trung tâm cảnh báo", icon: "fa-triangle-exclamation", type: "route", route: "/canh-bao" },

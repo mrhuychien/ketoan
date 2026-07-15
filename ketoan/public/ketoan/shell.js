@@ -17,6 +17,7 @@ const ROUTES = [
   { pattern: "/", view: "views/home.js", title: "Trang chủ" },
   { pattern: "/vt/:key", view: "views/workspace.js", title: "Hướng dẫn & lối tắt" },
   { pattern: "/dashboard", view: "views/dashboard.js", cap: "chief", ws: "chief", title: "Tổng quan" },
+  { pattern: "/giam-sat", view: "views/supervision.js", cap: "chief", ws: "chief", title: "Giám sát" },
   { pattern: "/phan-quyen", view: "views/roles.js", cap: "chief", ws: "chief", title: "Phân quyền" },
   { pattern: "/canh-bao", view: "views/alerts.js", cap: "chief", ws: "chief", title: "Cảnh báo" },
   { pattern: "/cong-no", view: "views/receivables.js", cap: "chief", ws: "chief", title: "Công nợ toàn bộ" },
