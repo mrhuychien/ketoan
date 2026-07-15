@@ -6,8 +6,7 @@ import { html, setHTML } from "../lib/dom.js";
 import { formatVND, formatDate } from "../lib/format.js";
 import { replaceQuery } from "../lib/router.js";
 import { createCombobox, closeComboPanel } from "../components/combobox.js";
-
-const CTX = window.KETOAN_CONTEXT || {};
+import { glUrl } from "../lib/workspaces.js";
 
 const PERIODS = [
   { key: "thang", label: "Tháng này" },
@@ -25,18 +24,11 @@ function periodFrom(key) {
   return null; // all
 }
 
-// Link mở đúng báo cáo General Ledger trên Desk với TK + kỳ đang xem.
+// Link GL Desk chuẩn (glUrl) mang theo TK + kỳ đang xem trên portal.
 function deskGlUrl(account, from_date) {
-  const iso = (d) => d.toISOString().slice(0, 10);
-  const p = new URLSearchParams({
-    company: CTX.company || "",
-    from_date: from_date || new Date().getFullYear() + "-01-01",
-    to_date: iso(new Date()),
-    account: account || "",
-    include_dimensions: "1",
-    include_default_book_entries: "1",
-  });
-  return "/desk/query-report/General%20Ledger?" + p.toString();
+  const extra = { from_date: from_date || "2000-01-01" };
+  if (account) extra.account = account;
+  return glUrl(extra);
 }
 
 export async function render({ container, query }) {

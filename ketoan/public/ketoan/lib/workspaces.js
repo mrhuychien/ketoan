@@ -7,9 +7,12 @@
 
 const CTX = window.KETOAN_CONTEXT || {};
 
-// URL Sổ cái (General Ledger) với filter chuẩn: company + 30 ngày gần nhất
-// + Categorize by Voucher (Consolidated) + dimensions + default book entries.
-function glUrl() {
+// URL Sổ cái CHUẨN duy nhất của portal: /desk/query-report/General%20Ledger
+// với filter company + 30 ngày gần nhất + Categorize by Voucher (Consolidated)
+// + dimensions + default book entries. `extra` để lọc thêm/ghi đè:
+// glUrl({ account }) · glUrl({ party_type, party }) · glUrl({ from_date }).
+// KHÔNG dùng dạng tắt /desk/general-ledger — site không nhận route đó.
+export function glUrl(extra = {}) {
   const fmt = (d) => d.toISOString().slice(0, 10);
   const to = new Date();
   const from = new Date();
@@ -21,6 +24,7 @@ function glUrl() {
     categorize_by: "Categorize by Voucher (Consolidated)",
     include_dimensions: "1",
     include_default_book_entries: "1",
+    ...extra,
   });
   return "/desk/query-report/General%20Ledger?" + p.toString();
 }
@@ -132,7 +136,7 @@ export const WORKSPACES = [
         { label: "Công nợ phải trả + tuổi nợ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no-ncc" },
         { label: "Accounts Payable (Desk)", icon: "fa-table", type: "desk", href: "/desk/accounts-payable" },
         { label: "Purchase Register", icon: "fa-table", type: "desk", href: "/desk/query-report/Purchase Register" },
-        { label: "Sổ chi tiết NCC", icon: "fa-book", type: "desk", href: "/desk/general-ledger?party_type=Supplier" },
+        { label: "Sổ chi tiết NCC", icon: "fa-book", type: "desk", href: glUrl({ party_type: "Supplier" }) },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
         { label: "Lịch thanh toán đến hạn", icon: "fa-calendar-days", type: "route", route: "/cong-no-ncc?tab=due" },

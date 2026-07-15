@@ -2,6 +2,7 @@
 import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
 import { formatVND, formatDate } from "../lib/format.js";
+import { glUrl } from "../lib/workspaces.js";
 
 const q = encodeURIComponent;
 
@@ -39,7 +40,7 @@ export async function render({ container, params }) {
         <div class="kt-card-body" style="display:flex;gap:10px;flex-wrap:wrap">
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/supplier/${q(d.supplier)}"><i class="fas fa-up-right-from-square"></i> Mở NCC</a>
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/payment-entry/new?party_type=Supplier&party=${q(d.supplier)}"><i class="fas fa-money-bill-transfer"></i> Lập phiếu chi</a>
-          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/general-ledger?party_type=Supplier&party=${q(d.supplier)}"><i class="fas fa-book"></i> Sổ cái</a>
+          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="${glUrl({ party_type: "Supplier", party: d.supplier })}"><i class="fas fa-book"></i> Sổ cái</a>
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/purchase-invoice?supplier=${q(d.supplier)}"><i class="fas fa-file-invoice"></i> Hóa đơn mua</a>
         </div>
       </div>

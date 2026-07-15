@@ -4,6 +4,7 @@ import { html, setHTML } from "../lib/dom.js";
 import { formatVND, formatDate, escapeHtml } from "../lib/format.js";
 import { navigate } from "../lib/router.js";
 import { openCashbook } from "../components/cashbook.js";
+import { glUrl } from "../lib/workspaces.js";
 
 const q = encodeURIComponent;
 
@@ -51,7 +52,7 @@ export async function render({ container }) {
                   <td class="num ${a.balance < 0 ? "danger" : "pos"}">${formatVND(a.balance)}</td>
                   <td class="num" style="white-space:nowrap">
                     <a class="kt-btn-icon" title="Sổ cái trên portal" href="#/so-cai?account=${q(a.account)}"><i class="fas fa-book"></i></a>
-                    <a class="kt-btn-icon" target="_blank" title="GL trên Desk" href="/desk/general-ledger?account=${q(a.account)}"><i class="fas fa-up-right-from-square"></i></a>
+                    <a class="kt-btn-icon" target="_blank" title="GL trên Desk" href="${glUrl({ account: a.account })}"><i class="fas fa-up-right-from-square"></i></a>
                   </td></tr>`
               )}</tbody>
             </table></div>

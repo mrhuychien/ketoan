@@ -4,6 +4,7 @@ import { html, setHTML } from "../lib/dom.js";
 import { formatVND, escapeHtml } from "../lib/format.js";
 import { navigate } from "../lib/router.js";
 import { openCashbook } from "../components/cashbook.js";
+import { glUrl } from "../lib/workspaces.js";
 
 const CAN_CASHBOOK = !!(window.KETOAN_CONTEXT || {}).canUseCashbook;
 
@@ -38,7 +39,7 @@ export async function render({ container }) {
         <div class="kt-card-body" style="display:flex;gap:10px;flex-wrap:wrap">
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/accounts-receivable"><i class="fas fa-file-invoice-dollar"></i> Bảng kê công nợ phải thu</a>
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/accounts-receivable-summary"><i class="fas fa-layer-group"></i> Tổng hợp công nợ</a>
-          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/general-ledger"><i class="fas fa-book"></i> Sổ cái</a>
+          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="${glUrl()}"><i class="fas fa-book"></i> Sổ cái</a>
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/cash-flow"><i class="fas fa-chart-line"></i> Lưu chuyển tiền tệ</a>
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/journal-entry/new"><i class="fas fa-pen"></i> Bút toán mới</a>
         </div>

@@ -19,6 +19,22 @@ from frappe.utils import flt, today
 from ketoan.api._guard import guard_manager, resolve_company, get_settings, cash_account_types, can_view_cash
 
 
+def _gl_link(company: str, account: str) -> str:
+    """Link Sổ cái CHUẨN trên Desk (query-report, KHÔNG dùng dạng tắt
+    /desk/general-ledger): company + 30 ngày + Categorize by Voucher."""
+    from urllib.parse import urlencode
+    from frappe.utils import add_days
+    return "/desk/query-report/General%20Ledger?" + urlencode({
+        "company": company,
+        "from_date": add_days(today(), -30),
+        "to_date": today(),
+        "categorize_by": "Categorize by Voucher (Consolidated)",
+        "include_dimensions": "1",
+        "include_default_book_entries": "1",
+        "account": account,
+    })
+
+
 @frappe.whitelist()
 def get_alerts(company: str | None = None) -> dict:
     """Gộp toàn bộ cảnh báo P0 cho 1 company."""
@@ -191,7 +207,7 @@ def _alert_cash_negative(company: str) -> list:
         {
             "label": r.account_name or r.account,
             "amount": flt(r.balance),
-            "link": f"/desk/general-ledger?account={quote(r.account)}",
+            "link": _gl_link(company, r.account),
         }
         for r in rows
     ]
