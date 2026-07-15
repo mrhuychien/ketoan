@@ -56,26 +56,35 @@ def get_alerts(company: str | None = None) -> dict:
 
 
 def _alert_credit_limit(company: str, s) -> list:
-    """A1: khách có outstanding > hạn mức tín dụng."""
+    """A1: khách có công nợ GL > hạn mức tín dụng (nợ tính từ GL Entry)."""
     if not s.enable_credit_limit_alert:
         return []
-    # Join outstanding theo khách với hạn mức (Customer Credit Limit theo company).
+    params = {"company": company}
+    if s.receivable_account:
+        params["racc"] = s.receivable_account
+        racc = "gle.account = %(racc)s"
+    else:
+        racc = "acc.account_type = 'Receivable'"
     rows = frappe.db.sql(
-        """
-        SELECT si.customer, si.customer_name,
-               SUM(si.outstanding_amount) AS outstanding,
+        f"""
+        SELECT gle.party AS customer,
+               COALESCE(c.customer_name, gle.party) AS customer_name,
+               SUM(gle.debit - gle.credit) AS outstanding,
                ccl.credit_limit
-        FROM `tabSales Invoice` si
+        FROM `tabGL Entry` gle
+        JOIN `tabAccount` acc ON acc.name = gle.account
+        JOIN `tabCustomer` c ON c.name = gle.party
         JOIN `tabCustomer Credit Limit` ccl
-          ON ccl.parent = si.customer AND ccl.parenttype = 'Customer'
+          ON ccl.parent = gle.party AND ccl.parenttype = 'Customer'
          AND ccl.company = %(company)s
-        WHERE si.docstatus = 1 AND si.company = %(company)s AND si.outstanding_amount > 0
+        WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
+          AND gle.party_type = 'Customer' AND {racc}
           AND ccl.credit_limit > 0
-        GROUP BY si.customer, si.customer_name, ccl.credit_limit
-        HAVING SUM(si.outstanding_amount) > ccl.credit_limit
-        ORDER BY (SUM(si.outstanding_amount) - ccl.credit_limit) DESC
+        GROUP BY gle.party, c.customer_name, ccl.credit_limit
+        HAVING SUM(gle.debit - gle.credit) > ccl.credit_limit
+        ORDER BY (SUM(gle.debit - gle.credit) - ccl.credit_limit) DESC
         """,
-        {"company": company},
+        params,
         as_dict=True,
     )
     if not rows:

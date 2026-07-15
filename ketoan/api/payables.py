@@ -1,10 +1,15 @@
 """Whitelisted methods — phân hệ Phải trả (công nợ nhà cung cấp).
 
-Semantics đối xứng với receivables:
-- Công nợ NCC = `Purchase Invoice.outstanding_amount` (docstatus=1).
-- Aging theo `COALESCE(due_date, posting_date)` so với hôm nay (rổ từ Settings).
-- Kiểm soát: trùng hóa đơn NCC (cùng supplier + bill_no) — lỗi nhập hoặc gian lận;
-  khớp 3 chiều: hóa đơn mua thiếu liên kết nhập kho (Purchase Receipt).
+NGUỒN SỰ THẬT = GL ENTRY (không phải hóa đơn):
+- Công nợ NCC = SUM(credit - debit) trên GL Entry các TK account_type='Payable'
+  với party_type='Supplier' — gồm cả nợ từ bút toán JE, dư đầu kỳ, trả trước
+  (số âm) chứ không chỉ Purchase Invoice.outstanding_amount.
+- Aging: gộp GL theo chứng từ gốc (COALESCE(against_voucher, voucher_no)) →
+  số dư mở từng chứng từ, tuổi theo due_date của PI (nếu là PI) hoặc ngày
+  phát sinh; rổ từ Settings. Tổng aging khớp tổng công nợ GL.
+- Lịch thanh toán (get_due_schedule) vẫn theo hóa đơn — vì hạn trả nằm trên PI.
+- Kiểm soát: trùng hóa đơn NCC (cùng supplier + bill_no); khớp 3 chiều
+  (hóa đơn mua thiếu liên kết Purchase Receipt).
 Tất cả read-only, guard_purchase ở dòng đầu, SQL parameterized.
 """
 
@@ -16,77 +21,111 @@ from ketoan.api._guard import guard_purchase, resolve_company, get_settings
 
 @frappe.whitelist()
 def get_ap_summary(company: str | None = None, limit: int = 200) -> dict:
-    """Bảng kê công nợ phải trả theo NCC + tổng."""
+    """Bảng kê công nợ phải trả theo NCC + tổng — TÍNH TỪ GL ENTRY.
+
+    outstanding = SUM(credit - debit) trên TK Payable (party = NCC); âm = ta
+    đang ứng trước/NCC nợ lại. days_overdue lấy từ hóa đơn PI còn nợ sớm hạn
+    nhất (GL không mang hạn trả).
+    """
     guard_purchase()
     company = resolve_company(company)
     limit = min(int(limit or 200), 1000)
 
     rows = frappe.db.sql(
         """
-        SELECT pi.supplier,
-               pi.supplier_name,
+        SELECT gle.party AS supplier,
+               COALESCE(s.supplier_name, gle.party) AS supplier_name,
                s.supplier_group,
-               SUM(pi.outstanding_amount)                  AS outstanding,
-               MIN(COALESCE(pi.due_date, pi.posting_date)) AS earliest_due
-        FROM `tabPurchase Invoice` pi
-        LEFT JOIN `tabSupplier` s ON s.name = pi.supplier
-        WHERE pi.docstatus = 1
-          AND pi.company = %(company)s
-          AND pi.outstanding_amount > 0
-        GROUP BY pi.supplier, pi.supplier_name, s.supplier_group
-        ORDER BY SUM(pi.outstanding_amount) DESC
+               SUM(gle.credit - gle.debit) AS outstanding
+        FROM `tabGL Entry` gle
+        JOIN `tabAccount` acc ON acc.name = gle.account
+        LEFT JOIN `tabSupplier` s ON s.name = gle.party
+        WHERE gle.is_cancelled = 0
+          AND gle.company = %(company)s
+          AND gle.party_type = 'Supplier'
+          AND acc.account_type = 'Payable'
+        GROUP BY gle.party, s.supplier_name, s.supplier_group
+        HAVING ROUND(SUM(gle.credit - gle.debit), 2) <> 0
+        ORDER BY SUM(gle.credit - gle.debit) DESC
         LIMIT %(limit)s
         """,
         {"company": company, "limit": limit},
         as_dict=True,
     )
 
+    # Hạn trả sớm nhất trong các hóa đơn PI còn nợ của từng NCC (chỉ để tính quá hạn).
+    due_map = {}
+    for x in frappe.db.sql(
+        """
+        SELECT supplier, MIN(COALESCE(due_date, posting_date)) AS earliest_due
+        FROM `tabPurchase Invoice`
+        WHERE docstatus = 1 AND company = %(company)s AND outstanding_amount > 0
+        GROUP BY supplier
+        """,
+        {"company": company},
+        as_dict=True,
+    ):
+        due_map[x.supplier] = x.earliest_due
+
     t = getdate(today())
     total = 0.0
     for r in rows:
         r["outstanding"] = flt(r["outstanding"])
         total += r["outstanding"]
-        r["days_overdue"] = (t - getdate(r["earliest_due"])).days if r["earliest_due"] else 0
+        due = due_map.get(r["supplier"])
+        r["days_overdue"] = max((t - getdate(due)).days, 0) if (due and r["outstanding"] > 0) else 0
 
     return {"company": company, "total": total, "count": len(rows), "rows": rows}
 
 
 @frappe.whitelist()
 def get_aging(company: str | None = None) -> dict:
-    """Tuổi nợ phải trả theo rổ cấu hình (Settings)."""
+    """Tuổi nợ phải trả theo rổ cấu hình (Settings) — TÍNH TỪ GL ENTRY.
+
+    Gộp GL theo chứng từ gốc (against_voucher, không có thì chính voucher) →
+    số dư mở từng chứng từ; tuổi theo due_date của PI hoặc ngày phát sinh.
+    Số âm (ứng trước NCC) trừ vào rổ — tổng rổ khớp tổng công nợ GL.
+    """
     guard_purchase()
     company = resolve_company(company)
     s = get_settings()
     b1, b2, b3 = int(s.aging_bucket_1 or 30), int(s.aging_bucket_2 or 60), int(s.aging_bucket_3 or 90)
 
-    row = frappe.db.sql(
+    items = frappe.db.sql(
         """
-        SELECT
-          SUM(CASE WHEN d <= 0                 THEN o ELSE 0 END) AS current_amt,
-          SUM(CASE WHEN d > 0  AND d <= %(b1)s THEN o ELSE 0 END) AS b1_amt,
-          SUM(CASE WHEN d > %(b1)s AND d <= %(b2)s THEN o ELSE 0 END) AS b2_amt,
-          SUM(CASE WHEN d > %(b2)s AND d <= %(b3)s THEN o ELSE 0 END) AS b3_amt,
-          SUM(CASE WHEN d > %(b3)s             THEN o ELSE 0 END) AS over_amt,
-          SUM(o) AS total_amt
-        FROM (
-            SELECT outstanding_amount AS o,
-                   DATEDIFF(%(today)s, COALESCE(due_date, posting_date)) AS d
-            FROM `tabPurchase Invoice`
-            WHERE docstatus = 1 AND company = %(company)s AND outstanding_amount > 0
-        ) t
+        SELECT COALESCE(gle.against_voucher, gle.voucher_no) AS ref,
+               SUM(gle.credit - gle.debit) AS o,
+               MIN(gle.posting_date) AS first_date
+        FROM `tabGL Entry` gle
+        JOIN `tabAccount` acc ON acc.name = gle.account
+        WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
+          AND gle.party_type = 'Supplier' AND acc.account_type = 'Payable'
+        GROUP BY COALESCE(gle.against_voucher, gle.voucher_no)
+        HAVING ROUND(SUM(gle.credit - gle.debit), 2) <> 0
+        LIMIT 20000
         """,
-        {"company": company, "today": today(), "b1": b1, "b2": b2, "b3": b3},
+        {"company": company},
         as_dict=True,
-    )[0]
+    )
 
+    # Hạn trả cho các chứng từ mở là Purchase Invoice.
+    refs = [it.ref for it in items if it.ref]
+    due_map = {}
+    if refs:
+        for x in frappe.get_all("Purchase Invoice", filters={"name": ["in", refs]},
+                                fields=["name", "due_date", "posting_date"], limit=len(refs)):
+            due_map[x.name] = x.due_date or x.posting_date
+
+    from ketoan.api.receivables import _bucketize
+    sums, total = _bucketize(items, due_map, b1, b2, b3)
     buckets = [
-        {"key": "current", "label": "Trong hạn", "amount": flt(row.current_amt)},
-        {"key": "b1", "label": f"1–{b1} ngày", "amount": flt(row.b1_amt)},
-        {"key": "b2", "label": f"{b1+1}–{b2} ngày", "amount": flt(row.b2_amt)},
-        {"key": "b3", "label": f"{b2+1}–{b3} ngày", "amount": flt(row.b3_amt)},
-        {"key": "over", "label": f">{b3} ngày", "amount": flt(row.over_amt)},
+        {"key": "current", "label": "Trong hạn", "amount": flt(sums["current"])},
+        {"key": "b1", "label": f"1–{b1} ngày", "amount": flt(sums["b1"])},
+        {"key": "b2", "label": f"{b1+1}–{b2} ngày", "amount": flt(sums["b2"])},
+        {"key": "b3", "label": f"{b2+1}–{b3} ngày", "amount": flt(sums["b3"])},
+        {"key": "over", "label": f">{b3} ngày", "amount": flt(sums["over"])},
     ]
-    return {"company": company, "buckets": buckets, "total": flt(row.total_amt)}
+    return {"company": company, "buckets": buckets, "total": flt(total)}
 
 
 @frappe.whitelist()
@@ -154,7 +193,15 @@ def get_supplier_detail(supplier: str, company: str | None = None) -> dict:
         inv["grand_total"] = flt(inv["grand_total"])
         inv["outstanding_amount"] = flt(inv["outstanding_amount"])
 
-    outstanding = sum(i["outstanding_amount"] for i in invoices)
+    # Còn phải trả TÍNH TỪ GL (gồm JE, nợ đầu kỳ, ứng trước — không chỉ PI).
+    outstanding = flt(frappe.db.sql(
+        """SELECT SUM(gle.credit - gle.debit)
+           FROM `tabGL Entry` gle JOIN `tabAccount` acc ON acc.name = gle.account
+           WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
+             AND gle.party_type = 'Supplier' AND gle.party = %(supplier)s
+             AND acc.account_type = 'Payable'""",
+        {"company": company, "supplier": supplier},
+    )[0][0] or 0)
 
     # Khoản chi trả trước chưa khớp hóa đơn.
     unallocated = flt(

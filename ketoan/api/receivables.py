@@ -1,10 +1,14 @@
 """Whitelisted methods — phân hệ Phải thu (công nợ NPP/khách hàng).
 
-Semantics (theo frappe-sales-analytics):
-- Công nợ = `Sales Invoice.outstanding_amount` (docstatus=1) — ERPNext tự duy trì
-  sau khi phân bổ thanh toán. KHÔNG lọc `is_opening` (nợ đầu kỳ là nợ thật).
-- Aging theo `COALESCE(due_date, posting_date)` so với hôm nay.
-- DSO ≈ nợ / doanh thu kỳ × số ngày cửa sổ.
+NGUỒN SỰ THẬT = GL ENTRY (không phải hóa đơn):
+- Công nợ khách = SUM(debit - credit) trên GL Entry các TK phải thu (theo
+  Settings.receivable_account, không cấu hình thì account_type='Receivable')
+  với party_type='Customer' — gồm cả nợ đầu kỳ, JE, khoản thu trước (số âm),
+  không chỉ Sales Invoice.outstanding_amount.
+- Aging: gộp GL theo chứng từ gốc (COALESCE(against_voucher, voucher_no)) →
+  số dư mở từng chứng từ, tuổi theo due_date của SI (nếu là SI) hoặc ngày
+  phát sinh. Tổng aging khớp tổng công nợ GL.
+- DSO ≈ nợ GL / doanh thu kỳ × số ngày cửa sổ.
 Tất cả read-only, guard ở dòng đầu, SQL parameterized.
 """
 
@@ -17,91 +21,158 @@ from ketoan.api._guard import (
 )
 
 
+def _racc_clause(params: dict) -> str:
+    """Mệnh đề TK phải thu: TK cụ thể từ Settings hoặc account_type Receivable.
+    (Query phải JOIN `tabAccount` acc ON acc.name = gle.account.)"""
+    st = get_settings()
+    if st.receivable_account:
+        params["racc"] = st.receivable_account
+        return "gle.account = %(racc)s"
+    return "acc.account_type = 'Receivable'"
+
+
 @frappe.whitelist()
 def get_ar_summary(company: str | None = None, limit: int = 200, channel: str = "tat-ca") -> dict:
-    """Bảng kê công nợ phải thu theo khách hàng + tổng, lọc theo KÊNH
-    (npp / mt / khac theo Customer Group; 'tat-ca' chỉ cho kế toán trưởng)."""
+    """Bảng kê công nợ phải thu theo khách + tổng — TÍNH TỪ GL ENTRY, lọc theo
+    KÊNH (npp / mt / khac theo Customer Group; 'tat-ca' chỉ cho kế toán trưởng).
+
+    outstanding = SUM(debit - credit) trên TK phải thu; âm = khách trả trước.
+    days_overdue lấy từ hóa đơn SI còn nợ sớm hạn nhất (GL không mang hạn thu).
+    """
     guard_channel(channel)
     company = resolve_company(company)
     limit = min(int(limit or 200), 1000)
 
     params = {"company": company, "limit": limit}
     ch_clause = channel_group_clause(channel, params, alias="c")
+    racc = _racc_clause(params)
 
-    # Gộp ở mức khách: tổng outstanding + chứng từ quá hạn lâu nhất.
-    # Dùng SQL (group + aggregate) thay ORM cho gọn 1 round-trip.
     rows = frappe.db.sql(
-        """
-        SELECT si.customer,
-               si.customer_name,
+        f"""
+        SELECT gle.party AS customer,
+               COALESCE(c.customer_name, gle.party) AS customer_name,
                c.customer_group,
-               SUM(si.outstanding_amount)              AS outstanding,
-               MIN(COALESCE(si.due_date, si.posting_date)) AS earliest_due
-        FROM `tabSales Invoice` si
-        LEFT JOIN `tabCustomer` c ON c.name = si.customer
-        WHERE si.docstatus = 1
-          AND si.company = %(company)s
-          AND si.outstanding_amount > 0
-          AND {ch}
-        GROUP BY si.customer, si.customer_name, c.customer_group
-        ORDER BY SUM(si.outstanding_amount) DESC
+               SUM(gle.debit - gle.credit) AS outstanding
+        FROM `tabGL Entry` gle
+        JOIN `tabAccount` acc ON acc.name = gle.account
+        JOIN `tabCustomer` c ON c.name = gle.party
+        WHERE gle.is_cancelled = 0
+          AND gle.company = %(company)s
+          AND gle.party_type = 'Customer'
+          AND {racc}
+          AND {ch_clause}
+        GROUP BY gle.party, c.customer_name, c.customer_group
+        HAVING ROUND(SUM(gle.debit - gle.credit), 2) <> 0
+        ORDER BY SUM(gle.debit - gle.credit) DESC
         LIMIT %(limit)s
-        """.format(ch=ch_clause),
+        """,
         params,
         as_dict=True,
     )
+
+    # Hạn thu sớm nhất trong các hóa đơn SI còn nợ (chỉ để tính "quá hạn").
+    due_map = {}
+    for x in frappe.db.sql(
+        """
+        SELECT customer, MIN(COALESCE(due_date, posting_date)) AS earliest_due
+        FROM `tabSales Invoice`
+        WHERE docstatus = 1 AND company = %(company)s AND outstanding_amount > 0
+        GROUP BY customer
+        """,
+        {"company": company},
+        as_dict=True,
+    ):
+        due_map[x.customer] = x.earliest_due
 
     t = getdate(today())
     total = 0.0
     for r in rows:
         r["outstanding"] = flt(r["outstanding"])
         total += r["outstanding"]
-        r["days_overdue"] = (t - getdate(r["earliest_due"])).days if r["earliest_due"] else 0
+        due = due_map.get(r["customer"])
+        r["days_overdue"] = max((t - getdate(due)).days, 0) if (due and r["outstanding"] > 0) else 0
 
     return {"company": company, "channel": channel, "total": total, "count": len(rows), "rows": rows}
 
 
+def _bucketize(open_items, due_map, b1: int, b2: int, b3: int) -> tuple:
+    """Cộng dồn số dư mở từng chứng từ vào rổ tuổi nợ.
+
+    open_items: [{ref, o, first_date}] từ GL; due_map: ref → hạn (SI/PI).
+    Không có hạn (JE, khoản trả trước...) → tuổi theo ngày phát sinh đầu tiên.
+    Số âm (trả trước) trừ vào rổ tương ứng — tổng rổ luôn khớp tổng GL.
+    """
+    t = getdate(today())
+    sums = {"current": 0.0, "b1": 0.0, "b2": 0.0, "b3": 0.0, "over": 0.0}
+    total = 0.0
+    for it in open_items:
+        due = due_map.get(it.ref) or it.first_date
+        d = (t - getdate(due)).days if due else 0
+        o = flt(it.o)
+        total += o
+        if d <= 0:
+            sums["current"] += o
+        elif d <= b1:
+            sums["b1"] += o
+        elif d <= b2:
+            sums["b2"] += o
+        elif d <= b3:
+            sums["b3"] += o
+        else:
+            sums["over"] += o
+    return sums, total
+
+
 @frappe.whitelist()
 def get_aging(company: str | None = None, channel: str = "tat-ca") -> dict:
-    """Tuổi nợ theo rổ cấu hình (Settings), lọc theo kênh."""
+    """Tuổi nợ theo rổ cấu hình (Settings), lọc theo kênh — TÍNH TỪ GL ENTRY.
+
+    Gộp GL theo chứng từ gốc (against_voucher, không có thì chính voucher) →
+    số dư mở từng chứng từ; tuổi theo due_date của SI hoặc ngày phát sinh.
+    """
     guard_channel(channel)
     company = resolve_company(company)
     s = get_settings()
     b1, b2, b3 = int(s.aging_bucket_1 or 30), int(s.aging_bucket_2 or 60), int(s.aging_bucket_3 or 90)
-    params = {"company": company, "today": today(), "b1": b1, "b2": b2, "b3": b3}
+    params = {"company": company}
     ch_clause = channel_group_clause(channel, params, alias="c")
+    racc = _racc_clause(params)
 
-    # Bucket bằng CASE trên số ngày quá hạn (DATEDIFF), tham số hoá ngưỡng.
-    row = frappe.db.sql(
-        """
-        SELECT
-          SUM(CASE WHEN d <= 0                 THEN o ELSE 0 END) AS current_amt,
-          SUM(CASE WHEN d > 0  AND d <= %(b1)s THEN o ELSE 0 END) AS b1_amt,
-          SUM(CASE WHEN d > %(b1)s AND d <= %(b2)s THEN o ELSE 0 END) AS b2_amt,
-          SUM(CASE WHEN d > %(b2)s AND d <= %(b3)s THEN o ELSE 0 END) AS b3_amt,
-          SUM(CASE WHEN d > %(b3)s             THEN o ELSE 0 END) AS over_amt,
-          SUM(o) AS total_amt
-        FROM (
-            SELECT si.outstanding_amount AS o,
-                   DATEDIFF(%(today)s, COALESCE(si.due_date, si.posting_date)) AS d
-            FROM `tabSales Invoice` si
-            LEFT JOIN `tabCustomer` c ON c.name = si.customer
-            WHERE si.docstatus = 1 AND si.company = %(company)s AND si.outstanding_amount > 0
-              AND {ch}
-        ) t
-        """.format(ch=ch_clause),
+    items = frappe.db.sql(
+        f"""
+        SELECT COALESCE(gle.against_voucher, gle.voucher_no) AS ref,
+               SUM(gle.debit - gle.credit) AS o,
+               MIN(gle.posting_date) AS first_date
+        FROM `tabGL Entry` gle
+        JOIN `tabAccount` acc ON acc.name = gle.account
+        JOIN `tabCustomer` c ON c.name = gle.party
+        WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
+          AND gle.party_type = 'Customer' AND {racc} AND {ch_clause}
+        GROUP BY COALESCE(gle.against_voucher, gle.voucher_no)
+        HAVING ROUND(SUM(gle.debit - gle.credit), 2) <> 0
+        LIMIT 20000
+        """,
         params,
         as_dict=True,
-    )[0]
+    )
 
+    # Hạn thu cho các chứng từ mở là Sales Invoice.
+    refs = [it.ref for it in items if it.ref]
+    due_map = {}
+    if refs:
+        for x in frappe.get_all("Sales Invoice", filters={"name": ["in", refs]},
+                                fields=["name", "due_date", "posting_date"], limit=len(refs)):
+            due_map[x.name] = x.due_date or x.posting_date
+
+    sums, total = _bucketize(items, due_map, b1, b2, b3)
     buckets = [
-        {"key": "current", "label": "Trong hạn", "amount": flt(row.current_amt)},
-        {"key": "b1", "label": f"1–{b1} ngày", "amount": flt(row.b1_amt)},
-        {"key": "b2", "label": f"{b1+1}–{b2} ngày", "amount": flt(row.b2_amt)},
-        {"key": "b3", "label": f"{b2+1}–{b3} ngày", "amount": flt(row.b3_amt)},
-        {"key": "over", "label": f">{b3} ngày", "amount": flt(row.over_amt)},
+        {"key": "current", "label": "Trong hạn", "amount": flt(sums["current"])},
+        {"key": "b1", "label": f"1–{b1} ngày", "amount": flt(sums["b1"])},
+        {"key": "b2", "label": f"{b1+1}–{b2} ngày", "amount": flt(sums["b2"])},
+        {"key": "b3", "label": f"{b2+1}–{b3} ngày", "amount": flt(sums["b3"])},
+        {"key": "over", "label": f">{b3} ngày", "amount": flt(sums["over"])},
     ]
-    return {"company": company, "channel": channel, "buckets": buckets, "total": flt(row.total_amt)}
+    return {"company": company, "channel": channel, "buckets": buckets, "total": flt(total)}
 
 
 @frappe.whitelist()
@@ -142,7 +213,16 @@ def get_customer_detail(customer: str, company: str | None = None) -> dict:
         inv["grand_total"] = flt(inv["grand_total"])
         inv["outstanding_amount"] = flt(inv["outstanding_amount"])
 
-    outstanding = sum(i["outstanding_amount"] for i in invoices)
+    # Tổng công nợ TÍNH TỪ GL (gồm JE, nợ đầu kỳ, khoản thu trước — không chỉ SI).
+    gparams = {"company": company, "customer": customer}
+    racc = _racc_clause(gparams)
+    outstanding = flt(frappe.db.sql(
+        f"""SELECT SUM(gle.debit - gle.credit)
+            FROM `tabGL Entry` gle JOIN `tabAccount` acc ON acc.name = gle.account
+            WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
+              AND gle.party_type = 'Customer' AND gle.party = %(customer)s AND {racc}""",
+        gparams,
+    )[0][0] or 0)
 
     # Hạn mức tín dụng: Customer Credit Limit là child table (theo company) → đọc an toàn.
     credit_limit = _get_credit_limit(customer, company)
@@ -227,13 +307,17 @@ def get_dso(company: str | None = None, channel: str = "tat-ca") -> dict:
     company = resolve_company(company)
     window = int(get_settings().dso_window_days or 365)
 
+    dparams = {"company": company}
+    racc = _racc_clause(dparams)
     debt = flt(
         frappe.db.sql(
-            """
-            SELECT SUM(outstanding_amount) FROM `tabSales Invoice`
-            WHERE docstatus = 1 AND company = %(company)s AND outstanding_amount > 0
+            f"""
+            SELECT SUM(gle.debit - gle.credit)
+            FROM `tabGL Entry` gle JOIN `tabAccount` acc ON acc.name = gle.account
+            WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
+              AND gle.party_type = 'Customer' AND {racc}
             """,
-            {"company": company},
+            dparams,
         )[0][0]
         or 0
     )
