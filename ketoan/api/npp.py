@@ -287,7 +287,7 @@ def get_discount_eligible(company: str | None = None, month: str | None = None) 
             "discount_amount": disc,
             "status": "created" if je_name else "pending",
             "je_name": je_name,
-            "route": f"/app/journal-entry/{je_name}" if je_name else None,
+            "route": f"/desk/journal-entry/{je_name}" if je_name else None,
         })
 
     rows.sort(key=lambda r: r["monthly_sales"], reverse=True)
@@ -360,7 +360,7 @@ def create_discount_entries(customers, month: str | None = None, company: str | 
         je.insert()
         created.append({
             "customer": cust, "name": je.name, "amount": amount,
-            "route": f"/app/journal-entry/{je.name}",
+            "route": f"/desk/journal-entry/{je.name}",
         })
 
     return {"created": created, "skipped": skipped, "count": len(created), "month": mkey}

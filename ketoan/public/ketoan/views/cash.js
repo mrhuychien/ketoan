@@ -47,9 +47,12 @@ export async function render({ container }) {
             <div class="kt-card-body"><div class="kt-table-wrap"><table class="kt-table">
               <thead><tr><th>Tài khoản</th><th>Loại</th><th class="num">Số dư</th><th></th></tr></thead>
               <tbody>${balances.rows.map(
-                (a) => html`<tr><td>${a.account_name || a.account}</td><td><span class="kt-badge kt-badge--gray">${a.account_type}</span></td>
+                (a) => html`<tr class="kt-row-link" data-acc="${a.account}"><td>${a.account_name || a.account}</td><td><span class="kt-badge kt-badge--gray">${a.account_type}</span></td>
                   <td class="num ${a.balance < 0 ? "danger" : "pos"}">${formatVND(a.balance)}</td>
-                  <td class="num"><a class="kt-btn-icon" target="_blank" href="/app/general-ledger?account=${q(a.account)}"><i class="fas fa-book"></i></a></td></tr>`
+                  <td class="num" style="white-space:nowrap">
+                    <a class="kt-btn-icon" title="Sổ cái trên portal" href="#/so-cai?account=${q(a.account)}"><i class="fas fa-book"></i></a>
+                    <a class="kt-btn-icon" target="_blank" title="GL trên Desk" href="/desk/general-ledger?account=${q(a.account)}"><i class="fas fa-up-right-from-square"></i></a>
+                  </td></tr>`
               )}</tbody>
             </table></div>
             ${balances.rows.length === 0 ? html`<div class="kt-empty"><i class="fas fa-wallet"></i><p>Chưa có TK tiền</p></div>` : ""}
@@ -73,7 +76,7 @@ export async function render({ container }) {
             <tbody>${txns.rows.map(
               (t) => html`<tr><td>${formatDate(t.posting_date)}</td><td>${t.remarks || t.against || "—"}</td>
                 <td>${t.voucher_no || "—"}</td><td class="num pos">${t.debit ? formatVND(t.debit) : ""}</td><td class="num danger">${t.credit ? formatVND(t.credit) : ""}</td>
-                <td class="num">${t.voucher_no ? html`<a class="kt-btn-icon" target="_blank" href="/app/${voucherRoute(t.voucher_type)}/${q(t.voucher_no)}"><i class="fas fa-up-right-from-square"></i></a>` : ""}</td></tr>`
+                <td class="num">${t.voucher_no ? html`<a class="kt-btn-icon" target="_blank" href="/desk/${voucherRoute(t.voucher_type)}/${q(t.voucher_no)}"><i class="fas fa-up-right-from-square"></i></a>` : ""}</td></tr>`
             )}</tbody>
           </table></div>
           ${txns.rows.length === 0 ? html`<div class="kt-empty"><i class="fas fa-list"></i><p>Không có giao dịch</p></div>` : ""}
@@ -83,6 +86,14 @@ export async function render({ container }) {
 
     container.querySelector("#kt-new-cash").addEventListener("click", () => openCashbook({ onDone: load }));
     container.querySelector("#kt-import-bank").addEventListener("click", () => navigate("/nhap-sao-ke"));
+
+    // Bấm dòng tài khoản → sổ cái TK đó ngay trên portal.
+    container.querySelectorAll("tr[data-acc]").forEach((tr) =>
+      tr.addEventListener("click", (e) => {
+        if (e.target.closest("a")) return;
+        navigate("/so-cai?account=" + q(tr.dataset.acc));
+      })
+    );
   }
 
   await load();

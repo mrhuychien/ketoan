@@ -196,6 +196,10 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-home-role-help { display: flex; align-items: center; padding: 0 12px; background: var(--kt-bg-card); border: 1px solid var(--kt-border); border-left: 0; border-radius: 0 var(--kt-r-lg) var(--kt-r-lg) 0; color: var(--kt-text-2); box-shadow: var(--kt-shadow); transition: color .12s, border-color .12s; }
 .kt-home-role-help:hover { color: var(--kt-primary); border-color: var(--kt-primary); }
 
+/* ===== Sổ cái: dòng dư đầu kỳ / cộng phát sinh ===== */
+.kt-lg-open td, .kt-lg-total td { background: var(--kt-bg-input); }
+.kt-lg-total td { border-top: 2px solid var(--kt-border); }
+
 /* ===== Combobox (ô chọn có tìm kiếm) ===== */
 .kt-combo { display: block; }
 .kt-combo-input { width: 100%; min-width: 180px; }

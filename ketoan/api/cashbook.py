@@ -119,7 +119,7 @@ def create_entry(
         "doctype": "Journal Entry",
         "name": je.name,
         "docstatus": je.docstatus,
-        "route": f"/app/journal-entry/{quote(je.name)}",
+        "route": f"/desk/journal-entry/{quote(je.name)}",
     }
 
 

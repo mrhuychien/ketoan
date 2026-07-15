@@ -571,7 +571,7 @@ async function renderJEs(body, data, state) {
           <div class="kt-card-title"><i class="fas fa-pen-to-square"></i> Bút toán JE · ${dtCountBadges(d.je_counts)}</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="kt-btn kt-btn--primary kt-btn--sm" id="dt-new-je"><i class="fas fa-plus"></i> Bút toán JE</button>
-            <a class="kt-btn-icon" target="_blank" href="/app/journal-entry/new" title="Tạo JE phức tạp trong Desk"><i class="fas fa-up-right-from-square"></i></a>
+            <a class="kt-btn-icon" target="_blank" href="/desk/journal-entry/new" title="Tạo JE phức tạp trong Desk"><i class="fas fa-up-right-from-square"></i></a>
           </div>
         </div>
         <div class="kt-card-body">
@@ -749,7 +749,7 @@ async function renderEinvoice(body) {
             <tbody>${d.rows.map(
               (r) => html`<tr><td>${r.name}</td><td>${r.customer_name}</td><td>${r.posting_date}</td>
                 <td class="num">${formatVND(r.grand_total)}</td>
-                <td class="num"><a class="kt-btn-icon" target="_blank" href="/app/sales-invoice/${r.name}"><i class="fas fa-up-right-from-square"></i></a></td></tr>`
+                <td class="num"><a class="kt-btn-icon" target="_blank" href="/desk/sales-invoice/${r.name}"><i class="fas fa-up-right-from-square"></i></a></td></tr>`
             )}</tbody>
           </table></div>
           ${d.rows.length === 0 ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i><p>Tất cả hàng đi đã xuất HĐĐT 👍</p></div>` : ""}

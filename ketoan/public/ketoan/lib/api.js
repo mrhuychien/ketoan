@@ -89,6 +89,8 @@ export const api = {
   balances: (a) => callMethod(NS + "cash.get_balances", withCompany(a)),
   cashflow: (a) => callMethod(NS + "cash.get_cashflow", withCompany(a)),
   transactions: (a) => callMethod(NS + "cash.get_transactions", withCompany(a)),
+  glAccounts: () => callMethod(NS + "cash.get_ledger_accounts", withCompany()),
+  glLedger: (account, a) => callMethod(NS + "cash.get_account_ledger", withCompany({ account, ...a })),
 
   // Payables (mua hàng)
   apSummary: (a) => callMethod(NS + "payables.get_ap_summary", withCompany(a)),

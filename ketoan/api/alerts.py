@@ -71,7 +71,7 @@ def _alert_credit_limit(company: str, s) -> list:
             "outstanding": flt(r.outstanding),
             "credit_limit": flt(r.credit_limit),
             "over": flt(r.outstanding) - flt(r.credit_limit),
-            "link": f"/app/customer/{quote(r.customer)}",
+            "link": f"/desk/customer/{quote(r.customer)}",
         }
         for r in rows
     ]
@@ -120,7 +120,7 @@ def _alert_overdue(company: str, s) -> list:
             "count": int(row.cnt_b1 or 0),
             "amount": over_b1,
             "hint": f">{b1}: {_vnd(over_b1)} · >{b2}: {_vnd(row.over_b2)} · >{b3}: {_vnd(row.over_b3)}",
-            "link": "/app/accounts-receivable",
+            "link": "/desk/accounts-receivable",
             "breakdown": {
                 f">{b1}": over_b1,
                 f">{b2}": flt(row.over_b2),
@@ -150,7 +150,7 @@ def _alert_unallocated(company: str) -> list:
         {
             "label": f"{r.party_name or r.party} · {r.name}",
             "amount": flt(r.unallocated_amount),
-            "link": f"/app/payment-entry/{quote(r.name)}",
+            "link": f"/desk/payment-entry/{quote(r.name)}",
         }
         for r in rows
     ]
@@ -191,7 +191,7 @@ def _alert_cash_negative(company: str) -> list:
         {
             "label": r.account_name or r.account,
             "amount": flt(r.balance),
-            "link": f"/app/general-ledger?account={quote(r.account)}",
+            "link": f"/desk/general-ledger?account={quote(r.account)}",
         }
         for r in rows
     ]

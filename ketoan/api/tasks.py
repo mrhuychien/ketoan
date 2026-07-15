@@ -151,7 +151,7 @@ def get_tasks(company: str | None = None) -> dict:
             {"company": company},
         )
         add("Kế toán hạch toán", "fa-book", "gl", [
-            {"label": "Bút toán nháp cần kiểm tra & ghi sổ", "count": n, "href": "/app/journal-entry?docstatus=0", "severity": "warning"},
+            {"label": "Bút toán nháp cần kiểm tra & ghi sổ", "count": n, "href": "/desk/journal-entry?docstatus=0", "severity": "warning"},
         ])
 
     # ── Kế toán trưởng ──────────────────────────────────────────────────────

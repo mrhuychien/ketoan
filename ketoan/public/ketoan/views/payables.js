@@ -147,8 +147,8 @@ async function renderDue(body) {
               <td class="num danger">${formatVND(r.outstanding_amount)}</td>
               <td>${r.days_to_due < 0 ? html`<span class="kt-badge kt-badge--red">quá ${-r.days_to_due}n</span>` : html`<span class="kt-badge kt-badge--yellow">còn ${r.days_to_due}n</span>`}</td>
               <td class="num" style="white-space:nowrap">
-                <a class="kt-btn-icon" target="_blank" title="Mở hóa đơn" href="/app/purchase-invoice/${q(r.name)}"><i class="fas fa-up-right-from-square"></i></a>
-                <a class="kt-btn-icon" target="_blank" title="Lập phiếu chi" href="/app/payment-entry/new?party_type=Supplier&party=${q(r.supplier)}"><i class="fas fa-money-bill-transfer"></i></a>
+                <a class="kt-btn-icon" target="_blank" title="Mở hóa đơn" href="/desk/purchase-invoice/${q(r.name)}"><i class="fas fa-up-right-from-square"></i></a>
+                <a class="kt-btn-icon" target="_blank" title="Lập phiếu chi" href="/desk/payment-entry/new?party_type=Supplier&party=${q(r.supplier)}"><i class="fas fa-money-bill-transfer"></i></a>
               </td>
             </tr>`
           )}</tbody>
@@ -196,7 +196,7 @@ async function renderControl(body) {
                 <tbody>${d.missing_receipt.map(
                   (r) => html`<tr><td>${r.name}</td><td>${r.supplier_name}</td><td>${formatDate(r.posting_date)}</td>
                     <td class="num">${formatVND(r.grand_total)}</td>
-                    <td class="num"><a class="kt-btn-icon" target="_blank" href="/app/purchase-invoice/${q(r.name)}"><i class="fas fa-up-right-from-square"></i></a></td></tr>`
+                    <td class="num"><a class="kt-btn-icon" target="_blank" href="/desk/purchase-invoice/${q(r.name)}"><i class="fas fa-up-right-from-square"></i></a></td></tr>`
                 )}</tbody>
               </table></div>
               <p class="kt-sub" style="margin-top:8px">Khớp 3 chiều PO–nhập kho–hóa đơn: các hóa đơn này chưa gắn Purchase Receipt.</p>`

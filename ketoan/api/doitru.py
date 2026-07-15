@@ -81,7 +81,7 @@ def get_cases(company: str | None = None, days: int = 90) -> dict:
             "against": r.return_against,
             "attachments": att,
             "status": _status(r.docstatus, att),
-            "route": f"/app/sales-invoice/{r.name}",
+            "route": f"/desk/sales-invoice/{r.name}",
         })
 
     # ── BÚT TOÁN JE: mọi JE có dòng party Customer thuộc nhóm NPP ──────────
@@ -121,7 +121,7 @@ def get_cases(company: str | None = None, days: int = 90) -> dict:
             "remark": remark[:120],
             "attachments": att,
             "status": _status(r.docstatus, att),
-            "route": f"/app/journal-entry/{r.name}",
+            "route": f"/desk/journal-entry/{r.name}",
         })
 
     order = {"cho_hoadon": 0, "cho_duyet": 1, "done": 2}
@@ -176,7 +176,7 @@ def create_return(invoice: str, company: str | None = None) -> dict:
 
     doc = make_return_doc("Sales Invoice", invoice)
     doc.insert()  # tôn trọng quyền create Sales Invoice của user
-    return {"name": doc.name, "route": f"/app/sales-invoice/{doc.name}"}
+    return {"name": doc.name, "route": f"/desk/sales-invoice/{doc.name}"}
 
 
 @frappe.whitelist()
@@ -265,7 +265,7 @@ def create_je(customer: str, amount, remark: str, expense_account: str | None = 
             "decode": True,
         }).save()
 
-    return {"name": je.name, "route": f"/app/journal-entry/{je.name}"}
+    return {"name": je.name, "route": f"/desk/journal-entry/{je.name}"}
 
 
 @frappe.whitelist()

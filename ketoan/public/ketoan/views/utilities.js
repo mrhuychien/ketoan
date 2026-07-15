@@ -36,11 +36,11 @@ export async function render({ container }) {
       <div class="kt-card">
         <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-file-export"></i> Lối tắt báo cáo (ERPNext)</div></div>
         <div class="kt-card-body" style="display:flex;gap:10px;flex-wrap:wrap">
-          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/accounts-receivable"><i class="fas fa-file-invoice-dollar"></i> Bảng kê công nợ phải thu</a>
-          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/accounts-receivable-summary"><i class="fas fa-layer-group"></i> Tổng hợp công nợ</a>
-          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/general-ledger"><i class="fas fa-book"></i> Sổ cái</a>
-          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/cash-flow"><i class="fas fa-chart-line"></i> Lưu chuyển tiền tệ</a>
-          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/journal-entry/new"><i class="fas fa-pen"></i> Bút toán mới</a>
+          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/accounts-receivable"><i class="fas fa-file-invoice-dollar"></i> Bảng kê công nợ phải thu</a>
+          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/accounts-receivable-summary"><i class="fas fa-layer-group"></i> Tổng hợp công nợ</a>
+          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/general-ledger"><i class="fas fa-book"></i> Sổ cái</a>
+          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/cash-flow"><i class="fas fa-chart-line"></i> Lưu chuyển tiền tệ</a>
+          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/journal-entry/new"><i class="fas fa-pen"></i> Bút toán mới</a>
         </div>
       </div>
     `

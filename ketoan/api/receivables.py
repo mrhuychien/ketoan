@@ -392,7 +392,7 @@ def get_customer_ledger(customer: str, company: str | None = None,
             "voucher_no": r.voucher_no, "debit": flt(r.debit), "credit": flt(r.credit),
             "balance": running, "docstatus": 1, "todos": todos,
             "against": (r.against or "")[:140],
-            "route": f"/app/{frappe.scrub(r.voucher_type).replace('_', '-')}/{r.voucher_no}",
+            "route": f"/desk/{frappe.scrub(r.voucher_type).replace('_', '-')}/{r.voucher_no}",
         })
 
     # ── Chứng từ NHÁP đang treo (không vào số dư) ───────────────────────────
@@ -408,7 +408,7 @@ def get_customer_ledger(customer: str, company: str | None = None,
             "todos": [{"icon": "fa-rotate-left",
                        "label": "Chờ KTT duyệt trả hàng" if has_att else "Chờ hóa đơn NPP (trả hàng)",
                        "sev": "red" if has_att else "yellow"}],
-            "route": f"/app/sales-invoice/{x.name}",
+            "route": f"/desk/sales-invoice/{x.name}",
         })
     from ketoan.utils import je_remark_field
     fieldr = je_remark_field()
@@ -438,7 +438,7 @@ def get_customer_ledger(customer: str, company: str | None = None,
             "todos": [{"icon": "fa-percent" if is_ck else "fa-gift",
                        "label": "Chờ KTT duyệt bút toán" if has_att else "Chờ hóa đơn NPP (bút toán JE)",
                        "sev": "red" if has_att else "yellow"}],
-            "route": f"/app/journal-entry/{x.name}",
+            "route": f"/desk/journal-entry/{x.name}",
         })
 
     return {

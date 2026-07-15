@@ -3,7 +3,7 @@
 // guide + sections (Thực hiện / Báo cáo / Công cụ) hiển thị ở trang tham khảo
 // /vt/:key ("Hướng dẫn & lối tắt") — mỗi đích chỉ xuất hiện 1 lần, link vào tab
 // thì mang ?tab= để rơi đúng màn hình.
-// item.type: "desk" (href ra /app), "route" (route nội bộ #/...).
+// item.type: "desk" (href ra /desk), "route" (route nội bộ #/...).
 
 const CTX = window.KETOAN_CONTEXT || {};
 
@@ -22,7 +22,7 @@ function glUrl() {
     include_dimensions: "1",
     include_default_book_entries: "1",
   });
-  return "/app/query-report/General%20Ledger?" + p.toString();
+  return "/desk/query-report/General%20Ledger?" + p.toString();
 }
 
 export const WORKSPACES = [
@@ -41,12 +41,12 @@ export const WORKSPACES = [
     ],
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
-        { label: "Hóa đơn bán hàng (Sales Invoice)", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice" },
+        { label: "Hóa đơn bán hàng (Sales Invoice)", icon: "fa-file-invoice", type: "desk", href: "/desk/sales-invoice" },
         { label: "Sổ cái (General Ledger, 30 ngày)", icon: "fa-book", type: "desk", href: glUrl() },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
         { label: "Công nợ kênh NPP + tuổi nợ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no/npp" },
-        { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/app/accounts-receivable" },
+        { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/desk/accounts-receivable" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
         { label: "Chiết khấu theo doanh số tháng", icon: "fa-percent", type: "route", route: "/doi-chieu-npp?tab=discount" },
@@ -69,14 +69,14 @@ export const WORKSPACES = [
     ],
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
-        { label: "Lập hóa đơn bán", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice/new" },
-        { label: "Phiếu thu tiền", icon: "fa-money-bill-wave", type: "desk", href: "/app/payment-entry/new" },
-        { label: "Khách hàng MT", icon: "fa-users", type: "desk", href: "/app/customer?customer_group=MT" },
+        { label: "Lập hóa đơn bán", icon: "fa-file-invoice", type: "desk", href: "/desk/sales-invoice/new" },
+        { label: "Phiếu thu tiền", icon: "fa-money-bill-wave", type: "desk", href: "/desk/payment-entry/new" },
+        { label: "Khách hàng MT", icon: "fa-users", type: "desk", href: "/desk/customer?customer_group=MT" },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
         { label: "Công nợ kênh MT + tuổi nợ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no/mt" },
-        { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/app/accounts-receivable" },
-        { label: "Sales Register", icon: "fa-table", type: "desk", href: "/app/query-report/Sales Register" },
+        { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/desk/accounts-receivable" },
+        { label: "Sales Register", icon: "fa-table", type: "desk", href: "/desk/query-report/Sales Register" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
         { label: "Tìm khách → 360° · xuất đối chiếu PDF", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
@@ -96,13 +96,13 @@ export const WORKSPACES = [
     ],
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
-        { label: "Lập hóa đơn bán", icon: "fa-file-invoice", type: "desk", href: "/app/sales-invoice/new" },
-        { label: "Phiếu thu tiền", icon: "fa-money-bill-wave", type: "desk", href: "/app/payment-entry/new" },
-        { label: "Khách hàng", icon: "fa-users", type: "desk", href: "/app/customer" },
+        { label: "Lập hóa đơn bán", icon: "fa-file-invoice", type: "desk", href: "/desk/sales-invoice/new" },
+        { label: "Phiếu thu tiền", icon: "fa-money-bill-wave", type: "desk", href: "/desk/payment-entry/new" },
+        { label: "Khách hàng", icon: "fa-users", type: "desk", href: "/desk/customer" },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
         { label: "Công nợ kênh Du lịch, Khác + tuổi nợ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no/khac" },
-        { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/app/accounts-receivable" },
+        { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/desk/accounts-receivable" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
         { label: "Tìm khách → 360° · xuất đối chiếu PDF", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
@@ -123,21 +123,21 @@ export const WORKSPACES = [
     ],
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
-        { label: "Hóa đơn mua (Purchase Invoice)", icon: "fa-file-invoice", type: "desk", href: "/app/purchase-invoice/new" },
-        { label: "Phiếu chi thanh toán", icon: "fa-money-bill-transfer", type: "desk", href: "/app/payment-entry/new" },
-        { label: "Nhà cung cấp", icon: "fa-industry", type: "desk", href: "/app/supplier" },
-        { label: "Đơn mua hàng (PO)", icon: "fa-file-lines", type: "desk", href: "/app/purchase-order" },
+        { label: "Hóa đơn mua (Purchase Invoice)", icon: "fa-file-invoice", type: "desk", href: "/desk/purchase-invoice/new" },
+        { label: "Phiếu chi thanh toán", icon: "fa-money-bill-transfer", type: "desk", href: "/desk/payment-entry/new" },
+        { label: "Nhà cung cấp", icon: "fa-industry", type: "desk", href: "/desk/supplier" },
+        { label: "Đơn mua hàng (PO)", icon: "fa-file-lines", type: "desk", href: "/desk/purchase-order" },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
         { label: "Công nợ phải trả + tuổi nợ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no-ncc" },
-        { label: "Accounts Payable (Desk)", icon: "fa-table", type: "desk", href: "/app/accounts-payable" },
-        { label: "Purchase Register", icon: "fa-table", type: "desk", href: "/app/query-report/Purchase Register" },
-        { label: "Sổ chi tiết NCC", icon: "fa-book", type: "desk", href: "/app/general-ledger?party_type=Supplier" },
+        { label: "Accounts Payable (Desk)", icon: "fa-table", type: "desk", href: "/desk/accounts-payable" },
+        { label: "Purchase Register", icon: "fa-table", type: "desk", href: "/desk/query-report/Purchase Register" },
+        { label: "Sổ chi tiết NCC", icon: "fa-book", type: "desk", href: "/desk/general-ledger?party_type=Supplier" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
         { label: "Lịch thanh toán đến hạn", icon: "fa-calendar-days", type: "route", route: "/cong-no-ncc?tab=due" },
         { label: "Kiểm soát: trùng HĐ NCC + khớp 3 chiều", icon: "fa-shield-halved", type: "route", route: "/cong-no-ncc?tab=control" },
-        { label: "Hóa đơn NCC chờ thanh toán (Desk)", icon: "fa-clock", type: "desk", href: "/app/purchase-invoice?status=Unpaid" },
+        { label: "Hóa đơn NCC chờ thanh toán (Desk)", icon: "fa-clock", type: "desk", href: "/desk/purchase-invoice?status=Unpaid" },
       ]},
     ],
   },
@@ -154,13 +154,13 @@ export const WORKSPACES = [
     ],
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
-        { label: "Phiếu công nhật (SalaryDay)", icon: "fa-calendar-day", type: "desk", href: "/app/salaryday/new" },
-        { label: "Phiếu công khoán (SalaryProduct)", icon: "fa-boxes-stacked", type: "desk", href: "/app/salaryproduct/new" },
-        { label: "Payroll Entry", icon: "fa-file-invoice-dollar", type: "desk", href: "/app/payroll-entry" },
+        { label: "Phiếu công nhật (SalaryDay)", icon: "fa-calendar-day", type: "desk", href: "/desk/salaryday/new" },
+        { label: "Phiếu công khoán (SalaryProduct)", icon: "fa-boxes-stacked", type: "desk", href: "/desk/salaryproduct/new" },
+        { label: "Payroll Entry", icon: "fa-file-invoice-dollar", type: "desk", href: "/desk/payroll-entry" },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
-        { label: "Phiếu công nhật", icon: "fa-table", type: "desk", href: "/app/salaryday" },
-        { label: "Phiếu công khoán", icon: "fa-table", type: "desk", href: "/app/salaryproduct" },
+        { label: "Phiếu công nhật", icon: "fa-table", type: "desk", href: "/desk/salaryday" },
+        { label: "Phiếu công khoán", icon: "fa-table", type: "desk", href: "/desk/salaryproduct" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
         { label: "Tính lương tháng (quét · duyệt · xuất Excel · in PDF)", icon: "fa-calculator", type: "route", route: "/luong" },
@@ -181,16 +181,17 @@ export const WORKSPACES = [
     ],
     sections: [
       { title: "Thực hiện", icon: "fa-bolt", items: [
-        { label: "Bút toán (Journal Entry)", icon: "fa-pen-to-square", type: "desk", href: "/app/journal-entry/new" },
+        { label: "Bút toán (Journal Entry)", icon: "fa-pen-to-square", type: "desk", href: "/desk/journal-entry/new" },
         { label: "Sổ quỹ & nhập phiếu thu chi", icon: "fa-wallet", type: "route", route: "/quy" },
       ]},
       { title: "Báo cáo", icon: "fa-chart-line", items: [
+        { label: "Sổ cái từng tài khoản (trên portal)", icon: "fa-book-open", type: "route", route: "/so-cai" },
         { label: "Sổ cái (General Ledger, 30 ngày)", icon: "fa-book", type: "desk", href: glUrl() },
-        { label: "Bảng cân đối (Trial Balance)", icon: "fa-scale-balanced", type: "desk", href: "/app/query-report/Trial Balance" },
+        { label: "Bảng cân đối (Trial Balance)", icon: "fa-scale-balanced", type: "desk", href: "/desk/query-report/Trial Balance" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
         { label: "Nhập sao kê ngân hàng", icon: "fa-file-import", type: "route", route: "/nhap-sao-ke" },
-        { label: "Quy tắc map sao kê", icon: "fa-sliders", type: "desk", href: "/app/ketoan-bank-map-rule" },
+        { label: "Quy tắc map sao kê", icon: "fa-sliders", type: "desk", href: "/desk/ketoan-bank-map-rule" },
       ]},
     ],
   },
@@ -220,8 +221,8 @@ export const WORKSPACES = [
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
         { label: "Phân quyền vai trò kế toán", icon: "fa-user-shield", type: "route", route: "/phan-quyen" },
-        { label: "Cấu hình portal (Settings)", icon: "fa-gear", type: "desk", href: "/app/ketoan-portal-settings" },
-        { label: "Quản lý user (Desk)", icon: "fa-users-gear", type: "desk", href: "/app/user" },
+        { label: "Cấu hình portal (Settings)", icon: "fa-gear", type: "desk", href: "/desk/ketoan-portal-settings" },
+        { label: "Quản lý user (Desk)", icon: "fa-users-gear", type: "desk", href: "/desk/user" },
       ]},
     ],
   },

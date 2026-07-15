@@ -50,7 +50,7 @@ export async function render({ container, params }) {
         <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-bolt"></i> Thao tác</div></div>
         <div class="kt-card-body" style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="kt-btn kt-btn--primary kt-btn--sm" id="kt-export-recon"><i class="fas fa-file-pdf"></i> Xuất đối chiếu (PDF)</button>
-          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/app/customer/${q(d.customer)}"><i class="fas fa-up-right-from-square"></i> Mở khách</a>
+          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/customer/${q(d.customer)}"><i class="fas fa-up-right-from-square"></i> Mở khách</a>
         </div>
       </div>
 
@@ -171,7 +171,7 @@ function customerTasksBlock(d) {
   if (t.pending_je)
     items.push({ icon: "fa-pen-to-square", label: `Bút toán JE đang treo (CK, thưởng, hỗ trợ...): ${t.pending_je}`, sev: "yellow", href: "#/doi-chieu-npp?tab=butoan" });
   if (d.unallocated_payment > 0)
-    items.push({ icon: "fa-link-slash", label: `Khoản thu chưa khớp hóa đơn: ${formatVND(d.unallocated_payment)}`, sev: "yellow", href: `/app/payment-entry?party=${q(d.customer)}&unallocated_amount=[">",0]` });
+    items.push({ icon: "fa-link-slash", label: `Khoản thu chưa khớp hóa đơn: ${formatVND(d.unallocated_payment)}`, sev: "yellow", href: `/desk/payment-entry?party=${q(d.customer)}&unallocated_amount=[">",0]` });
   if (d.over_limit)
     items.push({ icon: "fa-user-shield", label: "Vượt hạn mức tín dụng — cân nhắc khóa đơn/thu hồi", sev: "red", href: null });
   if (t.missing_docs)
@@ -188,7 +188,7 @@ function customerTasksBlock(d) {
           const ico = html`<span class="kt-ws-item-ico" style="${it.sev === "red" ? "background:#fee2e2;color:#b91c1c" : "background:#fef3c7;color:#b45309"}"><i class="fas ${it.icon}"></i></span>`;
           if (!it.href)
             return html`<div class="kt-ws-item">${ico}<span class="kt-ws-item-label">${it.label}</span></div>`;
-          return html`<a class="kt-ws-item" href="${it.href}" target="${it.href.startsWith("/app") ? "_blank" : ""}">
+          return html`<a class="kt-ws-item" href="${it.href}" target="${it.href.startsWith("/desk") ? "_blank" : ""}">
             ${ico}<span class="kt-ws-item-label">${it.label}</span>
             <span class="kt-ws-item-go"><i class="fas fa-chevron-right"></i></span>
           </a>`;

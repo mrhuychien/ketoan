@@ -27,6 +27,7 @@ const ROUTES = [
   { pattern: "/cong-no-ncc", view: "views/payables.js", cap: "purchase", ws: "purchase", title: "Công nợ phải trả" },
   { pattern: "/ncc/:id", view: "views/supplier.js", cap: "purchase", ws: "purchase", title: "360° NCC" },
   { pattern: "/quy", view: "views/cash.js", cap: "gl", ws: "gl", title: "Sổ quỹ" },
+  { pattern: "/so-cai", view: "views/ledger.js", cap: "gl", ws: "gl", title: "Sổ cái tài khoản" },
   { pattern: "/nhap-sao-ke", view: "views/bankimport.js", cap: "gl", ws: "gl", title: "Nhập sao kê" },
   { pattern: "/luong", view: "views/payroll.js", cap: "payroll", ws: "payroll", title: "Tính lương" },
 ];
@@ -48,7 +49,7 @@ function renderShell() {
             </div>
           </div>
           <div class="kt-header-right">
-            <a class="kt-erp-link" href="/app" title="Mở ERPNext Desk"><i class="fas fa-up-right-from-square"></i> Desk</a>
+            <a class="kt-erp-link" href="/desk" title="Mở ERPNext Desk"><i class="fas fa-up-right-from-square"></i> Desk</a>
             <div class="kt-user">
               <span class="kt-user-name">${CTX.fullName || CTX.user || ""}</span>
               ${CAPS.chief ? html`<span class="kt-badge kt-badge--gold">Kế toán trưởng</span>` : ""}

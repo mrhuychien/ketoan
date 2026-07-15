@@ -386,7 +386,7 @@ def import_transactions(rows, bank_account: str, company: str | None = None) -> 
         try:
             je.insert()
             existing.add(key)
-            created.append({"key": key, "name": je.name, "route": f"/app/journal-entry/{je.name}"})
+            created.append({"key": key, "name": je.name, "route": f"/desk/journal-entry/{je.name}"})
         except Exception as e:
             skipped.append({"key": key, "reason": str(e)[:120]})
 
