@@ -368,9 +368,16 @@ def import_transactions(rows, bank_account: str, company: str | None = None) -> 
         je.voucher_type = "Journal Entry"
         je.posting_date = r.get("date")
         je.company = company
-        # Ghi chú tự nhập (nếu có) thay cho nội dung sao kê; luôn kèm marker chống trùng.
-        note = (r.get("remark") or "").strip() or (r.get("content") or "")
-        je.set(field, f"[BANKIMP-{key}] {note[:240]}")
+        # remark = ghi chú TỰ NHẬP (kèm marker chống trùng — dedup dò trên field này);
+        # user_remark = NỘI DUNG sao kê nguyên bản.
+        note = (r.get("remark") or "").strip()
+        content = (r.get("content") or "").strip()
+        if field == "remark":
+            je.set("remark", f"[BANKIMP-{key}]" + (f" {note[:240]}" if note else ""))
+            je.set("user_remark", content[:240])
+        else:
+            # Site không có field remark riêng → gộp cả vào user_remark.
+            je.set("user_remark", (f"[BANKIMP-{key}] " + (f"{note} | " if note else "") + content)[:300])
 
         bank_line = {"account": bank_account}
         counter_line = {"account": counter}

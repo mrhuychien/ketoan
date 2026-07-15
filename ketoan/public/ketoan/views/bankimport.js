@@ -58,7 +58,7 @@ export async function render({ container }) {
             <div class="kt-field"><label><i class="fas fa-file-excel"></i> File sao kê (.xlsx)</label>
               <input type="file" id="bi-file" class="kt-input" accept=".xlsx"></div>
           </div>
-          <p class="kt-sub">Cột: Số tham chiếu · Ngày · Ghi nợ (tiền ra) · Ghi có (tiền vào) · Số dư · Nội dung. Giao dịch đã nhập trước sẽ tự lọc trùng. TK đối ứng: gõ số TK hoặc tên (không cần dấu). Ghi chú sửa được trước khi ghi sổ — bút toán Journal Entry được <b>submit ngay</b> khi bấm "Tạo &amp; ghi sổ".</p>
+          <p class="kt-sub">Giao dịch đã nhập trước sẽ tự lọc trùng. TK đối ứng: gõ số TK hoặc tên (không cần dấu). <b>Nội dung sao kê tự ghi vào user_remark</b>; ô Ghi chú (tùy chọn) ghi vào <b>remark</b>. Bút toán Journal Entry được <b>submit ngay</b> khi bấm "Tạo &amp; ghi sổ". Số tiền: <span style="color:var(--kt-success)">+ tiền vào</span> · <span style="color:var(--kt-danger)">− tiền ra</span>.</p>
         </div>
       </div>
 
@@ -96,7 +96,7 @@ export async function render({ container }) {
           t.counter_account = t.suggested_counter || "";
           t.last_counter = t.counter_account; // TK đã CHỐT gần nhất (giữ party khi gõ tìm lại)
           t.party = t.suggested_party || "";
-          t.remark = (t.content || "").slice(0, 240); // ghi chú (remark) — sửa tự do trước khi ghi sổ
+          t.remark = ""; // ghi chú TỰ NHẬP → remark; nội dung sao kê tự vào user_remark
           t.checked = false;
         });
         renderTable();
@@ -136,9 +136,9 @@ export async function render({ container }) {
             <div class="kt-table-wrap"><table class="kt-table">
               <thead><tr>
                 <th><input type="checkbox" id="bi-all"></th>
-                <th>Ngày</th><th>Nội dung</th><th class="num">Tiền ra</th><th class="num">Tiền vào</th>
-                <th style="min-width:210px">TK đối ứng</th><th style="min-width:190px">Đối tượng</th>
-                <th style="min-width:200px">Ghi chú (remark)</th><th>Trạng thái</th><th></th>
+                <th>Ngày</th><th>Nội dung (→ user_remark)</th><th class="num">Số tiền</th>
+                <th style="min-width:190px">TK đối ứng</th><th style="min-width:160px">Đối tượng</th>
+                <th style="min-width:160px">Ghi chú (→ remark)</th><th></th>
               </tr></thead>
               <tbody>${txns.map((t) => txnRow(t))}</tbody>
             </table></div>
@@ -423,21 +423,24 @@ export async function render({ container }) {
     const done = t.created;
     const dup = t.duplicate;
     const disabled = done || dup;
-    const status = done
-      ? html`<span class="kt-badge kt-badge--green">Đã tạo</span>`
-      : dup
-        ? html`<span class="kt-badge kt-badge--gray">Trùng</span>`
-        : html`<span class="kt-badge kt-badge--${t.direction === "in" ? "green" : "red"}">${t.direction === "in" ? "Tiền vào" : "Tiền ra"}</span>`;
+    const isIn = t.direction === "in";
+    const amount = isIn ? t.credit : t.debit;
+    // Badge phụ dưới nội dung: Đã tạo / Trùng / 💡 (chiều tiền thể hiện bằng màu ± ở cột Số tiền).
+    const badges = [];
+    if (done) badges.push(html`<span class="kt-badge kt-badge--green">Đã tạo</span>`);
+    else if (dup) badges.push(html`<span class="kt-badge kt-badge--gray">Trùng</span>`);
+    if (t.suggested_rule && !disabled) badges.push(html`<span class="kt-badge kt-badge--green" title="Gợi ý từ quy tắc: ${t.suggested_rule}">💡 ${t.suggested_rule}</span>`);
     return html`<tr>
       <td><input type="checkbox" class="bi-cb" value="${t.key}" ${disabled ? "disabled" : ""} ${!disabled && t.checked ? "checked" : ""}></td>
-      <td>${t.date}</td>
-      <td title="${t.content}" style="max-width:320px;white-space:normal">${(t.content || "").slice(0, 90)}${t.content && t.content.length > 90 ? "…" : ""}</td>
-      <td class="num ${t.debit ? "danger" : ""}">${t.debit ? formatVND(t.debit) : ""}</td>
-      <td class="num ${t.credit ? "pos" : ""}">${t.credit ? formatVND(t.credit) : ""}</td>
+      <td style="white-space:nowrap">${t.date}</td>
+      <td title="${t.content}" style="min-width:170px;max-width:250px;white-space:normal;font-size:12px;line-height:1.45">
+        ${(t.content || "").slice(0, 110)}${t.content && t.content.length > 110 ? "…" : ""}
+        ${badges.length ? html`<div style="margin-top:3px">${badges}</div>` : ""}
+      </td>
+      <td class="num ${isIn ? "pos" : "danger"}" style="white-space:nowrap" title="${isIn ? "Tiền vào" : "Tiền ra"}">${isIn ? "+" : "−"}${formatVND(amount)}</td>
       <td>${disabled ? "—" : html`<div class="bi-counter-host" data-key="${t.key}"></div>`}</td>
       <td>${disabled ? "—" : html`<div class="bi-party-host" data-key="${t.key}"></div>`}</td>
-      <td>${disabled ? "—" : html`<input class="kt-input bi-remark" data-key="${t.key}" value="${t.remark || ""}" maxlength="240" placeholder="Diễn giải ghi vào bút toán…">`}</td>
-      <td>${status}${t.suggested_rule && !disabled ? html` <span class="kt-badge kt-badge--green" title="Gợi ý từ quy tắc: ${t.suggested_rule}">💡</span>` : ""}</td>
+      <td>${disabled ? "—" : html`<input class="kt-input bi-remark" data-key="${t.key}" value="${t.remark || ""}" maxlength="240" placeholder="Ghi chú thêm (tùy chọn)…">`}</td>
       <td>${disabled ? "" : html`<button class="kt-btn-icon bi-saverule" data-key="${t.key}" title="Lưu quy tắc từ dòng này"><i class="fas fa-floppy-disk"></i></button>`}</td>
     </tr>`;
   }
