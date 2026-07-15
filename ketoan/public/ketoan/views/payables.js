@@ -1,12 +1,13 @@
-// views/payables.js — Công nợ phải trả: 3 tab (Công nợ NCC / Đến hạn / Kiểm soát).
+// views/payables.js — Công nợ phải trả: 4 tab (Công nợ NCC / Đến hạn / Kiểm soát / Giá nhập NL).
 import { api } from "../lib/api.js";
 import { html, setHTML, on } from "../lib/dom.js";
 import { formatVND, formatVNDShort, formatDate, escapeHtml } from "../lib/format.js";
 import { navigate } from "../lib/router.js";
+import { openModal } from "../components/modal.js";
 
 const q = encodeURIComponent;
 
-const AP_TABS = ["ap", "due", "control"];
+const AP_TABS = ["ap", "due", "control", "gia"];
 
 export async function render({ container, query }) {
   setHTML(container, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
@@ -47,6 +48,7 @@ export async function render({ container, query }) {
         <button data-tab="ap" class="${state.tab === "ap" ? "is-active" : ""}">Công nợ NCC</button>
         <button data-tab="due" class="${state.tab === "due" ? "is-active" : ""}">Đến hạn thanh toán</button>
         <button data-tab="control" class="${state.tab === "control" ? "is-active" : ""}">Kiểm soát</button>
+        <button data-tab="gia" class="${state.tab === "gia" ? "is-active" : ""}">Giá nhập NL</button>
       </div>
       <div id="ap-tab-body"></div>
     `
@@ -70,7 +72,8 @@ export async function render({ container, query }) {
   function renderTab() {
     if (state.tab === "ap") renderAP(body, summary, state);
     else if (state.tab === "due") renderDue(body);
-    else renderControl(body);
+    else if (state.tab === "control") renderControl(body);
+    else renderPrices(body, state);
   }
   renderTab();
 }
@@ -205,4 +208,128 @@ async function renderControl(body) {
       </div>
     `
   );
+}
+
+/* ---------- Tab 4: theo dõi GIÁ NHẬP nguyên liệu (quét Purchase Invoice) ---------- */
+const PW_DAYS = [90, 180, 365];
+
+async function renderPrices(body, state) {
+  if (state.pwDays == null) state.pwDays = 180;
+  if (state.pwTh == null) state.pwTh = 10;
+  if (state.pwSearch == null) state.pwSearch = "";
+  setHTML(body, html`<div class="kt-boot"><div class="kt-spinner"></div><p>Đang quét hóa đơn mua…</p></div>`);
+  let d;
+  try { d = await api.apPriceWatch({ days: state.pwDays, threshold: state.pwTh }); }
+  catch (e) { setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`); return; }
+
+  const draw = () => {
+    const qs = (state.pwSearch || "").toLowerCase().trim();
+    const rows = !qs ? d.rows : d.rows.filter((r) =>
+      (r.item_name || "").toLowerCase().includes(qs) || (r.item_code || "").toLowerCase().includes(qs));
+    setHTML(
+      body,
+      html`
+        <div class="kt-stats">
+          <div class="kt-stat"><div class="kt-stat-label"><i class="fas fa-boxes-stacked"></i> Nguyên liệu theo dõi</div>
+            <div class="kt-stat-value">${d.item_count}</div>
+            <div class="kt-stat-sub">${d.days} ngày · quét Purchase Invoice</div></div>
+          <div class="kt-stat"><div class="kt-stat-label"><i class="fas fa-triangle-exclamation"></i> Biến động ≥ ${d.threshold}%</div>
+            <div class="kt-stat-value ${d.alert_count ? "neg" : "pos"}">${d.alert_count}</div></div>
+        </div>
+
+        <div class="kt-card">
+          <div class="kt-card-head">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <div class="kt-segment" id="pw-days">
+                ${PW_DAYS.map((n) => html`<button data-d="${n}" class="${n === state.pwDays ? "is-active" : ""}">${n} ngày</button>`)}
+              </div>
+              <label class="kt-sub" style="display:flex;align-items:center;gap:6px">Ngưỡng %
+                <input type="number" id="pw-th" class="kt-input" style="width:70px" min="1" max="100" value="${state.pwTh}"></label>
+            </div>
+            <div class="kt-search"><i class="fas fa-search"></i><input class="kt-input" id="pw-search" placeholder="Tìm nguyên liệu..." value="${state.pwSearch}"></div>
+          </div>
+          <div class="kt-card-body">
+            <div class="kt-table-wrap"><table class="kt-table">
+              <thead><tr><th>Nguyên liệu</th><th>NCC</th><th class="num">Giá gần nhất</th>
+                <th class="num">So lần trước</th><th class="num">TB kỳ</th><th class="num">So TB</th>
+                <th class="num">Min–Max</th><th class="num">Lần mua</th><th></th></tr></thead>
+              <tbody>${rows.map((r) => pwRow(r))}</tbody>
+            </table></div>
+            ${rows.length === 0 ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có nguyên liệu nào trong kỳ</p></div>` : ""}
+            ${d.truncated ? html`<p class="kt-sub" style="margin-top:8px">⚠ Kỳ này quá 20.000 dòng mua — thu hẹp số ngày để quét đủ.</p>` : ""}
+          </div>
+        </div>
+      `
+    );
+
+    body.querySelector("#pw-days").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-d]");
+      if (!b) return;
+      state.pwDays = parseInt(b.dataset.d, 10);
+      renderPrices(body, state);
+    });
+    body.querySelector("#pw-th").addEventListener("change", (e) => {
+      state.pwTh = Math.max(1, parseFloat(e.target.value || "10"));
+      renderPrices(body, state);
+    });
+    const search = body.querySelector("#pw-search");
+    let timer = null;
+    search.addEventListener("input", () => {
+      state.pwSearch = search.value;
+      clearTimeout(timer);
+      timer = setTimeout(draw, 200);
+    });
+    body.querySelectorAll("[data-pw-item]").forEach((tr) =>
+      tr.addEventListener("click", (e) => {
+        if (e.target.closest("a")) return;
+        openPriceHistory(tr.dataset.pwItem);
+      })
+    );
+  };
+  draw();
+}
+
+function pctBadge(pct) {
+  if (pct == null) return html`<span class="kt-sub">—</span>`;
+  if (Math.abs(pct) < 0.05) return html`<span class="kt-badge kt-badge--gray">0%</span>`;
+  // Giá NHẬP tăng = xấu (đỏ), giảm = tốt (xanh).
+  return pct > 0
+    ? html`<span class="kt-badge kt-badge--red">▲ +${pct}%</span>`
+    : html`<span class="kt-badge kt-badge--green">▼ ${pct}%</span>`;
+}
+
+function pwRow(r) {
+  const sup = r.suppliers.join(", ") + (r.supplier_count > 3 ? ` +${r.supplier_count - 3}` : "");
+  return html`<tr class="kt-row-link" data-pw-item="${r.item_code}" style="${r.alert ? "background:#fef2f2" : ""}">
+    <td style="max-width:220px;white-space:normal">${r.alert ? html`<i class="fas fa-triangle-exclamation" style="color:var(--kt-danger)"></i> ` : ""}<b>${r.item_name}</b><br><span class="kt-sub">${r.item_code} · ${r.uom}</span></td>
+    <td style="max-width:180px;white-space:normal;font-size:12px" title="${sup}">${r.last_supplier}${r.supplier_count > 1 ? html`<br><span class="kt-sub">${r.supplier_count} NCC</span>` : ""}</td>
+    <td class="num"><b>${formatVND(r.last_price)}</b><br><span class="kt-sub">${formatDate(r.last_date)}</span></td>
+    <td class="num">${pctBadge(r.chg_last_pct)}</td>
+    <td class="num">${formatVND(r.avg_price)}</td>
+    <td class="num">${pctBadge(r.chg_avg_pct)}</td>
+    <td class="num" style="font-size:12px">${formatVNDShort(r.min_price)}–${formatVNDShort(r.max_price)}</td>
+    <td class="num">${r.buys}</td>
+    <td class="num"><span class="kt-btn-icon"><i class="fas fa-chevron-right"></i></span></td>
+  </tr>`;
+}
+
+async function openPriceHistory(itemCode) {
+  const m = openModal({ title: "Lịch sử giá nhập", icon: "fa-chart-line", maxWidth: 720,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>` });
+  let d;
+  try { d = await api.apPriceHistory(itemCode, { days: 365 }); }
+  catch (e) { setHTML(m.body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`); return; }
+  setHTML(m.body, html`
+    <p class="kt-sub kt-mb"><b>${d.item_name}</b> (${d.item_code}) · ${d.rows.length} lần mua trong ${d.days} ngày</p>
+    <div class="kt-table-wrap"><table class="kt-table">
+      <thead><tr><th>Ngày</th><th>NCC</th><th class="num">SL</th><th class="num">Đơn giá</th><th class="num">So lần trước</th><th></th></tr></thead>
+      <tbody>${d.rows.map((r) => html`<tr>
+        <td>${formatDate(r.date)}</td>
+        <td style="max-width:200px;white-space:normal;font-size:12px">${r.supplier_name}</td>
+        <td class="num">${r.qty} ${r.uom}</td>
+        <td class="num"><b>${formatVND(r.price)}</b></td>
+        <td class="num">${pctBadge(r.chg_pct)}</td>
+        <td class="num"><a class="kt-btn-icon" target="_blank" href="${r.route}" title="Mở hóa đơn"><i class="fas fa-up-right-from-square"></i></a></td>
+      </tr>`)}</tbody>
+    </table></div>`);
 }

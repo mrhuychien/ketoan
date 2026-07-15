@@ -84,6 +84,7 @@ export const api = {
   aging: (channel, a) => callMethod(NS + "receivables.get_aging", withCompany({ channel: channel || "tat-ca", ...a })),
   customerDetail: (customer, a) => callMethod(NS + "receivables.get_customer_detail", withCompany({ customer, ...a })),
   customerLedger: (customer, a) => callMethod(NS + "receivables.get_customer_ledger", withCompany({ customer, ...a })),
+  sellingPriceWatch: (channel, a) => callMethod(NS + "prices.get_selling_price_watch", withCompany({ channel: channel || "tat-ca", ...a })),
 
   // Cash
   balances: (a) => callMethod(NS + "cash.get_balances", withCompany(a)),
@@ -98,6 +99,8 @@ export const api = {
   apDueSchedule: (a) => callMethod(NS + "payables.get_due_schedule", withCompany(a)),
   supplierDetail: (supplier, a) => callMethod(NS + "payables.get_supplier_detail", withCompany({ supplier, ...a })),
   apControls: (a) => callMethod(NS + "payables.get_controls", withCompany(a)),
+  apPriceWatch: (a) => callMethod(NS + "prices.get_price_watch", withCompany(a)),
+  apPriceHistory: (item_code, a) => callMethod(NS + "prices.get_price_history", withCompany({ item_code, ...a })),
 
   // NPP reconciliation
   nppDebts: (a) => callMethod(NS + "npp.get_debts", withCompany(a)),

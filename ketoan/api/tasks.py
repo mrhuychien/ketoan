@@ -20,6 +20,17 @@ def _count(sql: str, params) -> int:
         return 0
 
 
+def _selling_price_task(company: str, channel: str) -> dict:
+    """Item 'giá bán lệch bảng giá không có Pricing Rule' cho 1 kênh (30 ngày)."""
+    try:
+        from ketoan.api.prices import get_selling_price_watch
+        n = int(get_selling_price_watch(company, channel=channel, days=30)["alert_count"])
+    except Exception:
+        n = 0
+    return {"label": "Giá bán lệch bảng giá (không có Pricing Rule)", "count": n,
+            "route": f"/cong-no/{channel}?tab=gia", "severity": "warning"}
+
+
 def _overdue_customers(company: str, channel: str, b1: int) -> int:
     """Số khách của kênh có hóa đơn quá hạn > b1 ngày."""
     params = {"company": company, "today": today(), "b1": b1}
@@ -92,6 +103,7 @@ def get_tasks(company: str | None = None) -> dict:
         # Cần thu / đối chiếu công nợ
         n = _overdue_customers(company, "npp", b1)
         items.append({"label": f"Cần đối chiếu / thu công nợ (quá {b1} ngày)", "count": n, "route": "/doi-chieu-npp?tab=due", "severity": "danger"})
+        items.append(_selling_price_task(company, "npp"))
         add("Kế toán NPP", "fa-handshake", "npp", items)
         del items  # tránh dùng nhầm ở nhóm sau
 
@@ -100,11 +112,13 @@ def get_tasks(company: str | None = None) -> dict:
         n = _overdue_customers(company, "mt", b1)
         add("Kế toán MT", "fa-store", "mt", [
             {"label": f"Khách MT quá hạn (> {b1} ngày) cần thu/đối chiếu", "count": n, "route": "/cong-no/mt", "severity": "danger"},
+            _selling_price_task(company, "mt"),
         ])
     if caps.get("travel"):
         n = _overdue_customers(company, "khac", b1)
         add("Kế toán Du lịch, Khác", "fa-umbrella-beach", "travel", [
             {"label": f"Khách quá hạn (> {b1} ngày) cần thu/đối chiếu", "count": n, "route": "/cong-no/khac", "severity": "danger"},
+            _selling_price_task(company, "khac"),
         ])
 
     # ── Kế toán mua hàng ────────────────────────────────────────────────────
@@ -133,6 +147,13 @@ def get_tasks(company: str | None = None) -> dict:
             {"company": company},
         )
         items.append({"label": "Hóa đơn mua thiếu liên kết nhập kho (khớp 3 chiều)", "count": n, "route": "/cong-no-ncc?tab=control", "severity": "warning"})
+        # Giá nhập nguyên liệu biến động mạnh (quét PI 90 ngày, ngưỡng mặc định 10%).
+        try:
+            from ketoan.api.prices import get_price_watch
+            n = int(get_price_watch(company, days=90)["alert_count"])
+        except Exception:
+            n = 0
+        items.append({"label": "Giá nhập nguyên liệu biến động mạnh", "count": n, "route": "/cong-no-ncc?tab=gia", "severity": "danger"})
         add("Kế toán mua hàng", "fa-truck-field", "purchase", items)
 
     # ── Kế toán tiền lương ──────────────────────────────────────────────────

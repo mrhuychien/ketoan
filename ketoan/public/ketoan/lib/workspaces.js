@@ -53,6 +53,7 @@ export const WORKSPACES = [
         { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/desk/accounts-receivable" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
+        { label: "Soát giá bán vs bảng giá kênh", icon: "fa-tags", type: "route", route: "/cong-no/npp?tab=gia" },
         { label: "Chiết khấu theo doanh số tháng", icon: "fa-percent", type: "route", route: "/doi-chieu-npp?tab=discount" },
         { label: "Nhắc nợ Zalo / đến hạn", icon: "fa-comment-dots", type: "route", route: "/doi-chieu-npp?tab=due" },
         { label: "Xuất biên bản đối chiếu (PDF)", icon: "fa-file-pdf", type: "route", route: "/doi-chieu-npp?tab=debt" },
@@ -83,6 +84,7 @@ export const WORKSPACES = [
         { label: "Sales Register", icon: "fa-table", type: "desk", href: "/desk/query-report/Sales Register" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
+        { label: "Soát giá bán vs bảng giá kênh", icon: "fa-tags", type: "route", route: "/cong-no/mt?tab=gia" },
         { label: "Tìm khách → 360° · xuất đối chiếu PDF", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
       ]},
     ],
@@ -109,6 +111,7 @@ export const WORKSPACES = [
         { label: "Accounts Receivable", icon: "fa-table", type: "desk", href: "/desk/accounts-receivable" },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
+        { label: "Soát giá bán vs bảng giá kênh", icon: "fa-tags", type: "route", route: "/cong-no/khac?tab=gia" },
         { label: "Tìm khách → 360° · xuất đối chiếu PDF", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
       ]},
     ],
@@ -139,6 +142,7 @@ export const WORKSPACES = [
         { label: "Sổ chi tiết NCC", icon: "fa-book", type: "desk", href: glUrl({ party_type: "Supplier" }) },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
+        { label: "Theo dõi giá nhập nguyên liệu (cảnh báo biến động)", icon: "fa-tags", type: "route", route: "/cong-no-ncc?tab=gia" },
         { label: "Lịch thanh toán đến hạn", icon: "fa-calendar-days", type: "route", route: "/cong-no-ncc?tab=due" },
         { label: "Kiểm soát: trùng HĐ NCC + khớp 3 chiều", icon: "fa-shield-halved", type: "route", route: "/cong-no-ncc?tab=control" },
         { label: "Hóa đơn NCC chờ thanh toán (Desk)", icon: "fa-clock", type: "desk", href: "/desk/purchase-invoice?status=Unpaid" },
