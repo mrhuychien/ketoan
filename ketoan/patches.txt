@@ -7,3 +7,4 @@ ketoan.patches.v0_0_2.create_channel_roles
 ketoan.patches.v0_0_2.grant_business_permissions
 ketoan.patches.v0_0_3.regrant_permissions
 ketoan.patches.v0_0_4.baseline_desk_perms
+ketoan.patches.v0_0_5.sales_tax_price_perms

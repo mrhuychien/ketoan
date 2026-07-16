@@ -30,7 +30,9 @@ DRAFT_DOC = ("read", "write", "create", "print", "report")  # nháp — không s
 READ_DOC = ("read", "report", "print")
 
 # Quyền chung cho 1 kế toán kênh bán hàng (NPP/MT/Du lịch):
-# SI đầy đủ (xem/sửa/ghi sổ/hủy) · JE nháp · thu tiền · xem sổ cái/khách/địa chỉ.
+# SI đầy đủ (xem/sửa/ghi sổ/hủy — TOÀN BỘ hóa đơn, if_owner=0) · JE nháp ·
+# thu tiền · xem sổ cái/khách/địa chỉ · chọn BẢNG GIÁ + THUẾ trên hóa đơn
+# và hàng trả về (Price List/Item Price/mẫu thuế/thuế mặt hàng/Pricing Rule).
 _SALES_CHANNEL_PERMS = {
     "Sales Invoice": FULL_DOC,
     "Journal Entry": DRAFT_DOC,
@@ -45,6 +47,13 @@ _SALES_CHANNEL_PERMS = {
     "Delivery Note": ("read", "report"),
     "Customer Group": ("read",),
     "Item": ("read",),
+    # Bảng giá & thuế cho hóa đơn bán / hàng trả về:
+    "Price List": ("read",),
+    "Item Price": ("read", "report"),
+    "Sales Taxes and Charges Template": ("read",),
+    "Item Tax Template": ("read",),
+    "Tax Category": ("read",),
+    "Pricing Rule": ("read",),
 }
 
 BUSINESS_PERMS = {
@@ -191,6 +200,8 @@ def grant_business_permissions():
                 if right == "read":
                     continue  # add_permission đã set read
                 update_permission_property(doctype, role, 0, right, 1)
+            # Xem TOÀN BỘ chứng từ của doctype (không giới hạn "chỉ của tôi").
+            update_permission_property(doctype, role, 0, "if_owner", 0)
         except Exception:
             frappe.log_error(frappe.get_traceback(), f"ketoan perms: {role} @ {doctype}")
 
