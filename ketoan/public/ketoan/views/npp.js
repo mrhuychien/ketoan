@@ -126,14 +126,23 @@ function policyDesc(d) {
 /* ---------- Tab 1: Công nợ NPP ---------- */
 function renderDebt(body, data, state) {
   const filtered = applyFilter(data.rows, state);
+  const cf = data.config || {};
   setHTML(
     body,
     html`
+      <div class="kt-alert kt-alert--info kt-mb">
+        <div class="kt-alert-title"><i class="fas fa-calendar-check"></i> Chính sách thu &amp; thưởng</div>
+        <div class="kt-alert-hint">Chốt đơn đến hạn ngày ${cf.pay_window_start ?? 5}, thu từ ngày ${cf.pay_window_start ?? 5}–${cf.pay_window_end ?? 10} hàng tháng.
+          Trả chậm ${(cf.grace_days ?? 5) + 1}–${cf.penalty_days ?? 10} ngày: phạt ${cf.penalty_pct ?? 50}% thưởng ${cf.discount_pct ?? 2}%; trả chậm >${cf.penalty_days ?? 10} ngày: cắt thưởng.
+          Cột "Cảnh báo trễ hạn" là <b>nguy cơ real-time</b> — mức phạt/cắt chính thức chốt theo từng tháng ở tab <b>Chiết khấu</b>.
+          ${data.late_count ? html`<b style="color:var(--kt-danger)"> · ${data.late_count} NPP đang trễ hạn, có nguy cơ mất thưởng.</b>` : ""}</div>
+      </div>
       <div class="kt-card">
         <div class="kt-card-head">
           <div class="kt-segment" id="npp-status">
             <button data-f="all" class="${state.statusFilter === "all" ? "is-active" : ""}">Tất cả</button>
             <button data-f="due" class="${state.statusFilter === "due" ? "is-active" : ""}">Cần thu</button>
+            <button data-f="late" class="${state.statusFilter === "late" ? "is-active" : ""}">Trả chậm</button>
             <button data-f="normal" class="${state.statusFilter === "normal" ? "is-active" : ""}">Bình thường</button>
             <button data-f="negative" class="${state.statusFilter === "negative" ? "is-active" : ""}">Số dư âm</button>
           </div>
@@ -144,7 +153,7 @@ function renderDebt(body, data, state) {
         </div>
         <div class="kt-card-body">
           <div class="kt-table-wrap"><table class="kt-table">
-            <thead><tr><th><input type="checkbox" id="npp-debt-all"></th><th>NPP</th><th class="num">Công nợ</th><th class="num">DS bình quân/tháng</th><th class="num">Cần thanh toán</th><th>Trạng thái</th><th></th></tr></thead>
+            <thead><tr><th><input type="checkbox" id="npp-debt-all"></th><th>NPP</th><th class="num">Công nợ</th><th class="num">DS bình quân/tháng</th><th class="num">Cần thanh toán</th><th>Trạng thái</th><th>Cảnh báo trễ hạn</th><th></th></tr></thead>
             <tbody>${filtered.map((r) => debtRow(r, state))}</tbody>
           </table></div>
           ${filtered.length === 0 ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có NPP phù hợp</p></div>` : ""}
@@ -192,9 +201,14 @@ function renderDebt(body, data, state) {
   });
 }
 
+const BONUS_BADGE = { warning: "yellow", danger: "red" };
+
 function debtRow(r, state) {
   const s = STATUS[r.status] || STATUS.normal;
   const checked = state.debtSelected.has(r.customer) ? "checked" : "";
+  const bonus = r.bonus_tier && r.bonus_tier !== "full"
+    ? html`<span class="kt-badge kt-badge--${BONUS_BADGE[r.bonus_sev] || "yellow"}"><i class="fas fa-triangle-exclamation"></i> ${r.bonus_impact}</span>`
+    : html`<span class="kt-sub">—</span>`;
   return html`<tr class="kt-row-link" data-customer="${r.customer}">
     <td><input type="checkbox" class="npp-debt-cb" value="${r.customer}" ${checked}></td>
     <td>${r.customer_name}</td>
@@ -202,6 +216,7 @@ function debtRow(r, state) {
     <td class="num">${formatVND(r.monthly_sales)}</td>
     <td class="num ${r.required_payment > 0 ? "danger" : "pos"}">${r.required_payment > 0 ? formatVND(r.required_payment) : "—"}</td>
     <td><span class="kt-badge kt-badge--${s.cls}">${s.label}</span></td>
+    <td>${bonus}</td>
     <td class="num"><span class="kt-btn-icon"><i class="fas fa-chevron-right"></i></span></td>
   </tr>`;
 }
@@ -347,21 +362,29 @@ async function renderDiscount(body, data, state) {
   state.discData = dd;
   state.discSelected = new Set();
 
-  const pending = dd.rows.filter((r) => r.status !== "created");
+  const selectable = dd.rows.filter((r) => r.status === "pending");
+  const cutCount = dd.rows.filter((r) => r.status === "cut").length;
   const totalSel = () => dd.rows.filter((r) => state.discSelected.has(r.customer)).reduce((s, r) => s + r.discount_amount, 0);
+  const cf = dd.config || {};
 
   const inner = html`
     ${!dd.config.discount_account_set
       ? html`<div class="kt-alert kt-alert--warning"><div class="kt-alert-title"><i class="fas fa-gear"></i> Chưa cấu hình tài khoản</div>
           <div class="kt-alert-hint">Vào <b>Ketoan Portal Settings</b> đặt <i>TK chi phí chiết khấu (6412)</i> và <i>TK phải thu (131)</i> để tạo bút toán.</div></div>`
       : ""}
+    <div class="kt-alert kt-alert--info kt-mb"><div class="kt-alert-hint">
+      Thưởng ${cf.discount_pct}% doanh số khi doanh số tháng ≥ ngưỡng. <b>Phạt theo tiến độ trả tiền HĐ trong tháng</b>:
+      trả chậm ${(cf.grace_days ?? 5) + 1}–${cf.penalty_days ?? 10} ngày → phạt ${cf.penalty_pct ?? 50}% (chỉ còn ${((cf.discount_pct || 2) * (1 - (cf.penalty_pct ?? 50) / 100)).toFixed(1)}%);
+      trả chậm >${cf.penalty_days ?? 10} ngày → cắt thưởng.
+      ${cutCount ? html`<b style="color:var(--kt-danger)"> · ${cutCount} NPP bị cắt thưởng tháng này.</b>` : ""}
+    </div></div>
     <div class="kt-mb" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <span class="kt-sub">Ngưỡng ${formatVNDShort(dd.config.threshold)} · ${dd.config.discount_pct}% doanh số · ${dd.rows.length} NPP đủ điều kiện tháng ${dd.month}</span>
       <span class="kt-sub">Tổng chiết khấu chọn: <b id="npp-disc-total" style="color:var(--kt-success)">${formatVND(0)}</b>
         <button class="kt-btn kt-btn--success kt-btn--sm" id="npp-disc-create" style="margin-left:8px" ${dd.config.discount_account_set ? "" : "disabled"}><i class="fas fa-file-circle-plus"></i> Tạo bút toán</button></span>
     </div>
     <div class="kt-table-wrap"><table class="kt-table">
-      <thead><tr><th><input type="checkbox" id="npp-disc-all" ${pending.length ? "" : "disabled"}></th><th>Khách hàng</th><th class="num">Doanh số tháng</th><th class="num">Chiết khấu ${dd.config.discount_pct}%</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
+      <thead><tr><th><input type="checkbox" id="npp-disc-all" ${selectable.length ? "" : "disabled"}></th><th>Khách hàng</th><th class="num">Doanh số tháng</th><th>Trả tiền HĐ tháng</th><th class="num">Thực thưởng</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
       <tbody>${dd.rows.map((r) => discRow(r))}</tbody>
     </table></div>
     ${dd.rows.length === 0 ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có NPP đủ điều kiện trong tháng ${dd.month}</p></div>` : ""}
@@ -406,12 +429,30 @@ async function renderDiscount(body, data, state) {
 
 function discRow(r) {
   const created = r.status === "created";
+  const cut = r.status === "cut";
+  const penalized = r.tier && r.tier !== "full";
+  // Cột "Trả tiền HĐ tháng": tình trạng trả chậm → mức phạt.
+  const pay = r.tier === "full"
+    ? html`<span class="kt-badge kt-badge--green"><i class="fas fa-check"></i> Đúng hạn</span>`
+    : html`<span class="kt-badge kt-badge--${r.tier === "cut" ? "red" : "yellow"}"><i class="fas fa-triangle-exclamation"></i> ${r.penalty_label}</span>`;
+  // Cột "Thực thưởng": số thực nhận; nếu bị phạt thì gạch số gốc.
+  const amount = cut
+    ? html`<span class="danger">0</span>${r.base_amount ? html` <span class="kt-sub" style="text-decoration:line-through">${formatVND(r.base_amount)}</span>` : ""}`
+    : penalized
+      ? html`<b class="pos">${formatVND(r.discount_amount)}</b> <span class="kt-sub" style="text-decoration:line-through">${formatVND(r.base_amount)}</span>`
+      : html`<span class="pos">${formatVND(r.discount_amount)}</span>`;
+  const statusBadge = created
+    ? html`<span class="kt-badge kt-badge--green">Đã tạo JE</span>`
+    : cut
+      ? html`<span class="kt-badge kt-badge--red">Cắt thưởng</span>`
+      : html`<span class="kt-badge kt-badge--gray">Chờ tạo</span>`;
   return html`<tr>
-    <td><input type="checkbox" class="npp-disc-cb" value="${r.customer}" ${created ? "disabled" : ""}></td>
+    <td><input type="checkbox" class="npp-disc-cb" value="${r.customer}" ${created || cut ? "disabled" : ""}></td>
     <td>${r.customer_name}</td>
     <td class="num">${formatVND(r.monthly_sales)}</td>
-    <td class="num pos">${formatVND(r.discount_amount)}</td>
-    <td>${created ? html`<span class="kt-badge kt-badge--green">Đã tạo JE</span>` : html`<span class="kt-badge kt-badge--gray">Chờ tạo</span>`}</td>
+    <td>${pay}</td>
+    <td class="num">${amount}</td>
+    <td>${statusBadge}</td>
     <td>${r.route ? html`<a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="${r.route}">Xem JE</a>` : "—"}</td>
   </tr>`;
 }
@@ -762,7 +803,8 @@ async function renderEinvoice(body) {
 /* ---------- helpers ---------- */
 function applyFilter(rows, state) {
   let r = rows;
-  if (state.statusFilter !== "all") r = r.filter((x) => x.status === state.statusFilter);
+  if (state.statusFilter === "late") r = r.filter((x) => x.bonus_tier && x.bonus_tier !== "full");
+  else if (state.statusFilter !== "all") r = r.filter((x) => x.status === state.statusFilter);
   const q = (state.search || "").toLowerCase().trim();
   if (q) r = r.filter((x) => (x.customer_name || x.customer || "").toLowerCase().includes(q));
   return r;

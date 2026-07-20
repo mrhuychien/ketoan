@@ -28,7 +28,14 @@
   "tet_start_month",
   "tet_payment_percent",
   "receivable_account",
-  "discount_expense_account"
+  "discount_expense_account",
+  "payment_policy_section",
+  "pay_window_start",
+  "pay_window_end",
+  "pay_grace_days",
+  "column_break_pay",
+  "pay_penalty_days",
+  "pay_penalty_percent"
  ],
  "fields": [
   {
@@ -184,6 +191,50 @@
    "fieldtype": "Link",
    "label": "TK chi phí chiết khấu (6412)",
    "options": "Account"
+  },
+  {
+   "fieldname": "payment_policy_section",
+   "fieldtype": "Section Break",
+   "label": "Chính sách thanh toán & phạt thưởng NPP"
+  },
+  {
+   "default": "5",
+   "description": "Chốt đơn cần thanh toán vào ngày này hàng tháng (đơn đã đến hạn 30 ngày).",
+   "fieldname": "pay_window_start",
+   "fieldtype": "Int",
+   "label": "Ngày chốt / bắt đầu thu (hàng tháng)"
+  },
+  {
+   "default": "10",
+   "description": "Hạn NPP thanh toán trong tháng (thu từ ngày chốt đến ngày này).",
+   "fieldname": "pay_window_end",
+   "fieldtype": "Int",
+   "label": "Ngày hạn thanh toán (hàng tháng)"
+  },
+  {
+   "default": "5",
+   "description": "Trả chậm ≤ số ngày này (so với hạn HĐ): KHÔNG phạt thưởng.",
+   "fieldname": "pay_grace_days",
+   "fieldtype": "Int",
+   "label": "Ân hạn trả chậm (ngày)"
+  },
+  {
+   "fieldname": "column_break_pay",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "10",
+   "description": "Trả chậm > số ngày này: CẮT toàn bộ thưởng 2% của tháng. Trong khoảng (ân hạn, mốc này]: phạt một phần.",
+   "fieldname": "pay_penalty_days",
+   "fieldtype": "Int",
+   "label": "Mốc cắt thưởng (ngày quá hạn)"
+  },
+  {
+   "default": "50",
+   "description": "% thưởng bị PHẠT khi trả chậm ở mức giữa (vd 50% = còn nhận một nửa thưởng).",
+   "fieldname": "pay_penalty_percent",
+   "fieldtype": "Percent",
+   "label": "Tỷ lệ phạt thưởng mức giữa (%)"
   }
  ],
  "issingle": 1,

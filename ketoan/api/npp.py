@@ -35,7 +35,40 @@ def _cfg() -> dict:
         "tet_pct": flt(s.tet_payment_percent) or 50.0,
         "receivable_account": s.receivable_account or None,
         "discount_expense_account": s.discount_expense_account or None,
+        # Chính sách thanh toán & phạt thưởng. Ân hạn / % phạt cho phép giá trị 0
+        # hợp lệ → chỉ fallback khi field CHƯA đặt (None).
+        "pay_window_start": int(s.get("pay_window_start") or 5),
+        "pay_window_end": int(s.get("pay_window_end") or 10),
+        "grace_days": _int_or(s.get("pay_grace_days"), 5),
+        "penalty_days": int(s.get("pay_penalty_days") or 10),
+        "penalty_pct": _flt_or(s.get("pay_penalty_percent"), 50.0),
     }
+
+
+def _int_or(v, default: int) -> int:
+    return int(v) if v not in (None, "") else default
+
+
+def _flt_or(v, default: float) -> float:
+    return flt(v) if v not in (None, "") else default
+
+
+def _penalty_tier(late_days, cfg: dict) -> dict:
+    """Phân mức phạt thưởng theo số ngày TRẢ CHẬM (so hạn hóa đơn).
+
+    ≤ ân hạn        → full  (giữ 100% thưởng)
+    (ân hạn, mốc]   → half  (phạt penalty_pct% → giữ phần còn lại)
+    > mốc           → cut   (cắt toàn bộ thưởng của tháng)
+    """
+    g, p = cfg["grace_days"], cfg["penalty_days"]
+    if late_days is None or late_days <= g:
+        return {"tier": "full", "keep": 1.0, "label": "Đúng hạn", "sev": "ok"}
+    if late_days <= p:
+        keep = max(0.0, 1.0 - cfg["penalty_pct"] / 100.0)
+        return {"tier": "half", "keep": keep,
+                "label": f"Trả chậm {late_days} ngày — phạt {cfg['penalty_pct']:.0f}% thưởng", "sev": "warning"}
+    return {"tier": "cut", "keep": 0.0,
+            "label": f"Trả chậm {late_days} ngày (>{p}) — cắt thưởng", "sev": "danger"}
 
 
 def _policy(cfg: dict):
@@ -100,17 +133,20 @@ def _existing_discount_je(month_key: str) -> dict:
 
 
 def _month_sales(company: str, names: tuple, first: str, last: str, cfg: dict) -> dict:
-    """Doanh số tháng theo NPP = SUM(debit) TK phải thu từ Sales Invoice trong tháng."""
+    """Doanh số THUẦN tháng theo NPP = SUM(debit − credit) TK phải thu từ Sales
+    Invoice trong tháng — net hàng trả về (credit note cùng voucher_type) và loại
+    hóa đơn số dư đầu kỳ (is_opening)."""
     params = {"company": company, "names": names, "first": first, "last": last}
     rclause = _receivable_clause(cfg, params)
     rows = frappe.db.sql(
         f"""
-        SELECT gle.party AS customer, SUM(gle.debit) AS sales
+        SELECT gle.party AS customer, SUM(gle.debit - gle.credit) AS sales
         FROM `tabGL Entry` gle
         JOIN `tabAccount` acc ON acc.name = gle.account
         WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
           AND gle.party_type = 'Customer' AND gle.party IN %(names)s
           AND gle.voucher_type = 'Sales Invoice'
+          AND IFNULL(gle.is_opening, 'No') != 'Yes'
           AND gle.posting_date BETWEEN %(first)s AND %(last)s
           AND {rclause}
         GROUP BY gle.party
@@ -119,6 +155,60 @@ def _month_sales(company: str, names: tuple, first: str, last: str, cfg: dict) -
         as_dict=True,
     )
     return {r.customer: flt(r.sales) for r in rows}
+
+
+def _current_overdue(company: str, names: tuple, cfg: dict) -> dict:
+    """Số ngày TRẢ CHẬM hiện tại của từng NPP = max(today − hạn) trên các hóa đơn
+    còn nợ đã đến hạn. Hạn = due_date (nếu có) hoặc posting + due_days."""
+    rows = frappe.db.sql(
+        """
+        SELECT customer,
+               MAX(DATEDIFF(%(today)s, COALESCE(due_date, DATE_ADD(posting_date, INTERVAL %(dd)s DAY)))) AS late
+        FROM `tabSales Invoice`
+        WHERE docstatus = 1 AND company = %(company)s AND customer IN %(names)s
+          AND IFNULL(is_return, 0) = 0 AND outstanding_amount > 0.5
+        GROUP BY customer
+        """,
+        {"company": company, "names": names, "today": today(), "dd": cfg["due_days"]},
+        as_dict=True,
+    )
+    return {r.customer: int(r.late or 0) for r in rows}
+
+
+def _month_payment_lateness(company: str, names: tuple, first: str, last: str, cfg: dict) -> dict:
+    """Số ngày trả chậm TỆ NHẤT của hóa đơn PHÁT SINH trong tháng M (dùng cho phạt
+    thưởng của tháng đó): với HĐ còn nợ → today − hạn; HĐ đã tất toán → ngày thanh
+    toán cuối (Payment Entry) − hạn; lấy MAX, kẹp ≥ 0."""
+    rows = frappe.db.sql(
+        """
+        SELECT si.customer,
+               MAX(GREATEST(
+                 DATEDIFF(
+                   CASE WHEN si.outstanding_amount > 0.5 THEN %(today)s
+                        -- Đã tất toán: dùng ngày Payment Entry; nếu tất toán bằng JE/bù
+                        -- trừ (không có PE) thì coi như ĐÚNG HẠN (không phạt oan).
+                        ELSE COALESCE(lp.pdate, si.due_date,
+                                      DATE_ADD(si.posting_date, INTERVAL %(dd)s DAY)) END,
+                   COALESCE(si.due_date, DATE_ADD(si.posting_date, INTERVAL %(dd)s DAY))
+                 ), 0)) AS late
+        FROM `tabSales Invoice` si
+        LEFT JOIN (
+          SELECT per.reference_name AS rn, MAX(pe.posting_date) AS pdate
+          FROM `tabPayment Entry Reference` per
+          JOIN `tabPayment Entry` pe ON pe.name = per.parent
+          WHERE pe.docstatus = 1 AND per.reference_doctype = 'Sales Invoice'
+          GROUP BY per.reference_name
+        ) lp ON lp.rn = si.name
+        WHERE si.docstatus = 1 AND si.company = %(company)s AND si.customer IN %(names)s
+          AND IFNULL(si.is_return, 0) = 0 AND si.base_grand_total > 0
+          AND si.posting_date BETWEEN %(first)s AND %(last)s
+        GROUP BY si.customer
+        """,
+        {"company": company, "names": names, "first": first, "last": last,
+         "today": today(), "dd": cfg["due_days"]},
+        as_dict=True,
+    )
+    return {r.customer: int(r.late or 0) for r in rows}
 
 
 @frappe.whitelist()
@@ -176,14 +266,16 @@ def get_debts(company: str | None = None) -> dict:
 
     # 3) requiredPayment theo chính sách.
     if policy == "normal":
+        # Chốt đơn cần thanh toán = outstanding của HĐ ĐÃ ĐẾN HẠN (quá hạn HĐ,
+        # tức đơn đến hạn 30 ngày chốt vào kỳ thu 5–10 hàng tháng).
         params = dict(base, due_days=cfg["due_days"])
         over_rows = frappe.db.sql(
             """
             SELECT customer, SUM(outstanding_amount) AS overdue
             FROM `tabSales Invoice`
             WHERE docstatus = 1 AND company = %(company)s AND customer IN %(names)s
-              AND outstanding_amount > 0
-              AND DATEDIFF(%(today)s, COALESCE(due_date, posting_date)) > %(due_days)s
+              AND outstanding_amount > 0 AND IFNULL(is_return, 0) = 0
+              AND DATEDIFF(%(today)s, COALESCE(due_date, DATE_ADD(posting_date, INTERVAL %(due_days)s DAY))) >= 0
             GROUP BY customer
             """,
             params,
@@ -207,9 +299,13 @@ def get_debts(company: str | None = None) -> dict:
         tet_total = {r.customer: flt(r.tet_total) for r in tet_rows}
         overdue = {}
 
+    # 4) Số ngày trả chậm hiện tại → mức ảnh hưởng thưởng (cảnh báo cho kế toán).
+    overdue_days = _current_overdue(company, names, cfg)
+
     rows = []
     total_debt = 0.0
     total_required = 0.0
+    late_count = 0
     for c in customers:
         d = debt.get(c.name, 0.0)
         if policy == "normal":
@@ -226,6 +322,19 @@ def get_debts(company: str | None = None) -> dict:
         else:
             status = "normal"
 
+        # CẢNH BÁO SỚM (real-time) theo mức trả chậm HIỆN TẠI của HĐ còn nợ —
+        # KHÁC với mức phạt chính thức (tính theo HĐ từng THÁNG ở tab Chiết khấu).
+        late = overdue_days.get(c.name, 0)
+        tier = _penalty_tier(late, cfg)
+        if tier["tier"] == "half":
+            impact = f"Đang trễ {late} ngày — nguy cơ phạt {cfg['penalty_pct']:.0f}% thưởng"
+            late_count += 1
+        elif tier["tier"] == "cut":
+            impact = f"Đang trễ {late} ngày (>{cfg['penalty_days']}) — nguy cơ cắt thưởng"
+            late_count += 1
+        else:
+            impact = ""
+
         rows.append({
             "customer": c.name,
             "customer_name": c.customer_name or c.name,
@@ -234,6 +343,10 @@ def get_debts(company: str | None = None) -> dict:
             "monthly_sales": monthly.get(c.name, 0.0),
             "required_payment": required,
             "status": status,
+            "overdue_days": late,
+            "bonus_tier": tier["tier"],
+            "bonus_impact": impact,
+            "bonus_sev": tier["sev"],
         })
         total_debt += d
         total_required += required
@@ -243,10 +356,16 @@ def get_debts(company: str | None = None) -> dict:
         "company": company,
         "policy": policy,
         "tet_start": tet_start,
-        "config": {"due_days": cfg["due_days"], "tet_pct": cfg["tet_pct"], "group": cfg["group"]},
+        "config": {
+            "due_days": cfg["due_days"], "tet_pct": cfg["tet_pct"], "group": cfg["group"],
+            "pay_window_start": cfg["pay_window_start"], "pay_window_end": cfg["pay_window_end"],
+            "grace_days": cfg["grace_days"], "penalty_days": cfg["penalty_days"],
+            "penalty_pct": cfg["penalty_pct"], "discount_pct": cfg["discount_pct"],
+        },
         "rows": rows,
         "total_debt": total_debt,
         "total_required": total_required,
+        "late_count": late_count,
     }
 
 
@@ -261,6 +380,9 @@ def get_discount_eligible(company: str | None = None, month: str | None = None) 
     cfg_out = {
         "threshold": cfg["threshold"],
         "discount_pct": cfg["discount_pct"],
+        "grace_days": cfg["grace_days"],
+        "penalty_days": cfg["penalty_days"],
+        "penalty_pct": cfg["penalty_pct"],
         "discount_account_set": bool(cfg["discount_expense_account"] and cfg["receivable_account"]),
     }
     customers = _npp_customers(cfg)
@@ -269,6 +391,8 @@ def get_discount_eligible(company: str | None = None, month: str | None = None) 
 
     names = tuple(c.name for c in customers)
     sales = _month_sales(company, names, first, last, cfg)
+    # Trả chậm của HĐ phát sinh trong tháng → phạt thưởng.
+    lateness = _month_payment_lateness(company, names, first, last, cfg)
 
     # JE chiết khấu đã tạo cho tháng này (để khóa, tránh tạo trùng) — dò trong remark.
     ex_map = _existing_discount_je(mkey)
@@ -278,14 +402,28 @@ def get_discount_eligible(company: str | None = None, month: str | None = None) 
         s = sales.get(c.name, 0.0)
         if s < cfg["threshold"]:
             continue
-        disc = round(s * cfg["discount_pct"] / 100.0)
+        base_amount = round(s * cfg["discount_pct"] / 100.0)
+        late = lateness.get(c.name, 0)
+        tier = _penalty_tier(late, cfg)
+        disc = round(base_amount * tier["keep"])
         je_name = ex_map.get(_marker(c.name, mkey))
+        if je_name:
+            status = "created"
+        elif tier["tier"] == "cut" or disc <= 0:
+            status = "cut"
+        else:
+            status = "pending"
         rows.append({
             "customer": c.name,
             "customer_name": c.customer_name or c.name,
             "monthly_sales": s,
+            "base_amount": base_amount,
             "discount_amount": disc,
-            "status": "created" if je_name else "pending",
+            "overdue_days": late,
+            "tier": tier["tier"],
+            "penalty_label": tier["label"],
+            "penalty_sev": tier["sev"],
+            "status": status,
             "je_name": je_name,
             "route": f"/desk/journal-entry/{je_name}" if je_name else None,
         })
@@ -322,6 +460,7 @@ def create_discount_entries(customers, month: str | None = None, company: str | 
     first, last, mkey = _month_range(month)
     names = tuple(customers)
     sales = _month_sales(company, names, first, last, cfg)
+    lateness = _month_payment_lateness(company, names, first, last, cfg)
 
     existing = set(_existing_discount_je(mkey).keys())
 
@@ -336,17 +475,20 @@ def create_discount_entries(customers, month: str | None = None, company: str | 
         if mk in existing:
             skipped.append({"customer": cust, "reason": "Đã có bút toán tháng này"})
             continue
-        amount = round(s * cfg["discount_pct"] / 100.0)
-        if amount <= 0:
-            skipped.append({"customer": cust, "reason": "Chiết khấu = 0"})
+        # Server tự áp phạt thưởng theo mức trả chậm (không tin client).
+        tier = _penalty_tier(lateness.get(cust, 0), cfg)
+        amount = round(round(s * cfg["discount_pct"] / 100.0) * tier["keep"])
+        if tier["tier"] == "cut" or amount <= 0:
+            skipped.append({"customer": cust, "reason": tier["label"] if tier["tier"] != "full" else "Chiết khấu = 0"})
             continue
+        penalty_note = "" if tier["tier"] == "full" else f" ({tier['label']})"
 
         je = frappe.new_doc("Journal Entry")
         je.voucher_type = "Journal Entry"
         je.posting_date = last
         je.company = company
-        # Ghi thẳng vào trường remark: marker chống trùng + diễn giải.
-        je.set(je_remark_field(), f"{mk} Chiết khấu {cfg['discount_pct']}% doanh số tháng {mkey} — {cust}")
+        # Ghi thẳng vào trường remark: marker chống trùng + diễn giải + ghi chú phạt.
+        je.set(je_remark_field(), f"{mk} Chiết khấu {cfg['discount_pct']}% doanh số tháng {mkey} — {cust}{penalty_note}")
         je.append("accounts", {
             "account": cfg["discount_expense_account"],
             "debit_in_account_currency": amount,

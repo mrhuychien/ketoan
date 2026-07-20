@@ -20,6 +20,17 @@ def _count(sql: str, params) -> int:
         return 0
 
 
+def _late_bonus_task(company: str) -> dict:
+    """Số NPP đang trả chậm quá ân hạn → thưởng 2% bị phạt/cắt (bàn NPP)."""
+    try:
+        from ketoan.api.npp import get_debts
+        n = int(get_debts(company).get("late_count") or 0)
+    except Exception:
+        n = 0
+    return {"label": "NPP đang trễ hạn — nguy cơ phạt/cắt thưởng", "count": n,
+            "route": "/doi-chieu-npp?tab=debt", "severity": "warning"}
+
+
 def _selling_price_task(company: str, channel: str) -> dict:
     """Item 'giá bán lệch bảng giá không có Pricing Rule' cho 1 kênh (30 ngày)."""
     try:
@@ -103,6 +114,8 @@ def get_tasks(company: str | None = None) -> dict:
         # Cần thu / đối chiếu công nợ
         n = _overdue_customers(company, "npp", b1)
         items.append({"label": f"Cần đối chiếu / thu công nợ (quá {b1} ngày)", "count": n, "route": "/doi-chieu-npp?tab=due", "severity": "danger"})
+        # NPP trả chậm ảnh hưởng thưởng 2% (phạt/cắt) — kế toán soát trước khi tạo bút toán.
+        items.append(_late_bonus_task(company))
         items.append(_selling_price_task(company, "npp"))
         add("Kế toán NPP", "fa-handshake", "npp", items)
         del items  # tránh dùng nhầm ở nhóm sau
