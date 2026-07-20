@@ -67,8 +67,53 @@ export async function render({ container, params }) {
     else location.hash = "#/";
   });
 
+  // Việc cần xử lý: mở danh sách HĐ đến hạn / cuộn tới khối hồ sơ để tải lên.
+  container.querySelectorAll("[data-task-action]").forEach((el) =>
+    el.addEventListener("click", () => {
+      if (el.dataset.taskAction === "overdue") openOverdueInvoices(d);
+      else if (el.dataset.taskAction === "docs") openCustomerDocs(container);
+    })
+  );
+
   renderLedger(container.querySelector("#kt-ledger"), d.customer);
   renderCustomerFiles(container, d.customer);
+}
+
+// Danh sách hóa đơn CẦN THANH TOÁN của kỳ (đã đến hạn — HĐ đến hạn 30 ngày trở lên).
+function openOverdueInvoices(d) {
+  const rows = (d.invoices || []).filter((i) => i.days_overdue > 0)
+    .slice().sort((a, b) => b.days_overdue - a.days_overdue);
+  const total = rows.reduce((s, i) => s + i.outstanding_amount, 0);
+  openModal({
+    title: "Hóa đơn cần thanh toán kỳ này",
+    icon: "fa-hand-holding-dollar",
+    maxWidth: 720,
+    body: html`
+      <p class="kt-sub kt-mb">Khách: <b>${d.customer_name || d.customer}</b> · ${rows.length} hóa đơn đã đến hạn ·
+        tổng còn phải thu <b style="color:var(--kt-danger)">${formatVND(total)}</b>.
+        <br>Đơn đã đến hạn (chốt kỳ thu ngày 5, hóa đơn đến hạn 30 ngày trở lên).</p>
+      <div class="kt-table-wrap"><table class="kt-table">
+        <thead><tr><th>Số HĐ</th><th>Ngày HĐ</th><th>Hạn TT</th><th class="num">Còn phải thu</th><th class="num">Quá hạn</th><th></th></tr></thead>
+        <tbody>${rows.map((i) => html`<tr>
+          <td>${i.name}</td>
+          <td>${formatDate(i.posting_date)}</td>
+          <td>${i.due_date ? formatDate(i.due_date) : "—"}</td>
+          <td class="num danger">${formatVND(i.outstanding_amount)}</td>
+          <td class="num danger">${i.days_overdue} ngày</td>
+          <td class="num"><a class="kt-btn-icon" target="_blank" href="/desk/sales-invoice/${q(i.name)}" title="Mở hóa đơn"><i class="fas fa-up-right-from-square"></i></a></td>
+        </tr>`)}</tbody>
+      </table></div>
+      ${rows.length === 0 ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i><p>Không có hóa đơn đến hạn</p></div>` : ""}`,
+  });
+}
+
+// Cuộn tới khối "Hồ sơ khách hàng" và mở hộp thoại tải file (nếu đã tải xong).
+function openCustomerDocs(container) {
+  const card = container.querySelector("#kt-customer-files");
+  if (!card) return;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  const btn = card.querySelector("#cf-upload");
+  if (btn) btn.click(); // trong ngữ cảnh user gesture → mở được hộp chọn file
 }
 
 /* ---- Sổ cái giao dịch + việc cần làm gắn từng chứng từ ---- */
@@ -163,7 +208,7 @@ function customerTasksBlock(d) {
 
   const items = [];
   if (overdueInv.length)
-    items.push({ icon: "fa-hand-holding-dollar", label: `Cần thu/đối chiếu: ${overdueInv.length} hóa đơn quá hạn (${formatVND(overdueSum)})`, sev: "red", href: null });
+    items.push({ icon: "fa-hand-holding-dollar", label: `Cần thu/đối chiếu: ${overdueInv.length} hóa đơn đến hạn (${formatVND(overdueSum)})`, sev: "red", action: "overdue" });
   if (t.missing_einvoice)
     items.push({ icon: "fa-file-circle-exclamation", label: `Cần xuất hóa đơn điện tử: ${t.missing_einvoice} hóa đơn`, sev: "red", href: "#/doi-chieu-npp?tab=einvoice" });
   if (t.pending_returns)
@@ -175,7 +220,7 @@ function customerTasksBlock(d) {
   if (d.over_limit)
     items.push({ icon: "fa-user-shield", label: "Vượt hạn mức tín dụng — cân nhắc khóa đơn/thu hồi", sev: "red", href: null });
   if (t.missing_docs)
-    items.push({ icon: "fa-file-signature", label: "Bổ sung hợp đồng, pháp lý — chưa có hồ sơ đính kèm (tải lên ở khối Hồ sơ khách hàng bên dưới)", sev: "yellow", href: null });
+    items.push({ icon: "fa-file-signature", label: "Bổ sung hợp đồng, pháp lý — chưa có hồ sơ đính kèm (bấm để tải lên)", sev: "yellow", action: "docs" });
 
   if (!items.length)
     return html`<div class="kt-alert kt-alert--info kt-mb"><div class="kt-alert-title"><i class="fas fa-circle-check" style="color:var(--kt-success)"></i> Không có việc tồn đọng với khách này</div></div>`;
@@ -186,6 +231,11 @@ function customerTasksBlock(d) {
       <div class="kt-card-body"><div class="kt-ws-items">
         ${items.map((it) => {
           const ico = html`<span class="kt-ws-item-ico" style="${it.sev === "red" ? "background:#fee2e2;color:#b91c1c" : "background:#fef3c7;color:#b45309"}"><i class="fas ${it.icon}"></i></span>`;
+          if (it.action)
+            return html`<div class="kt-ws-item kt-row-link" data-task-action="${it.action}" style="cursor:pointer">
+              ${ico}<span class="kt-ws-item-label">${it.label}</span>
+              <span class="kt-ws-item-go"><i class="fas fa-chevron-right"></i></span>
+            </div>`;
           if (!it.href)
             return html`<div class="kt-ws-item">${ico}<span class="kt-ws-item-label">${it.label}</span></div>`;
           return html`<a class="kt-ws-item" href="${it.href}" target="${it.href.startsWith("/desk") ? "_blank" : ""}">
@@ -201,6 +251,7 @@ function customerTasksBlock(d) {
 async function renderCustomerFiles(container, customer) {
   const host = document.createElement("div");
   host.className = "kt-card";
+  host.id = "kt-customer-files";
   host.style.marginTop = "16px";
   container.appendChild(host);
   setHTML(host, html`<div class="kt-card-body"><div class="kt-spinner" style="width:24px;height:24px"></div></div>`);
