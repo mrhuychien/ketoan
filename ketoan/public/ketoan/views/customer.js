@@ -4,6 +4,7 @@ import { html, setHTML } from "../lib/dom.js";
 import { formatVND, formatDate, escapeHtml } from "../lib/format.js";
 import { openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
+import { glUrl } from "../lib/workspaces.js";
 
 const CTX = window.KETOAN_CONTEXT || {};
 const isManager = CTX.isManager;
@@ -50,6 +51,7 @@ export async function render({ container, params }) {
         <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-bolt"></i> Thao tác</div></div>
         <div class="kt-card-body" style="display:flex;gap:10px;flex-wrap:wrap">
           <button class="kt-btn kt-btn--primary kt-btn--sm" id="kt-export-recon"><i class="fas fa-file-pdf"></i> Xuất đối chiếu (PDF)</button>
+          <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="${glUrl({ party_type: "Customer", party: d.customer })}"><i class="fas fa-book"></i> Mở sổ cái</a>
           <a class="kt-btn kt-btn--outline kt-btn--sm" target="_blank" href="/desk/customer/${q(d.customer)}"><i class="fas fa-up-right-from-square"></i> Mở khách</a>
         </div>
       </div>
@@ -117,37 +119,50 @@ function openCustomerDocs(container) {
 }
 
 /* ---- Sổ cái giao dịch + việc cần làm gắn từng chứng từ ---- */
+const lgIso = (dt) => dt.toISOString().slice(0, 10);
+const lgToday = () => lgIso(new Date());
 const LEDGER_PERIODS = [
+  { key: "thang", label: "Tháng này" },
   { key: "90d", label: "90 ngày" },
   { key: "ytd", label: "Năm nay" },
   { key: "all", label: "Tất cả" },
 ];
 
+// Nút kỳ nhanh chỉ ĐIỀN SẴN Từ ngày; Đến ngày = hôm nay.
 function ledgerFrom(key) {
   const t = new Date();
-  if (key === "90d") { const d = new Date(); d.setDate(d.getDate() - 90); return d.toISOString().slice(0, 10); }
+  if (key === "thang") return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-01`;
+  if (key === "90d") { const d = new Date(); d.setDate(d.getDate() - 90); return lgIso(d); }
   if (key === "ytd") return t.getFullYear() + "-01-01";
-  return null;
+  return ""; // all
 }
 
-async function renderLedger(host, customer, period = "ytd") {
+async function renderLedger(host, customer, state) {
+  if (!state) state = { from: ledgerFrom("ytd"), to: lgToday() };
   setHTML(host, html`<div class="kt-card"><div class="kt-card-body"><div class="kt-spinner" style="width:26px;height:26px"></div></div></div>`);
   let d;
   try {
-    d = await api.customerLedger(customer, { from_date: ledgerFrom(period) });
+    d = await api.customerLedger(customer, { from_date: state.from || null, to_date: state.to || null });
   } catch (e) {
     setHTML(host, html`<div class="kt-card"><div class="kt-card-body kt-sub">${e.message}</div></div>`);
     return;
   }
 
+  const activeP = (p) => ledgerFrom(p) === (state.from || "") && state.to === lgToday();
   setHTML(
     host,
     html`
       <div class="kt-card">
         <div class="kt-card-head">
           <div class="kt-card-title"><i class="fas fa-book"></i> Giao dịch của khách (sổ cái)</div>
-          <div class="kt-segment" id="lg-period">
-            ${LEDGER_PERIODS.map((p) => html`<button data-p="${p.key}" class="${p.key === period ? "is-active" : ""}">${p.label}</button>`)}
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <div class="kt-field" style="margin:0"><label style="font-size:11px">Từ ngày</label>
+              <input type="date" id="lg-from" class="kt-input kt-input--sm" value="${state.from}"></div>
+            <div class="kt-field" style="margin:0"><label style="font-size:11px">Đến ngày</label>
+              <input type="date" id="lg-to" class="kt-input kt-input--sm" value="${state.to}"></div>
+            <div class="kt-segment" id="lg-period">
+              ${LEDGER_PERIODS.map((p) => html`<button data-p="${p.key}" class="${activeP(p.key) ? "is-active" : ""}">${p.label}</button>`)}
+            </div>
           </div>
         </div>
         <div class="kt-card-body">
@@ -170,9 +185,16 @@ async function renderLedger(host, customer, period = "ytd") {
     `
   );
 
+  const fromI = host.querySelector("#lg-from");
+  const toI = host.querySelector("#lg-to");
+  fromI.addEventListener("change", () => { state.from = fromI.value || ""; renderLedger(host, customer, state); });
+  toI.addEventListener("change", () => { state.to = toI.value || lgToday(); renderLedger(host, customer, state); });
   host.querySelector("#lg-period").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-p]");
-    if (b) renderLedger(host, customer, b.dataset.p);
+    if (!b) return;
+    state.from = ledgerFrom(b.dataset.p);
+    state.to = lgToday();
+    renderLedger(host, customer, state);
   });
 }
 
