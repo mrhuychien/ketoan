@@ -163,6 +163,7 @@ async function renderLedger(host, customer, state) {
             <div class="kt-segment" id="lg-period">
               ${LEDGER_PERIODS.map((p) => html`<button data-p="${p.key}" class="${activeP(p.key) ? "is-active" : ""}">${p.label}</button>`)}
             </div>
+            <button class="kt-btn kt-btn--outline kt-btn--sm" id="lg-pdf"><i class="fas fa-file-pdf"></i> Xuất PDF</button>
           </div>
         </div>
         <div class="kt-card-body">
@@ -189,6 +190,17 @@ async function renderLedger(host, customer, state) {
   const toI = host.querySelector("#lg-to");
   fromI.addEventListener("change", () => { state.from = fromI.value || ""; renderLedger(host, customer, state); });
   toI.addEventListener("change", () => { state.to = toI.value || lgToday(); renderLedger(host, customer, state); });
+
+  // Xuất biên bản đối chiếu PDF theo ĐÚNG khoảng ngày đang chọn.
+  const pdfBtn = host.querySelector("#lg-pdf");
+  pdfBtn.addEventListener("click", async () => {
+    const orig = pdfBtn.innerHTML;
+    pdfBtn.disabled = true;
+    pdfBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tạo…';
+    try { await api.nppExportRecon(customer, state.from || "", state.to || lgToday()); }
+    catch (e) { toast(e.message, "error"); }
+    finally { pdfBtn.disabled = false; pdfBtn.innerHTML = orig; }
+  });
   host.querySelector("#lg-period").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-p]");
     if (!b) return;
