@@ -187,13 +187,13 @@ function draftSection(rows, title) {
 function ledgerRow(r) {
   const draft = r.docstatus === 0;
   return html`<tr style="${draft ? "opacity:.85;background:#fffbeb" : ""}">
-    <td>${formatDate(r.posting_date)}</td>
-    <td>${r.voucher_no}<br><span class="kt-sub">${r.voucher_type}${draft ? html` <span class="kt-badge kt-badge--yellow">NHÁP</span>` : ""}</span></td>
-    <td style="font-size:11px;color:var(--kt-text-2);max-width:180px">${r.against || "—"}</td>
+    <td style="white-space:nowrap">${formatDate(r.posting_date)}</td>
+    <td style="white-space:nowrap">${r.voucher_no}<br><span class="kt-sub">${r.voucher_type}${draft ? html` <span class="kt-badge kt-badge--yellow">NHÁP</span>` : ""}</span></td>
+    <td class="kt-cell-wrap" style="font-size:11px;color:var(--kt-text-2);max-width:200px">${r.against || "—"}</td>
     <td class="num">${r.debit ? formatVND(r.debit) : ""}</td>
     <td class="num">${r.credit ? formatVND(r.credit) : ""}</td>
     <td class="num">${r.balance == null ? "—" : formatVND(r.balance)}</td>
-    <td>${(r.todos || []).length
+    <td class="kt-cell-wrap" style="max-width:200px">${(r.todos || []).length
       ? (r.todos || []).map((td) => html`<span class="kt-badge kt-badge--${td.sev === "red" ? "red" : "yellow"}" style="margin:1px 2px 1px 0"><i class="fas ${td.icon}"></i> ${td.label}</span>`)
       : html`<span class="kt-badge kt-badge--green"><i class="fas fa-check"></i> OK</span>`}</td>
     <td class="num"><a class="kt-btn-icon" target="_blank" href="${r.route}" title="Mở trong ERPNext"><i class="fas fa-up-right-from-square"></i></a></td>

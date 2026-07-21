@@ -98,6 +98,8 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-table-wrap { overflow-x: auto; border: 1px solid var(--kt-border); border-radius: var(--kt-r-md); }
 .kt-table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--kt-bg-card); }
 .kt-table th, .kt-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--kt-border); white-space: nowrap; }
+/* Ô nội dung dài (TK đối ứng, diễn giải, việc cần làm...) — cho xuống dòng trong ô, không tràn đè cột số. */
+.kt-table td.kt-cell-wrap { white-space: normal; word-break: break-word; overflow-wrap: anywhere; vertical-align: top; }
 .kt-table th { background: var(--kt-bg-input); color: var(--kt-text-2); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; position: sticky; top: 0; }
 .kt-table tbody tr:last-child td { border-bottom: none; }
 .kt-table tbody tr:hover { background: #f8fafc; }

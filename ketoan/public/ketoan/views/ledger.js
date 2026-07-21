@@ -206,8 +206,8 @@ export async function render({ container, query }) {
                 ${d.rows.map((r) => html`<tr>
                   <td>${formatDate(r.posting_date)}</td>
                   <td>${r.voucher_no}<br><span class="kt-sub">${r.voucher_type}</span></td>
-                  <td style="font-size:11.5px;color:var(--kt-text-2);max-width:170px;white-space:normal">${r.against || "—"}</td>
-                  <td style="max-width:260px;white-space:normal;font-size:12px">${r.remarks || "—"}</td>
+                  <td class="kt-cell-wrap" style="font-size:11.5px;color:var(--kt-text-2);max-width:170px">${r.against || "—"}</td>
+                  <td class="kt-cell-wrap" style="max-width:260px;font-size:12px">${r.remarks || "—"}</td>
                   <td style="font-size:12px">${r.party || "—"}</td>
                   <td class="num">${r.debit ? formatVND(r.debit) : ""}</td>
                   <td class="num">${r.credit ? formatVND(r.credit) : ""}</td>
