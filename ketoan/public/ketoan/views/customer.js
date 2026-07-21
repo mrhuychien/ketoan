@@ -152,14 +152,14 @@ async function renderLedger(host, customer, period = "ytd") {
         </div>
         <div class="kt-card-body">
           <div class="kt-table-wrap"><table class="kt-table">
-            <thead><tr><th>Ngày</th><th>Chứng từ</th><th>TK đối ứng</th><th class="num">Nợ (bán)</th><th class="num">Có (thu/giảm)</th><th class="num">Số dư</th><th>Việc cần làm</th><th></th></tr></thead>
+            <thead><tr><th>Ngày</th><th>Chứng từ</th><th class="num">Nợ (bán)</th><th class="num">Có (thu/giảm)</th><th class="num">Số dư</th><th>TK đối ứng</th><th>Việc cần làm</th><th></th></tr></thead>
             <tbody>
-              ${d.from_date ? html`<tr class="kt-lg-open"><td>${formatDate(d.from_date)}</td><td><b>Dư đầu kỳ</b></td><td></td><td class="num"></td><td class="num"></td><td class="num"><b>${formatVND(d.opening)}</b></td><td></td><td></td></tr>` : ""}
+              ${d.from_date ? html`<tr class="kt-lg-open"><td>${formatDate(d.from_date)}</td><td><b>Dư đầu kỳ</b></td><td class="num"></td><td class="num"></td><td class="num"><b>${formatVND(d.opening)}</b></td><td></td><td></td><td></td></tr>` : ""}
               ${d.rows.map((r) => ledgerRow(r))}
-              <tr class="kt-lg-total"><td></td><td><b>Cộng phát sinh</b></td><td></td>
+              <tr class="kt-lg-total"><td></td><td><b>Cộng phát sinh</b></td>
                 <td class="num"><b>${formatVND(d.total_debit)}</b></td>
                 <td class="num"><b>${formatVND(d.total_credit)}</b></td>
-                <td class="num"><b>${formatVND(d.closing)}</b></td><td></td><td></td></tr>
+                <td class="num"><b>${formatVND(d.closing)}</b></td><td></td><td></td><td></td></tr>
               ${draftSection(d.drafts.filter((r) => r.kind === "return"), "Hàng trả lại chưa xử lý (nháp — chưa vào số dư)")}
               ${draftSection(d.drafts.filter((r) => r.kind !== "return"), "Bút toán JE đang treo (nháp — chưa vào số dư)")}
             </tbody>
@@ -189,10 +189,10 @@ function ledgerRow(r) {
   return html`<tr style="${draft ? "opacity:.85;background:#fffbeb" : ""}">
     <td style="white-space:nowrap">${formatDate(r.posting_date)}</td>
     <td style="white-space:nowrap">${r.voucher_no}<br><span class="kt-sub">${r.voucher_type}${draft ? html` <span class="kt-badge kt-badge--yellow">NHÁP</span>` : ""}</span></td>
-    <td class="kt-cell-wrap" style="font-size:11px;color:var(--kt-text-2);max-width:200px">${r.against || "—"}</td>
     <td class="num">${r.debit ? formatVND(r.debit) : ""}</td>
     <td class="num">${r.credit ? formatVND(r.credit) : ""}</td>
     <td class="num">${r.balance == null ? "—" : formatVND(r.balance)}</td>
+    <td class="kt-cell-wrap" style="font-size:11px;color:var(--kt-text-2);max-width:200px">${r.against || "—"}</td>
     <td class="kt-cell-wrap" style="max-width:200px">${(r.todos || []).length
       ? (r.todos || []).map((td) => html`<span class="kt-badge kt-badge--${td.sev === "red" ? "red" : "yellow"}" style="margin:1px 2px 1px 0"><i class="fas ${td.icon}"></i> ${td.label}</span>`)
       : html`<span class="kt-badge kt-badge--green"><i class="fas fa-check"></i> OK</span>`}</td>
