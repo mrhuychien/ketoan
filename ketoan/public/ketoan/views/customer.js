@@ -34,9 +34,9 @@ export async function render({ container, params }) {
           <div class="kt-stat-value is-grad">${formatVND(d.outstanding)}</div>
           ${d.customer_group ? html`<div class="kt-stat-sub">${d.customer_group}${d.territory ? " · " + d.territory : ""}</div>` : ""}
         </div>
-        <div class="kt-stat"><div class="kt-stat-label"><i class="fas fa-calendar-check"></i> Cần thu kỳ này</div>
+        <div class="kt-stat"><div class="kt-stat-label"><i class="fas fa-calendar-check"></i> Cần thu kỳ ${formatDate(d.schedule && d.schedule.cutoff)}</div>
           <div class="kt-stat-value ${(d.schedule && d.schedule.due_amount) > 0 ? "neg" : "pos"}">${formatVND((d.schedule && d.schedule.due_amount) || 0)}</div>
-          <div class="kt-stat-sub">Chốt ${formatDate(d.schedule && d.schedule.cutoff)} · quá hạn ${formatVND(d.overdue_amount || 0)} · trong hạn ${formatVND(d.in_term_amount || 0)}</div>
+          <div class="kt-stat-sub">${d.schedule && d.schedule.in_window ? "Đang trong kỳ thu" : `Còn ${(d.schedule && d.schedule.days_to_window) || 0} ngày tới kỳ thu`} · quá hạn ${formatVND(d.overdue_amount || 0)}</div>
         </div>
         ${isManager
           ? html`<div class="kt-stat"><div class="kt-stat-label"><i class="fas fa-user-shield"></i> Hạn mức tín dụng</div>
@@ -114,16 +114,17 @@ function openOverdueInvoices(d) {
     maxWidth: 780,
     body: html`
       <div class="kt-alert kt-alert--info kt-mb"><div class="kt-alert-hint">
-        Khách: <b>${d.customer_name || d.customer}</b> · Kỳ chốt <b>${formatDate(cutoff)}</b>,
-        thu từ ngày ${s.day_start ?? 5} đến ngày ${s.day_end ?? 10} (${formatDate(s.window_end)}).
-        Hóa đơn đến hạn (${d.due_days || 30} ngày) tính đến mốc chốt phải thanh toán kỳ này —
+        Khách: <b>${d.customer_name || d.customer}</b> · Kỳ thu <b>${formatDate(cutoff)}</b> —
+        thu từ ${formatDate(s.window_start)} đến ${formatDate(s.window_end)}
+        (${s.in_window ? "đang trong kỳ thu" : `còn ${s.days_to_window || 0} ngày nữa tới kỳ`}).
+        Hóa đơn đến hạn (${d.due_days || 30} ngày) tính đến mốc chốt ${formatDate(cutoff)} phải thanh toán kỳ này —
         hóa đơn đến hạn sau đó chuyển kỳ <b>${formatDate(s.next_cutoff)}</b>.
         <br>Số còn nợ theo nguyên tắc <b>tiền về cấn trừ hóa đơn cũ trước</b>: hóa đơn cũ đã thanh toán không còn hiện ở đây.
       </div></div>
 
       <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)">
         <div class="kt-card-head">
-          <div class="kt-card-title"><i class="fas fa-hand-holding-dollar"></i> Phải thanh toán kỳ này (${dueNow.length} hóa đơn)</div>
+          <div class="kt-card-title"><i class="fas fa-hand-holding-dollar"></i> Phải thanh toán kỳ ${formatDate(cutoff)} (${dueNow.length} hóa đơn)</div>
           <b style="color:var(--kt-danger)">${formatVND(s.due_amount || 0)}</b>
         </div>
         <div class="kt-card-body">
@@ -292,7 +293,7 @@ function customerTasksBlock(d) {
   const items = [];
   const sch = d.schedule || {};
   if (sch.due_amount > 0)
-    items.push({ icon: "fa-calendar-check", label: `Cần thu theo lịch (kỳ chốt ${formatDate(sch.cutoff)}): ${formatVND(sch.due_amount)} · ${sch.invoice_count || 0} hóa đơn`, sev: "red", action: "overdue" });
+    items.push({ icon: "fa-calendar-check", label: `Cần thu kỳ ${formatDate(sch.cutoff)}: ${formatVND(sch.due_amount)} · ${sch.invoice_count || 0} hóa đơn`, sev: "red", action: "overdue" });
   else if (overdueInv.length || d.overdue_amount > 0)
     items.push({ icon: "fa-hand-holding-dollar", label: `Cần thu/đối chiếu: ${formatVND(d.overdue_amount || overdueSum)} quá hạn (${overdueInv.length} hóa đơn)`, sev: "red", action: "overdue" });
   if (t.missing_einvoice)

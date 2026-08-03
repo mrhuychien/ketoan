@@ -132,8 +132,9 @@ function renderDebt(body, data, state) {
     html`
       <div class="kt-alert kt-alert--info kt-mb">
         <div class="kt-alert-title"><i class="fas fa-calendar-check"></i> Chính sách thu &amp; thưởng</div>
-        <div class="kt-alert-hint">Kỳ chốt hiện tại <b>${formatDate((data.schedule || {}).cutoff)}</b> — thu từ ngày ${cf.pay_window_start ?? 5}–${cf.pay_window_end ?? 10}
-          (hóa đơn đến hạn ${cf.due_days ?? 30} ngày tính đến mốc chốt; đến hạn sau đó chuyển kỳ ${formatDate((data.schedule || {}).next_cutoff)}).
+        <div class="kt-alert-hint">Kỳ thu <b>${formatDate((data.schedule || {}).cutoff)}</b> — thu đến ${formatDate((data.schedule || {}).window_end)}
+          ${(data.schedule || {}).in_window ? "(đang trong kỳ thu)" : `(còn ${(data.schedule || {}).days_to_window ?? 0} ngày nữa)`};
+          hóa đơn đến hạn ${cf.due_days ?? 30} ngày tính đến mốc chốt phải trả kỳ này, sau đó chuyển kỳ ${formatDate((data.schedule || {}).next_cutoff)}.
           Trả chậm ${(cf.grace_days ?? 5) + 1}–${cf.penalty_days ?? 10} ngày: phạt ${cf.penalty_pct ?? 50}% thưởng ${cf.discount_pct ?? 2}%; trả chậm >${cf.penalty_days ?? 10} ngày: cắt thưởng.
           Cột "Cảnh báo trễ hạn" là <b>nguy cơ real-time</b> — mức phạt/cắt chính thức chốt theo từng tháng ở tab <b>Chiết khấu</b>.
           ${data.late_count ? html`<b style="color:var(--kt-danger)"> · ${data.late_count} NPP đang trễ hạn, có nguy cơ mất thưởng.</b>` : ""}</div>

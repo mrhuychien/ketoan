@@ -121,8 +121,9 @@ def open_invoices_map(company: str, balances: dict, limit: int = 20000) -> dict:
 def collection_schedule(as_of=None) -> dict:
     """LỊCH THU theo tháng: chốt ngày N, thu từ ngày N đến ngày M (Ketoan Portal Settings).
 
-    Trả về mốc CHỐT gần nhất đã tới: hóa đơn có hạn ≤ mốc này PHẢI thanh toán
-    trong kỳ thu hiện tại; hóa đơn đến hạn sau đó dồn sang kỳ chốt tháng sau.
+    Trả về kỳ thu ĐANG MỞ hoặc SẮP TỚI — cửa sổ thu tháng này đã đóng (qua ngày M)
+    thì chuyển sang kỳ tháng sau. Hóa đơn có hạn ≤ mốc chốt của kỳ phải thanh toán
+    trong kỳ đó (gồm cả hóa đơn quá hạn từ kỳ trước chưa thu được).
     """
     from frappe.utils import add_months, get_last_day
 
@@ -135,12 +136,17 @@ def collection_schedule(as_of=None) -> dict:
         return d.replace(day=min(int(day), getdate(get_last_day(d)).day))
 
     t = getdate(as_of or today())
-    cutoff = at(t, start) if t.day >= start else at(add_months(t, -1), start)
+    # Qua ngày kết thúc cửa sổ thu → kỳ tháng sau.
+    cutoff = at(t if t.day <= end else getdate(add_months(t, 1)), start)
+    win_end = at(cutoff, end)
     return {
         "cutoff": str(cutoff),
         "window_start": str(cutoff),
-        "window_end": str(at(cutoff, end)),
-        "next_cutoff": str(at(add_months(cutoff, 1), start)),
+        "window_end": str(win_end),
+        "next_cutoff": str(at(getdate(add_months(cutoff, 1)), start)),
+        "prev_cutoff": str(at(getdate(add_months(cutoff, -1)), start)),
+        "in_window": bool(cutoff <= t <= win_end),
+        "days_to_window": max((cutoff - t).days, 0),
         "day_start": start,
         "day_end": end,
     }
