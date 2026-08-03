@@ -1,7 +1,7 @@
 // views/npp.js — Đối chiếu công nợ kênh NPP: công nợ, đến hạn (+Zalo), chiết khấu.
 import { api } from "../lib/api.js";
 import { html, setHTML, on } from "../lib/dom.js";
-import { formatVND, formatVNDShort, escapeHtml } from "../lib/format.js";
+import { formatVND, formatVNDShort, formatDate, escapeHtml } from "../lib/format.js";
 import { navigate } from "../lib/router.js";
 import { openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
@@ -132,7 +132,8 @@ function renderDebt(body, data, state) {
     html`
       <div class="kt-alert kt-alert--info kt-mb">
         <div class="kt-alert-title"><i class="fas fa-calendar-check"></i> Chính sách thu &amp; thưởng</div>
-        <div class="kt-alert-hint">Chốt đơn đến hạn ngày ${cf.pay_window_start ?? 5}, thu từ ngày ${cf.pay_window_start ?? 5}–${cf.pay_window_end ?? 10} hàng tháng.
+        <div class="kt-alert-hint">Kỳ chốt hiện tại <b>${formatDate((data.schedule || {}).cutoff)}</b> — thu từ ngày ${cf.pay_window_start ?? 5}–${cf.pay_window_end ?? 10}
+          (hóa đơn đến hạn ${cf.due_days ?? 30} ngày tính đến mốc chốt; đến hạn sau đó chuyển kỳ ${formatDate((data.schedule || {}).next_cutoff)}).
           Trả chậm ${(cf.grace_days ?? 5) + 1}–${cf.penalty_days ?? 10} ngày: phạt ${cf.penalty_pct ?? 50}% thưởng ${cf.discount_pct ?? 2}%; trả chậm >${cf.penalty_days ?? 10} ngày: cắt thưởng.
           Cột "Cảnh báo trễ hạn" là <b>nguy cơ real-time</b> — mức phạt/cắt chính thức chốt theo từng tháng ở tab <b>Chiết khấu</b>.
           ${data.late_count ? html`<b style="color:var(--kt-danger)"> · ${data.late_count} NPP đang trễ hạn, có nguy cơ mất thưởng.</b>` : ""}</div>

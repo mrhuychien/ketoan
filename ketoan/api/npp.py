@@ -285,14 +285,18 @@ def get_debts(company: str | None = None) -> dict:
         #   = tổng công nợ (GL) − công nợ các hóa đơn CHƯA TỚI HẠN (trong 30 ngày).
         # KHÔNG cộng outstanding_amount của hóa đơn: tiền về qua JE / phiếu thu
         # chưa khớp không cập nhật trường đó → hóa đơn đã trả vẫn bị đòi.
-        params = dict(base, due_days=cfg["due_days"])
+        # Mốc CHỐT theo lịch (ngày 5 hàng tháng): hóa đơn đến hạn SAU mốc chốt
+        # chưa phải trả kỳ này — dồn sang kỳ chốt tháng sau.
+        from ketoan.api.receivables import collection_schedule
+        sched = collection_schedule()
+        params = dict(base, due_days=cfg["due_days"], cutoff=sched["cutoff"])
         in_rows = frappe.db.sql(
             """
             SELECT customer, SUM(base_grand_total) AS in_term
             FROM `tabSales Invoice`
             WHERE docstatus = 1 AND company = %(company)s AND customer IN %(names)s
               AND IFNULL(is_return, 0) = 0 AND base_grand_total > 0
-              AND COALESCE(due_date, DATE_ADD(posting_date, INTERVAL %(due_days)s DAY)) > %(today)s
+              AND COALESCE(due_date, DATE_ADD(posting_date, INTERVAL %(due_days)s DAY)) > %(cutoff)s
             GROUP BY customer
             """,
             params,
@@ -369,10 +373,12 @@ def get_debts(company: str | None = None) -> dict:
         total_required += required
 
     rows.sort(key=lambda r: r["debt"], reverse=True)
+    from ketoan.api.receivables import collection_schedule
     return {
         "company": company,
         "policy": policy,
         "tet_start": tet_start,
+        "schedule": collection_schedule(),
         "config": {
             "due_days": cfg["due_days"], "tet_pct": cfg["tet_pct"], "group": cfg["group"],
             "pay_window_start": cfg["pay_window_start"], "pay_window_end": cfg["pay_window_end"],

@@ -118,6 +118,34 @@ def open_invoices_map(company: str, balances: dict, limit: int = 20000) -> dict:
     return {c: _allocate_open(rows.get(c, []), balances[c]) for c in names}
 
 
+def collection_schedule(as_of=None) -> dict:
+    """LỊCH THU theo tháng: chốt ngày N, thu từ ngày N đến ngày M (Ketoan Portal Settings).
+
+    Trả về mốc CHỐT gần nhất đã tới: hóa đơn có hạn ≤ mốc này PHẢI thanh toán
+    trong kỳ thu hiện tại; hóa đơn đến hạn sau đó dồn sang kỳ chốt tháng sau.
+    """
+    from frappe.utils import add_months, get_last_day
+
+    s = get_settings()
+    start = int(s.get("pay_window_start") or 5)
+    end = int(s.get("pay_window_end") or 10)
+
+    def at(d, day):
+        d = getdate(d)
+        return d.replace(day=min(int(day), getdate(get_last_day(d)).day))
+
+    t = getdate(as_of or today())
+    cutoff = at(t, start) if t.day >= start else at(add_months(t, -1), start)
+    return {
+        "cutoff": str(cutoff),
+        "window_start": str(cutoff),
+        "window_end": str(at(cutoff, end)),
+        "next_cutoff": str(at(add_months(cutoff, 1), start)),
+        "day_start": start,
+        "day_end": end,
+    }
+
+
 def receivable_balances(company: str, channel: str = "tat-ca", customers: tuple | None = None) -> dict:
     """Số dư phải thu (GL) > 0 theo từng khách — nguồn cho phân bổ FIFO."""
     params = {"company": company}
@@ -329,6 +357,18 @@ def get_customer_detail(customer: str, company: str | None = None) -> dict:
     unbilled_overdue = max(0.0, overdue_amount - sum(
         i["outstanding_amount"] for i in invoices if i["days_overdue"] > 0))
 
+    # LỊCH THU: hóa đơn có hạn ≤ mốc chốt (ngày 5) phải thanh toán trong kỳ này;
+    # hóa đơn đến hạn sau mốc chốt dồn sang kỳ tháng sau.
+    sch = collection_schedule()
+    cutoff = sch["cutoff"]
+    due_now = [i for i in invoices if (i["due_date"] or "") <= cutoff]
+    sch["invoice_count"] = len(due_now)
+    sch["invoice_amount"] = sum(i["outstanding_amount"] for i in due_now)
+    sch["unbilled"] = unbilled_overdue          # nợ không gắn hóa đơn — cũng phải thu
+    sch["due_amount"] = sch["invoice_amount"] + unbilled_overdue
+    sch["upcoming_amount"] = sum(
+        i["outstanding_amount"] for i in invoices if (i["due_date"] or "") > cutoff)
+
     # Hạn mức tín dụng: Customer Credit Limit là child table (theo company) → đọc an toàn.
     credit_limit = _get_credit_limit(customer, company)
 
@@ -354,6 +394,7 @@ def get_customer_detail(customer: str, company: str | None = None) -> dict:
         "overdue_amount": overdue_amount,
         "in_term_amount": in_term_amount,
         "unbilled_overdue": unbilled_overdue,
+        "schedule": sch,
         "due_days": invoice_due_days(),
         "credit_limit": credit_limit,
         "over_limit": bool(credit_limit and outstanding > credit_limit),
