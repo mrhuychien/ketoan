@@ -3,6 +3,7 @@ import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
 import { formatVND, formatDate } from "../lib/format.js";
 import { glUrl } from "../lib/workspaces.js";
+import { toast } from "../components/toast.js";
 
 const q = encodeURIComponent;
 
@@ -35,6 +36,18 @@ export async function render({ container, params }) {
         </div>
       </div>
 
+      ${d.missing_docs
+        ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+            <div class="kt-card-body"><div class="kt-ws-items">
+              <div class="kt-ws-item kt-row-link" id="sup-need-docs" style="cursor:pointer">
+                <span class="kt-ws-item-ico" style="background:#fef3c7;color:#b45309"><i class="fas fa-file-signature"></i></span>
+                <span class="kt-ws-item-label">Bổ sung hợp đồng, pháp lý — chưa có hồ sơ đính kèm (bấm để tải lên)</span>
+                <span class="kt-ws-item-go"><i class="fas fa-chevron-right"></i></span>
+              </div>
+            </div></div>
+          </div>`
+        : ""}
+
       <div class="kt-card kt-mb">
         <div class="kt-card-head"><div class="kt-card-title"><i class="fas fa-bolt"></i> Thao tác trong ERPNext</div></div>
         <div class="kt-card-body" style="display:flex;gap:10px;flex-wrap:wrap">
@@ -64,4 +77,69 @@ export async function render({ container, params }) {
       </div>
     `
   );
+
+  renderSupplierFiles(container, d.supplier);
+
+  // Cảnh báo thiếu hồ sơ → cuộn tới khối hồ sơ và mở hộp chọn file.
+  const needDocs = container.querySelector("#sup-need-docs");
+  if (needDocs) needDocs.addEventListener("click", () => {
+    const card = container.querySelector("#kt-supplier-files");
+    if (!card) return;
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    const btn = card.querySelector("#sf-upload");
+    if (btn) btn.click();
+  });
+}
+
+// Khối "Hồ sơ nhà cung cấp" — file đính kèm trên Supplier (hợp đồng, pháp lý, ĐKKD...)
+async function renderSupplierFiles(container, supplier) {
+  const host = document.createElement("div");
+  host.className = "kt-card";
+  host.id = "kt-supplier-files";
+  host.style.marginTop = "16px";
+  container.appendChild(host);
+  setHTML(host, html`<div class="kt-card-body"><div class="kt-spinner" style="width:24px;height:24px"></div></div>`);
+
+  async function load() {
+    let files;
+    try { files = await api.supplierFiles(supplier); }
+    catch (e) { setHTML(host, html`<div class="kt-card-body kt-sub">${e.message}</div>`); return; }
+    setHTML(
+      host,
+      html`
+        <div class="kt-card-head">
+          <div class="kt-card-title"><i class="fas fa-folder-open"></i> Hồ sơ nhà cung cấp (${files.length})</div>
+          <button class="kt-btn kt-btn--outline kt-btn--sm" id="sf-upload"><i class="fas fa-upload"></i> Tải hồ sơ lên</button>
+        </div>
+        <div class="kt-card-body">
+          ${files.length
+            ? html`<div class="kt-table-wrap"><table class="kt-table"><tbody>
+                ${files.map(
+                  (f) => html`<tr><td><i class="fas fa-file-lines" style="color:var(--kt-primary)"></i> ${f.file_name}</td>
+                    <td>${(f.creation || "").slice(0, 10)}</td>
+                    <td class="num"><a class="kt-btn-icon" target="_blank" href="${f.file_url}" title="Mở file"><i class="fas fa-download"></i></a></td></tr>`
+                )}
+              </tbody></table></div>`
+            : html`<div class="kt-sub">Chưa có hồ sơ (hợp đồng, phụ lục, ĐKKD, hồ sơ pháp lý...). Bấm "Tải hồ sơ lên".</div>`}
+        </div>
+      `
+    );
+    host.querySelector("#sf-upload").addEventListener("click", () => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx";
+      input.onchange = () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try { await api.supplierFileUpload(supplier, file.name, reader.result); toast("Đã tải hồ sơ lên", "success"); load(); }
+          catch (e) { toast(e.message, "error"); }
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    });
+  }
+  load();
 }

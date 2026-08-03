@@ -14,6 +14,7 @@ Tất cả read-only, guard_purchase ở dòng đầu, SQL parameterized.
 """
 
 import frappe
+from frappe import _
 from frappe.utils import flt, today, getdate, add_days
 
 from ketoan.api._guard import guard_purchase, resolve_company, get_settings
@@ -216,6 +217,13 @@ def get_supplier_detail(supplier: str, company: str | None = None) -> dict:
         or 0
     )
 
+    # Hồ sơ pháp lý: chưa có file nào đính kèm trên Supplier.
+    try:
+        missing_docs = not frappe.db.exists(
+            "File", {"attached_to_doctype": "Supplier", "attached_to_name": supplier})
+    except Exception:
+        missing_docs = False
+
     return {
         "supplier": supplier,
         "supplier_name": info.get("supplier_name"),
@@ -224,7 +232,47 @@ def get_supplier_detail(supplier: str, company: str | None = None) -> dict:
         "outstanding": outstanding,
         "unallocated_payment": unallocated,
         "invoices": invoices,
+        "missing_docs": bool(missing_docs),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Hồ sơ nhà cung cấp — file đính kèm trên Supplier (hợp đồng, pháp lý, ĐKKD...)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@frappe.whitelist()
+def get_supplier_files(supplier: str) -> list:
+    """File đính kèm của 1 Supplier (hợp đồng, phụ lục, ĐKKD, hồ sơ pháp lý...)."""
+    guard_purchase()
+    if not supplier or not frappe.db.exists("Supplier", supplier):
+        frappe.throw(_("Nhà cung cấp không tồn tại"))
+    return frappe.get_all(
+        "File",
+        filters={"attached_to_doctype": "Supplier", "attached_to_name": supplier},
+        fields=["name", "file_name", "file_url", "creation", "file_size"],
+        order_by="creation desc",
+        limit=100,
+    )
+
+
+@frappe.whitelist()
+def upload_supplier_file(supplier: str, filename: str, content: str) -> dict:
+    """Upload hồ sơ (base64) đính kèm vào Supplier."""
+    guard_purchase()
+    if not supplier or not frappe.db.exists("Supplier", supplier):
+        frappe.throw(_("Nhà cung cấp không tồn tại"))
+    b64 = (content or "").split(",")[-1]
+    file_doc = frappe.get_doc({
+        "doctype": "File",
+        "attached_to_doctype": "Supplier",
+        "attached_to_name": supplier,
+        "file_name": filename or "ho-so-ncc.pdf",
+        "is_private": 1,
+        "content": b64,
+        "decode": True,
+    })
+    file_doc.save()
+    return {"file_url": file_doc.file_url, "name": file_doc.name}
 
 
 @frappe.whitelist()

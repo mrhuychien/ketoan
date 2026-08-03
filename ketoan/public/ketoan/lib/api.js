@@ -100,6 +100,8 @@ export const api = {
   apDueSchedule: (a) => callMethod(NS + "payables.get_due_schedule", withCompany(a)),
   supplierDetail: (supplier, a) => callMethod(NS + "payables.get_supplier_detail", withCompany({ supplier, ...a })),
   apControls: (a) => callMethod(NS + "payables.get_controls", withCompany(a)),
+  supplierFiles: (supplier) => callMethod(NS + "payables.get_supplier_files", { supplier }),
+  supplierFileUpload: (supplier, filename, content) => callMethod(NS + "payables.upload_supplier_file", { supplier, filename, content }),
   apPriceWatch: (a) => callMethod(NS + "prices.get_price_watch", withCompany(a)),
   apPriceHistory: (item_code, a) => callMethod(NS + "prices.get_price_history", withCompany({ item_code, ...a })),
 
