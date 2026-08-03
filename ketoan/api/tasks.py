@@ -8,7 +8,7 @@ import frappe
 from frappe.utils import flt, today
 
 from ketoan.api._guard import (
-    guard_view, capabilities, resolve_company, get_settings, channel_group_clause,
+    guard_view, capabilities, resolve_company, get_settings,
 )
 from ketoan.utils import je_remark_field
 
@@ -43,20 +43,17 @@ def _selling_price_task(company: str, channel: str) -> dict:
 
 
 def _overdue_customers(company: str, channel: str, b1: int) -> int:
-    """Số khách của kênh có hóa đơn quá hạn > b1 ngày."""
-    params = {"company": company, "today": today(), "b1": b1}
-    ch = channel_group_clause(channel, params, alias="c")
-    return _count(
-        f"""
-        SELECT COUNT(DISTINCT si.customer)
-        FROM `tabSales Invoice` si
-        LEFT JOIN `tabCustomer` c ON c.name = si.customer
-        WHERE si.docstatus = 1 AND si.company = %(company)s AND si.outstanding_amount > 0
-          AND DATEDIFF(%(today)s, COALESCE(si.due_date, si.posting_date)) > %(b1)s
-          AND {ch}
-        """,
-        params,
-    )
+    """Số khách của kênh còn nợ QUÁ HẠN > b1 ngày.
+
+    Dùng chung quy tắc FIFO của get_ar_summary (phân bổ số dư GL vào hóa đơn mới
+    nhất trước) — hóa đơn cũ đã được tiền về cấn trừ thì không còn tính quá hạn.
+    """
+    try:
+        from ketoan.api.receivables import get_ar_summary
+        rows = get_ar_summary(company, channel=channel).get("rows") or []
+        return sum(1 for r in rows if (r.get("days_overdue") or 0) > b1 and flt(r.get("overdue_amount")) > 0.5)
+    except Exception:
+        return 0
 
 
 @frappe.whitelist()

@@ -262,7 +262,9 @@ function rowHtml(r) {
       <td>${r.customer_name || r.customer}</td>
       <td>${r.customer_group ? html`<span class="kt-badge kt-badge--gray">${r.customer_group}</span>` : "—"}</td>
       <td class="num">${formatVND(r.outstanding)}</td>
-      <td class="num ${overdue ? "danger" : "pos"}">${overdue ? "quá " + r.days_overdue + " ngày" : "trong hạn"}</td>
+      <td class="num ${overdue ? "danger" : "pos"}">${overdue
+        ? html`${formatVND(r.overdue_amount || 0)}<br><span class="kt-sub">quá ${r.days_overdue} ngày</span>`
+        : "trong hạn"}</td>
       <td class="num" style="white-space:nowrap">
         <button class="kt-btn-icon ar-zalo" data-c="${r.customer}" title="Nhắc nợ Zalo"><i class="fas fa-comment-dots"></i></button>
         <button class="kt-btn-icon ar-pdf" data-c="${r.customer}" title="Xuất biên bản đối chiếu (PDF)"><i class="fas fa-file-pdf"></i></button>

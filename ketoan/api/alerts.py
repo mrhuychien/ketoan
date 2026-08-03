@@ -114,26 +114,33 @@ def _alert_credit_limit(company: str, s) -> list:
 
 
 def _alert_overdue(company: str, s) -> list:
-    """A2: nợ quá hạn theo 3 rổ (>b1 / >b2 / >b3 ngày)."""
+    """A2: nợ quá hạn theo 3 rổ (>b1 / >b2 / >b3 ngày).
+
+    Quy tắc FIFO: phân bổ số dư GL vào hóa đơn mới nhất trước (tiền trả cấn trừ
+    hóa đơn cũ trước) — không cộng outstanding_amount của hóa đơn.
+    """
     b1, b2, b3 = int(s.aging_bucket_1 or 30), int(s.aging_bucket_2 or 60), int(s.aging_bucket_3 or 90)
-    row = frappe.db.sql(
-        """
-        SELECT
-          SUM(CASE WHEN d > %(b1)s THEN o ELSE 0 END) AS over_b1,
-          SUM(CASE WHEN d > %(b2)s THEN o ELSE 0 END) AS over_b2,
-          SUM(CASE WHEN d > %(b3)s THEN o ELSE 0 END) AS over_b3,
-          SUM(CASE WHEN d > %(b1)s THEN 1 ELSE 0 END) AS cnt_b1
-        FROM (
-            SELECT outstanding_amount AS o,
-                   DATEDIFF(%(today)s, COALESCE(due_date, posting_date)) AS d
-            FROM `tabSales Invoice`
-            WHERE docstatus = 1 AND company = %(company)s AND outstanding_amount > 0
-        ) t
-        """,
-        {"company": company, "today": today(), "b1": b1, "b2": b2, "b3": b3},
-        as_dict=True,
-    )[0]
-    over_b1 = flt(row.over_b1)
+    try:
+        from ketoan.api.receivables import receivable_balances, open_invoices_map
+        opens = open_invoices_map(company, receivable_balances(company))
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "ketoan alerts: overdue FIFO")
+        return []
+
+    over_b1 = over_b2 = over_b3 = 0.0
+    cnt_b1 = 0
+    for _cust, invs in opens.items():
+        for i in invs:
+            d, o = i["days_overdue"], flt(i["outstanding_amount"])
+            if d > b1:
+                over_b1 += o
+                cnt_b1 += 1   # số hóa đơn quá hạn (giữ nghĩa cũ)
+            if d > b2:
+                over_b2 += o
+            if d > b3:
+                over_b3 += o
+    row = frappe._dict({"over_b2": over_b2, "over_b3": over_b3, "cnt_b1": cnt_b1})
+
     if over_b1 <= 0:
         return []
     sev = "danger" if flt(row.over_b3) > 0 else "warning"

@@ -15,6 +15,7 @@ Tất cả read-only, guard ở dòng đầu, SQL parameterized.
 import frappe
 from frappe.utils import flt, today, getdate
 
+from ketoan.utils import format_vnd
 from ketoan.api._guard import (
     guard_channel, guard_sales_any, allowed_channels, channel_group_clause,
     resolve_company, get_settings, is_chief,
@@ -29,6 +30,119 @@ def _racc_clause(params: dict) -> str:
         params["racc"] = st.receivable_account
         return "gle.account = %(racc)s"
     return "acc.account_type = 'Receivable'"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Hóa đơn CÒN NỢ — phân bổ số dư GL theo FIFO (tiền trả cấn trừ hóa đơn CŨ trước)
+#
+# KHÔNG dùng Sales Invoice.outstanding_amount: khách trả tiền qua bút toán JE
+# hoặc phiếu thu chưa khớp hóa đơn thì trường này vẫn giữ nguyên → hóa đơn đã
+# thanh toán vẫn hiện "quá hạn — cần thu".
+# Quy tắc chốt với nghiệp vụ: số dư còn lại thuộc về các hóa đơn MỚI NHẤT; đi
+# từ hóa đơn mới nhất (theo hạn thanh toán) trở về trước, phân bổ dần số dư —
+# hóa đơn nhận phân bổ = còn nợ, hóa đơn cũ hơn coi như đã thanh toán.
+# Hệ quả: công nợ quá hạn = tổng công nợ − công nợ hóa đơn chưa tới hạn.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _due_expr(alias: str = "si") -> str:
+    """Hạn thanh toán: due_date, không có thì ngày HĐ + số ngày đến hạn (Settings)."""
+    return f"COALESCE({alias}.due_date, DATE_ADD({alias}.posting_date, INTERVAL %(due_days)s DAY))"
+
+
+def invoice_due_days() -> int:
+    return int(get_settings().invoice_due_days or 30)
+
+
+def _fifo_invoice_rows(company: str, customers: tuple, due_days: int, limit: int = 20000) -> dict:
+    """Hóa đơn bán (loại hàng trả về) của các khách — sắp MỚI NHẤT TRƯỚC theo hạn TT."""
+    if not customers:
+        return {}
+    due = _due_expr()
+    rows = frappe.db.sql(
+        f"""
+        SELECT si.name, si.customer, si.posting_date, si.status,
+               si.base_grand_total AS grand_total, {due} AS due
+        FROM `tabSales Invoice` si
+        WHERE si.docstatus = 1 AND si.company = %(company)s
+          AND si.customer IN %(customers)s
+          AND IFNULL(si.is_return, 0) = 0
+          AND si.base_grand_total > 0
+        ORDER BY si.customer ASC, {due} DESC, si.posting_date DESC, si.creation DESC
+        LIMIT {int(limit)}
+        """,
+        {"company": company, "customers": tuple(customers), "due_days": due_days},
+        as_dict=True,
+    )
+    out = {}
+    for r in rows:
+        out.setdefault(r.customer, []).append(r)
+    return out
+
+
+def _allocate_open(rows: list, balance) -> list:
+    """Phân bổ số dư vào danh sách hóa đơn (đã sắp MỚI NHẤT TRƯỚC).
+
+    Trả về các hóa đơn CÒN NỢ, sắp lại cũ → mới, kèm `outstanding_amount` là
+    phần thực còn nợ của hóa đơn đó và `days_overdue` theo hạn thanh toán.
+    """
+    remaining = flt(balance)
+    if remaining <= 0.5 or not rows:
+        return []
+    t = getdate(today())
+    open_rows = []
+    for r in rows:
+        if remaining <= 0.5:
+            break
+        amt = min(remaining, flt(r.grand_total))
+        remaining -= amt
+        due = getdate(r.due) if r.get("due") else getdate(r.posting_date)
+        open_rows.append({
+            "name": r.name,
+            "posting_date": str(r.posting_date) if r.posting_date else None,
+            "due_date": str(r.due) if r.get("due") else None,
+            "grand_total": flt(r.grand_total),
+            "outstanding_amount": amt,
+            "days_overdue": (t - due).days,
+            "status": r.get("status"),
+        })
+    open_rows.sort(key=lambda x: (x["due_date"] or "", x["posting_date"] or ""))
+    return open_rows
+
+
+def open_invoices_map(company: str, balances: dict, limit: int = 20000) -> dict:
+    """{khách: [hóa đơn còn nợ]} — phân bổ FIFO số dư GL của từng khách."""
+    names = tuple(c for c, b in balances.items() if flt(b) > 0.5)
+    if not names:
+        return {}
+    rows = _fifo_invoice_rows(company, names, invoice_due_days(), limit)
+    return {c: _allocate_open(rows.get(c, []), balances[c]) for c in names}
+
+
+def receivable_balances(company: str, channel: str = "tat-ca", customers: tuple | None = None) -> dict:
+    """Số dư phải thu (GL) > 0 theo từng khách — nguồn cho phân bổ FIFO."""
+    params = {"company": company}
+    ch = channel_group_clause(channel, params, alias="c")
+    racc = _racc_clause(params)
+    cust_clause = ""
+    if customers:
+        params["customers"] = tuple(customers)
+        cust_clause = "AND gle.party IN %(customers)s"
+    rows = frappe.db.sql(
+        f"""
+        SELECT gle.party AS customer, SUM(gle.debit - gle.credit) AS bal
+        FROM `tabGL Entry` gle
+        JOIN `tabAccount` acc ON acc.name = gle.account
+        JOIN `tabCustomer` c ON c.name = gle.party
+        WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
+          AND gle.party_type = 'Customer' AND {racc} AND {ch} {cust_clause}
+        GROUP BY gle.party
+        HAVING ROUND(SUM(gle.debit - gle.credit), 2) > 0
+        LIMIT 5000
+        """,
+        params,
+        as_dict=True,
+    )
+    return {r.customer: flt(r.bal) for r in rows}
 
 
 @frappe.whitelist()
@@ -70,27 +184,21 @@ def get_ar_summary(company: str | None = None, limit: int = 200, channel: str = 
         as_dict=True,
     )
 
-    # Hạn thu sớm nhất trong các hóa đơn SI còn nợ (chỉ để tính "quá hạn").
-    due_map = {}
-    for x in frappe.db.sql(
-        """
-        SELECT customer, MIN(COALESCE(due_date, posting_date)) AS earliest_due
-        FROM `tabSales Invoice`
-        WHERE docstatus = 1 AND company = %(company)s AND outstanding_amount > 0
-        GROUP BY customer
-        """,
-        {"company": company},
-        as_dict=True,
-    ):
-        due_map[x.customer] = x.earliest_due
+    # Quá hạn theo FIFO: phân bổ số dư vào hóa đơn mới nhất trước → hóa đơn còn
+    # nợ thật sự; hóa đơn cũ đã được tiền về cấn trừ thì KHÔNG còn tính quá hạn.
+    balances = {r["customer"]: flt(r["outstanding"]) for r in rows}
+    opens = open_invoices_map(company, balances)
 
-    t = getdate(today())
     total = 0.0
     for r in rows:
         r["outstanding"] = flt(r["outstanding"])
         total += r["outstanding"]
-        due = due_map.get(r["customer"])
-        r["days_overdue"] = max((t - getdate(due)).days, 0) if (due and r["outstanding"] > 0) else 0
+        invs = opens.get(r["customer"], [])
+        od = [i for i in invs if i["days_overdue"] > 0]
+        r["days_overdue"] = max((i["days_overdue"] for i in od), default=0)
+        # Quá hạn = tổng nợ − nợ hóa đơn chưa tới hạn (gồm cả nợ không gắn hóa đơn).
+        r["overdue_amount"] = max(0.0, r["outstanding"] - sum(
+            i["outstanding_amount"] for i in invs if i["days_overdue"] <= 0))
 
     return {"company": company, "channel": channel, "total": total, "count": len(rows), "rows": rows}
 
@@ -197,22 +305,6 @@ def get_customer_detail(customer: str, company: str | None = None) -> dict:
         if ch not in allowed_channels():
             frappe.throw("Khách hàng này thuộc kênh khác — bạn không có quyền xem", frappe.PermissionError)
 
-    invoices = frappe.db.sql(
-        """
-        SELECT name, posting_date, due_date, grand_total, outstanding_amount, status,
-               DATEDIFF(%(today)s, COALESCE(due_date, posting_date)) AS days_overdue
-        FROM `tabSales Invoice`
-        WHERE docstatus = 1 AND company = %(company)s AND customer = %(customer)s
-          AND outstanding_amount > 0
-        ORDER BY COALESCE(due_date, posting_date) ASC
-        """,
-        {"today": today(), "company": company, "customer": customer},
-        as_dict=True,
-    )
-    for inv in invoices:
-        inv["grand_total"] = flt(inv["grand_total"])
-        inv["outstanding_amount"] = flt(inv["outstanding_amount"])
-
     # Tổng công nợ TÍNH TỪ GL (gồm JE, nợ đầu kỳ, khoản thu trước — không chỉ SI).
     gparams = {"company": company, "customer": customer}
     racc = _racc_clause(gparams)
@@ -223,6 +315,19 @@ def get_customer_detail(customer: str, company: str | None = None) -> dict:
               AND gle.party_type = 'Customer' AND gle.party = %(customer)s AND {racc}""",
         gparams,
     )[0][0] or 0)
+
+    # Hóa đơn CÒN NỢ = phân bổ số dư GL theo FIFO (tiền trả cấn trừ HĐ cũ trước).
+    invoices = _allocate_open(
+        _fifo_invoice_rows(company, (customer,), invoice_due_days()).get(customer, []),
+        outstanding,
+    )
+    # Công nợ quá hạn = TỔNG công nợ − công nợ hóa đơn chưa tới hạn (công thức chốt
+    # với nghiệp vụ). Phần nợ không gắn hóa đơn nào (JE điều chỉnh, nợ đầu kỳ ghi
+    # bằng bút toán) vẫn phải nằm trong "cần thu" → tách riêng để kế toán thấy.
+    in_term_amount = sum(i["outstanding_amount"] for i in invoices if i["days_overdue"] <= 0)
+    overdue_amount = max(0.0, outstanding - in_term_amount)
+    unbilled_overdue = max(0.0, overdue_amount - sum(
+        i["outstanding_amount"] for i in invoices if i["days_overdue"] > 0))
 
     # Hạn mức tín dụng: Customer Credit Limit là child table (theo company) → đọc an toàn.
     credit_limit = _get_credit_limit(customer, company)
@@ -246,6 +351,10 @@ def get_customer_detail(customer: str, company: str | None = None) -> dict:
         "customer_group": info.get("customer_group"),
         "territory": info.get("territory"),
         "outstanding": outstanding,
+        "overdue_amount": overdue_amount,
+        "in_term_amount": in_term_amount,
+        "unbilled_overdue": unbilled_overdue,
+        "due_days": invoice_due_days(),
         "credit_limit": credit_limit,
         "over_limit": bool(credit_limit and outstanding > credit_limit),
         "unallocated_payment": unallocated,
@@ -447,7 +556,21 @@ def get_customer_ledger(customer: str, company: str | None = None,
                                 fields=["name", "unallocated_amount"], limit=1000):
             pe_unalloc[x.name] = flt(x.unallocated_amount)
 
-    t = getdate(today())
+    # Hóa đơn nào CÒN NỢ thật (FIFO trên số dư hiện tại) — không tin
+    # outstanding_amount vì tiền về qua JE/phiếu thu chưa khớp không cập nhật nó.
+    cur_bal = flt(frappe.db.sql(
+        f"""SELECT SUM(gle.debit - gle.credit)
+            FROM `tabGL Entry` gle JOIN `tabAccount` acc ON acc.name = gle.account
+            WHERE gle.is_cancelled = 0 AND gle.company = %(company)s
+              AND gle.party_type = 'Customer' AND gle.party = %(customer)s AND {racc}""",
+        {k: v for k, v in params.items() if k in ("company", "customer", "racc")},
+    )[0][0] or 0)
+    open_map = {
+        i["name"]: i for i in _allocate_open(
+            _fifo_invoice_rows(company, (customer,), invoice_due_days()).get(customer, []), cur_bal
+        )
+    }
+
     running = opening
     total_debit = 0.0
     total_credit = 0.0
@@ -462,12 +585,17 @@ def get_customer_ledger(customer: str, company: str | None = None,
             if si:
                 if has_einv and not si.get("is_return") and not (si.get("vn_einvoice_number") or "").strip():
                     todos.append({"icon": "fa-file-circle-exclamation", "label": "Cần xuất HĐĐT", "sev": "red"})
-                if flt(si.outstanding_amount) > 0:
-                    dd = (t - getdate(si.due_date or si.posting_date)).days
+                op = open_map.get(r.voucher_no)
+                if op:
+                    dd = op["days_overdue"]
                     if dd > 0:
-                        todos.append({"icon": "fa-hand-holding-dollar", "label": f"Quá hạn {dd} ngày — cần thu", "sev": "red"})
+                        todos.append({"icon": "fa-hand-holding-dollar",
+                                      "label": f"Quá hạn {dd} ngày — cần thu {format_vnd(op['outstanding_amount'])}",
+                                      "sev": "red"})
                     else:
-                        todos.append({"icon": "fa-hourglass-half", "label": "Còn nợ, trong hạn", "sev": "yellow"})
+                        todos.append({"icon": "fa-hourglass-half",
+                                      "label": f"Còn nợ {format_vnd(op['outstanding_amount'])} — trong hạn",
+                                      "sev": "yellow"})
         elif r.voucher_type == "Payment Entry":
             if pe_unalloc.get(r.voucher_no, 0) > 0:
                 todos.append({"icon": "fa-link-slash", "label": "Chưa khớp hóa đơn", "sev": "yellow"})

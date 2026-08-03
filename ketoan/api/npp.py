@@ -157,40 +157,47 @@ def _month_sales(company: str, names: tuple, first: str, last: str, cfg: dict) -
     return {r.customer: flt(r.sales) for r in rows}
 
 
-def _current_overdue(company: str, names: tuple, cfg: dict) -> dict:
-    """Số ngày TRẢ CHẬM hiện tại của từng NPP = max(today − hạn) trên các hóa đơn
-    còn nợ đã đến hạn. Hạn = due_date (nếu có) hoặc posting + due_days."""
-    rows = frappe.db.sql(
-        """
-        SELECT customer,
-               MAX(DATEDIFF(%(today)s, COALESCE(due_date, DATE_ADD(posting_date, INTERVAL %(dd)s DAY)))) AS late
-        FROM `tabSales Invoice`
-        WHERE docstatus = 1 AND company = %(company)s AND customer IN %(names)s
-          AND IFNULL(is_return, 0) = 0 AND outstanding_amount > 0.5
-        GROUP BY customer
-        """,
-        {"company": company, "names": names, "today": today(), "dd": cfg["due_days"]},
-        as_dict=True,
-    )
-    return {r.customer: int(r.late or 0) for r in rows}
+def _open_invoice_names(company: str, names: tuple, balances: dict | None = None) -> tuple:
+    """(set tên hóa đơn CÒN NỢ thật, map khách → danh sách hóa đơn còn nợ).
+
+    Phân bổ số dư GL vào hóa đơn theo FIFO (tiền trả cấn trừ hóa đơn CŨ trước) —
+    KHÔNG đọc Sales Invoice.outstanding_amount vì tiền về qua bút toán JE hoặc
+    phiếu thu chưa khớp hóa đơn không cập nhật trường đó.
+    """
+    from ketoan.api.receivables import open_invoices_map, receivable_balances
+
+    if balances is None:
+        balances = receivable_balances(company, customers=names)
+    else:
+        balances = {c: flt(balances.get(c, 0.0)) for c in names}
+    opens = open_invoices_map(company, balances)
+    return {i["name"] for invs in opens.values() for i in invs}, opens
+
+
+def _current_overdue(company: str, names: tuple, cfg: dict, balances: dict) -> dict:
+    """Số ngày TRẢ CHẬM hiện tại của từng NPP = max ngày quá hạn trên các hóa đơn
+    CÒN NỢ THẬT (theo phân bổ FIFO số dư GL)."""
+    _open, opens = _open_invoice_names(company, names, balances)
+    return {
+        c: max((i["days_overdue"] for i in invs if i["days_overdue"] > 0), default=0)
+        for c, invs in opens.items()
+    }
 
 
 def _month_payment_lateness(company: str, names: tuple, first: str, last: str, cfg: dict) -> dict:
     """Số ngày trả chậm TỆ NHẤT của hóa đơn PHÁT SINH trong tháng M (dùng cho phạt
-    thưởng của tháng đó): với HĐ còn nợ → today − hạn; HĐ đã tất toán → ngày thanh
-    toán cuối (Payment Entry) − hạn; lấy MAX, kẹp ≥ 0."""
+    thưởng của tháng đó).
+
+    - HĐ CÒN NỢ THẬT (FIFO) → đang trễ tới hôm nay.
+    - HĐ đã tất toán → ngày Payment Entry cuối; tất toán bằng JE/bù trừ (không có
+      PE) thì coi như ĐÚNG HẠN, không phạt oan.
+    """
+    open_names, _opens = _open_invoice_names(company, names)
     rows = frappe.db.sql(
         """
-        SELECT si.customer,
-               MAX(GREATEST(
-                 DATEDIFF(
-                   CASE WHEN si.outstanding_amount > 0.5 THEN %(today)s
-                        -- Đã tất toán: dùng ngày Payment Entry; nếu tất toán bằng JE/bù
-                        -- trừ (không có PE) thì coi như ĐÚNG HẠN (không phạt oan).
-                        ELSE COALESCE(lp.pdate, si.due_date,
-                                      DATE_ADD(si.posting_date, INTERVAL %(dd)s DAY)) END,
-                   COALESCE(si.due_date, DATE_ADD(si.posting_date, INTERVAL %(dd)s DAY))
-                 ), 0)) AS late
+        SELECT si.customer, si.name,
+               COALESCE(si.due_date, DATE_ADD(si.posting_date, INTERVAL %(dd)s DAY)) AS due,
+               lp.pdate AS pdate
         FROM `tabSales Invoice` si
         LEFT JOIN (
           SELECT per.reference_name AS rn, MAX(pe.posting_date) AS pdate
@@ -202,13 +209,21 @@ def _month_payment_lateness(company: str, names: tuple, first: str, last: str, c
         WHERE si.docstatus = 1 AND si.company = %(company)s AND si.customer IN %(names)s
           AND IFNULL(si.is_return, 0) = 0 AND si.base_grand_total > 0
           AND si.posting_date BETWEEN %(first)s AND %(last)s
-        GROUP BY si.customer
+        LIMIT 20000
         """,
         {"company": company, "names": names, "first": first, "last": last,
-         "today": today(), "dd": cfg["due_days"]},
+         "dd": cfg["due_days"]},
         as_dict=True,
     )
-    return {r.customer: int(r.late or 0) for r in rows}
+    t = getdate(today())
+    out = {}
+    for r in rows:
+        due = getdate(r.due)
+        settled = t if r.name in open_names else (getdate(r.pdate) if r.pdate else due)
+        late = max((settled - due).days, 0)
+        if late > out.get(r.customer, 0):
+            out[r.customer] = late
+    return out
 
 
 @frappe.whitelist()
@@ -266,22 +281,24 @@ def get_debts(company: str | None = None) -> dict:
 
     # 3) requiredPayment theo chính sách.
     if policy == "normal":
-        # Chốt đơn cần thanh toán = outstanding của HĐ ĐÃ ĐẾN HẠN (quá hạn HĐ,
-        # tức đơn đến hạn 30 ngày chốt vào kỳ thu 5–10 hàng tháng).
+        # CHỐT ĐƠN CẦN THANH TOÁN = công nợ QUÁ HẠN
+        #   = tổng công nợ (GL) − công nợ các hóa đơn CHƯA TỚI HẠN (trong 30 ngày).
+        # KHÔNG cộng outstanding_amount của hóa đơn: tiền về qua JE / phiếu thu
+        # chưa khớp không cập nhật trường đó → hóa đơn đã trả vẫn bị đòi.
         params = dict(base, due_days=cfg["due_days"])
-        over_rows = frappe.db.sql(
+        in_rows = frappe.db.sql(
             """
-            SELECT customer, SUM(outstanding_amount) AS overdue
+            SELECT customer, SUM(base_grand_total) AS in_term
             FROM `tabSales Invoice`
             WHERE docstatus = 1 AND company = %(company)s AND customer IN %(names)s
-              AND outstanding_amount > 0 AND IFNULL(is_return, 0) = 0
-              AND DATEDIFF(%(today)s, COALESCE(due_date, DATE_ADD(posting_date, INTERVAL %(due_days)s DAY))) >= 0
+              AND IFNULL(is_return, 0) = 0 AND base_grand_total > 0
+              AND COALESCE(due_date, DATE_ADD(posting_date, INTERVAL %(due_days)s DAY)) > %(today)s
             GROUP BY customer
             """,
             params,
             as_dict=True,
         )
-        overdue = {r.customer: flt(r.overdue) for r in over_rows}
+        in_term = {r.customer: flt(r.in_term) for r in in_rows}
         tet_total = {}
     else:
         params = dict(base, tet_start=tet_start)
@@ -297,10 +314,10 @@ def get_debts(company: str | None = None) -> dict:
             as_dict=True,
         )
         tet_total = {r.customer: flt(r.tet_total) for r in tet_rows}
-        overdue = {}
+        in_term = {}
 
     # 4) Số ngày trả chậm hiện tại → mức ảnh hưởng thưởng (cảnh báo cho kế toán).
-    overdue_days = _current_overdue(company, names, cfg)
+    overdue_days = _current_overdue(company, names, cfg, debt)
 
     rows = []
     total_debt = 0.0
@@ -309,7 +326,7 @@ def get_debts(company: str | None = None) -> dict:
     for c in customers:
         d = debt.get(c.name, 0.0)
         if policy == "normal":
-            required = overdue.get(c.name, 0.0)
+            required = max(0.0, d - in_term.get(c.name, 0.0))
         else:
             allowed = tet_total.get(c.name, 0.0) * cfg["tet_pct"] / 100.0
             required = max(0.0, d - allowed)
