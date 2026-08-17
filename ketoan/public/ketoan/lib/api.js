@@ -124,6 +124,14 @@ export const api = {
   customerFiles: (customer) => callMethod(NS + "doitru.get_customer_files", { customer }),
   customerFileUpload: (customer, filename, content) => callMethod(NS + "doitru.upload_customer_file", { customer, filename, content }),
 
+  // Hóa đơn VAT (đối soát MISA)
+  vatOverview: (a) => callMethod(NS + "misa_vat.get_overview", withCompany(a)),
+  vatInvoices: (bucket, a) => callMethod(NS + "misa_vat.get_invoices", withCompany({ bucket, ...a })),
+  vatSearchInvoices: (txt) => callMethod(NS + "misa_vat.search_invoices", withCompany({ txt })),
+  vatSync: (a) => callMethod(NS + "misa_vat.sync_now", withCompany(a)),
+  vatRelink: (snapshot, sales_invoice, note) => callMethod(NS + "misa_reconcile.relink_snapshot", { snapshot, sales_invoice, note }),
+  vatMarkOrigin: (snapshot, origin, note) => callMethod(NS + "misa_reconcile.mark_origin", { snapshot, origin, note }),
+
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
 

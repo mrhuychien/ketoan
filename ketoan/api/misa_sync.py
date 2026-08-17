@@ -8,13 +8,14 @@ Hợp đồng API: docs/misa/misa_api_contract.md §L.2 (token) và §M (chi ti�
 đơn sau phát hành). Mọi tên field dưới đây đều đã xác minh trên dữ liệu thật.
 """
 
+import time
 import uuid
 
 import frappe
 from frappe import _
 from frappe.utils import flt, now_datetime, nowdate
 
-from ketoan.api.misa_client import MISAError, call, get_settings, invoice_path
+from ketoan.api.misa_client import PAGE_SLEEP, MISAError, call, get_settings, invoice_path
 from ketoan.api.misa_desk import invoice_links
 
 # Field ERPNext nhận số hóa đơn về. Nhóm vn_einvoice_* là mặt hiển thị cho kế
@@ -351,3 +352,196 @@ def scheduled_poll_pending():
         )
     except Exception:
         frappe.log_error(frappe.get_traceback(), "misa_sync.scheduled_poll_pending")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# pull_invoices — kéo danh sách hóa đơn MISA về MISA Invoice Snapshot
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Bộ tham số chép NGUYÊN từ request thật của lưới hóa đơn MISA (§J.3). Đừng
+# rút gọn: thử với 4 tham số đã trả về mảng rỗng (§M.6).
+#
+# `columns` quyết định field nào có giá trị trong response (§J.6) — thêm
+# TotalAmountWithoutVAT/TotalVATAmount để lấy được tách thuế ngay từ danh sách.
+PAGING_COLUMNS = ",".join([
+    "InvSeries", "InvDate", "InvNo", "InvoiceCode", "AccountObjectName",
+    "AccountObjectTaxCode", "ContactName", "PaymentStatus", "TotalAmount",
+    "TotalAmountWithoutVAT", "TotalVATAmount", "TotalAmountOC",
+    "EInvoiceStatus", "PublishStatus", "TransactionID", "SendInvoiceStatus",
+    "RefID", "SendToTaxStatus", "ApproveStep", "CurrencyCode",
+    "OrganizationUnitID", "EditVersion", "AccountObjectCode", "ReceiverEmail",
+    "InvoiceType", "IsTemplatePetrol", "BusinessArea", "IsTradeDiscountInvoice",
+    "ListNo", "ListDate", "SortOrder",
+])
+
+PAGING_BASE = {
+    "publishStatus": "6",
+    "sendEmailStatus": "-1",
+    "searchKey": "",
+    "filterInvoiceStatus": "0",
+    "sendToTaxStatus": "-1",
+    "invoiceSummaryStatus": "-2",
+    "searchField": "AccountObjectCode,AccountObjectName",
+    "keyValue": "",
+    "filterCustomField": "false",
+    "buyerSignature": "",
+    "filterPaymentStatus": "",
+    "lstOrganizationUnit": "",
+    "invTemplate": "",
+    "approveSteps": "",
+    "gridSort": "`InvDate` DESC, `InvNo` DESC",
+    "sort": "",
+    "filter": "[]",
+    "pagingType": "0",
+}
+
+PAGE_SIZE = 100
+MAX_PAGES = 100
+
+
+def _upsert_snapshot(row, source_api="statement"):
+    """Ghi 1 hóa đơn MISA vào snapshot theo khóa tự nhiên (ký hiệu, số chuẩn hóa).
+
+    KHÔNG đè `sales_invoice` / `match_status` / `transaction_id` đã có — kết quả
+    đối soát và liên kết do người chốt không được job kéo dữ liệu ghi đè.
+    Trả về "created" | "updated" | None.
+    """
+    from ketoan.misa_integration.doctype.misa_invoice_snapshot.misa_invoice_snapshot import (
+        norm_inv_no, norm_series,
+    )
+
+    series = norm_series(_pick(row, "InvSeries"))
+    inv_no = str(_pick(row, "InvNo") or "").strip()
+    if not (series and inv_no) or inv_no.startswith("<"):
+        return None
+
+    values = {
+        "inv_series": series,
+        "inv_no": inv_no,
+        "inv_no_norm": norm_inv_no(inv_no),
+        "inv_date": misa_date(_pick(row, "InvDate")),
+        "ref_id": _pick(row, "RefID") or "",
+        "invoice_code": _pick(row, "InvoiceCode") or "",
+        "buyer_tax_code": str(_pick(row, "AccountObjectTaxCode") or "").replace(" ", ""),
+        "buyer_name": _pick(row, "AccountObjectName") or "",
+        "amount_before_vat": flt(_pick(row, "TotalAmountWithoutVAT")),
+        "vat_amount": flt(_pick(row, "TotalVATAmount")),
+        "total_amount": flt(_pick(row, "TotalAmount")),
+        "publish_status": str(_pick(row, "PublishStatus") or ""),
+        "einvoice_status": str(_pick(row, "EInvoiceStatus") or ""),
+        "send_tax_status": str(_pick(row, "SendToTaxStatus") or ""),
+        "send_invoice_status": str(_pick(row, "SendInvoiceStatus") or ""),
+        "invoice_type": str(_pick(row, "InvoiceType") or ""),
+        "currency_code": _pick(row, "CurrencyCode") or "VND",
+        "organization_unit_id": _pick(row, "OrganizationUnitID") or "",
+        "edit_version": int(flt(_pick(row, "EditVersion"))),
+        "source_api": source_api,
+        "last_synced_at": now_datetime(),
+    }
+
+    existing = frappe.db.get_value(
+        "MISA Invoice Snapshot",
+        {"inv_series": series, "inv_no_norm": values["inv_no_norm"]},
+        ["name", "transaction_id"], as_dict=True,
+    )
+    txn = _pick(row, "TransactionID")
+
+    if existing:
+        if txn and not existing.transaction_id:
+            values["transaction_id"] = txn
+        frappe.db.set_value("MISA Invoice Snapshot", existing.name, values, update_modified=False)
+        return "updated"
+
+    values["transaction_id"] = txn or ""
+    values["origin"] = "Chưa xác định"
+    values["match_status"] = "Chưa xác định"
+    doc = frappe.get_doc(dict(doctype="MISA Invoice Snapshot", **values))
+    doc.flags.ignore_permissions = True
+    doc.insert()
+    return "created"
+
+
+@frappe.whitelist()
+def pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
+    """Kéo danh sách hóa đơn MISA trong khoảng ngày về snapshot.
+
+    KHÔNG ghi gì vào Sales Invoice — cô lập blast radius (ràng buộc 13.7).
+    Phân trang dừng khi mảng rỗng, KHÔNG dựa recordsTotal (§H).
+    """
+    from ketoan.api._guard import guard_manager
+
+    guard_manager()
+    return _pull_invoices(from_date, to_date, trigger_type)
+
+
+def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
+    settings = get_settings()
+    to_date = to_date or nowdate()
+    from_date = from_date or frappe.utils.add_months(to_date, -1)
+
+    run = frappe.get_doc({
+        "doctype": "MISA Sync Run", "job_type": "pull_statement",
+        "trigger_type": trigger_type, "from_date": from_date, "to_date": to_date,
+    }).insert(ignore_permissions=True)
+    frappe.db.commit()
+
+    stat = {"fetched": 0, "created": 0, "updated": 0}
+    errors = []
+    start = 0
+
+    for page in range(MAX_PAGES):
+        payload = dict(PAGING_BASE)
+        payload.update({
+            "draw": str(page + 1),
+            # Giá trị CÓ KÈM dấu nháy kép bên trong — đúng như lưới thật gửi (§J.3).
+            "fromDate": f'"{from_date}T00:00:00.000Z"',
+            "toDate": f'"{to_date}T23:59:59.000Z"',
+            "columns": PAGING_COLUMNS,
+            "start": str(start),
+            "length": str(PAGE_SIZE),
+        })
+        try:
+            data = call(invoice_path("v3sainvoice/paging", settings),
+                        payload=payload, method="POST", form=True)
+        except MISAError as e:
+            errors.append(f"trang {page + 1}: [{e.code}] {e.message}")
+            break
+        except Exception as e:
+            errors.append(f"trang {page + 1}: {type(e).__name__}")
+            break
+
+        rows = data if isinstance(data, list) else []
+        if not rows:
+            break  # hết dữ liệu — KHÔNG dựa recordsTotal
+
+        for row in rows:
+            try:
+                res = _upsert_snapshot(row)
+                if res:
+                    stat["fetched"] += 1
+                    stat[res] += 1
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), "misa_sync._upsert_snapshot")
+                errors.append(f"hóa đơn {_pick(row, 'InvNo')}: lỗi ghi snapshot")
+        frappe.db.commit()
+
+        if len(rows) < PAGE_SIZE:
+            break
+        start += PAGE_SIZE
+        time.sleep(PAGE_SLEEP)
+
+    if not stat["fetched"] and not errors:
+        errors.append(
+            "MISA trả về 0 bản ghi. Nhiều khả năng endpoint danh sách trên bề mặt API cần thêm "
+            "tham số (§M.6) — dùng lưới trên app3.meinvoice.vn để lấy request thật rồi bổ sung."
+        )
+
+    for k, v in stat.items():
+        setattr(run, k, v)
+    if errors:
+        run.error_log = "\n".join(errors[-200:])
+    run.status = "Lỗi" if (errors and not stat["fetched"]) else ("Thành công một phần" if errors else "Thành công")
+    run.finished_at = now_datetime()
+    run.save(ignore_permissions=True)
+    frappe.db.commit()
+    return run.name

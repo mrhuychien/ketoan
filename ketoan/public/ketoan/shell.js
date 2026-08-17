@@ -25,6 +25,7 @@ const ROUTES = [
   { pattern: "/doi-chieu-npp", view: "views/npp.js", cap: "npp", ws: "npp", title: "Đối chiếu NPP" },
   { pattern: "/khach/:id", view: "views/customer.js", cap: "salesany", title: "360° khách" },
   { pattern: "/tien-ich", view: "views/utilities.js", cap: "salesany", title: "Tiện ích" },
+  { pattern: "/hoa-don-vat", view: "views/vat.js", cap: "salesany", title: "Hóa đơn VAT" },
   { pattern: "/cong-no-ncc", view: "views/payables.js", cap: "purchase", ws: "purchase", title: "Công nợ phải trả" },
   { pattern: "/ncc/:id", view: "views/supplier.js", cap: "purchase", ws: "purchase", title: "360° NCC" },
   { pattern: "/quy", view: "views/cash.js", cap: "gl", ws: "gl", title: "Sổ quỹ" },

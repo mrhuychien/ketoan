@@ -57,6 +57,7 @@ export const WORKSPACES = [
         { label: "Chiết khấu theo doanh số tháng", icon: "fa-percent", type: "route", route: "/doi-chieu-npp?tab=discount" },
         { label: "Nhắc nợ Zalo / đến hạn", icon: "fa-comment-dots", type: "route", route: "/doi-chieu-npp?tab=due" },
         { label: "Xuất biên bản đối chiếu (PDF)", icon: "fa-file-pdf", type: "route", route: "/doi-chieu-npp?tab=debt" },
+        { label: "Hóa đơn VAT — đối soát với MISA", icon: "fa-receipt", type: "route", route: "/hoa-don-vat" },
         { label: "Tìm khách → 360°", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
       ]},
     ],
@@ -85,6 +86,7 @@ export const WORKSPACES = [
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
         { label: "Soát giá bán vs bảng giá kênh", icon: "fa-tags", type: "route", route: "/cong-no/mt?tab=gia" },
+        { label: "Hóa đơn VAT — đối soát với MISA", icon: "fa-receipt", type: "route", route: "/hoa-don-vat" },
         { label: "Tìm khách → 360° · xuất đối chiếu PDF", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
       ]},
     ],
@@ -112,6 +114,7 @@ export const WORKSPACES = [
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
         { label: "Soát giá bán vs bảng giá kênh", icon: "fa-tags", type: "route", route: "/cong-no/khac?tab=gia" },
+        { label: "Hóa đơn VAT — đối soát với MISA", icon: "fa-receipt", type: "route", route: "/hoa-don-vat" },
         { label: "Tìm khách → 360° · xuất đối chiếu PDF", icon: "fa-magnifying-glass", type: "route", route: "/tien-ich" },
       ]},
     ],
@@ -226,6 +229,7 @@ export const WORKSPACES = [
         { label: "Dashboard tổng hợp", icon: "fa-gauge-high", type: "route", route: "/dashboard" },
         { label: "Công nợ phải thu toàn bộ", icon: "fa-file-invoice-dollar", type: "route", route: "/cong-no" },
         { label: "Trung tâm cảnh báo", icon: "fa-triangle-exclamation", type: "route", route: "/canh-bao" },
+        { label: "Hóa đơn VAT — đối soát với MISA", icon: "fa-receipt", type: "route", route: "/hoa-don-vat" },
         { label: "Sổ cái (General Ledger, 30 ngày)", icon: "fa-book", type: "desk", href: glUrl() },
       ]},
       { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
