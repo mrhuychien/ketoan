@@ -28,7 +28,11 @@
   "lookback_days",
   "column_break_sync",
   "poll_interval_min",
-  "amount_tolerance"
+  "amount_tolerance",
+  "url_section",
+  "invoice_url_template",
+  "column_break_url",
+  "lookup_url_template"
  ],
  "fields": [
   {
@@ -169,6 +173,29 @@
    "fieldname": "amount_tolerance",
    "fieldtype": "Currency",
    "label": "Ngưỡng lệch tiền"
+  },
+  {
+   "fieldname": "url_section",
+   "fieldtype": "Section Break",
+   "label": "Đường dẫn mở hóa đơn"
+  },
+  {
+   "fieldname": "invoice_url_template",
+   "fieldtype": "Data",
+   "label": "Mẫu link mở hóa đơn trên MISA",
+   "default": "https://app3.meinvoice.vn/v3/hoa-don",
+   "description": "Dán URL thật khi mở 1 hóa đơn trên MISA, thay phần mã bằng chỗ giữ. Dùng được: {ref_id} {transaction_id} {inv_no} {inv_series} {invoice_code} {taxcode}. Vd: https://app3.meinvoice.vn/v3/hoa-don/{ref_id}"
+  },
+  {
+   "fieldname": "column_break_url",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "lookup_url_template",
+   "fieldtype": "Data",
+   "label": "Mẫu link tra cứu công khai",
+   "default": "https://www.meinvoice.vn/tra-cuu",
+   "description": "Trang tra cứu cho khách hàng. Chỗ giữ như trên, thường dùng {transaction_id}."
   }
  ],
  "links": [],
@@ -179,11 +206,20 @@
  "owner": "Administrator",
  "permissions": [
   {
-   "create": 1, "delete": 1, "email": 1, "print": 1, "read": 1, "share": 1, "write": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "share": 1,
+   "write": 1,
    "role": "System Manager"
   },
   {
-   "create": 1, "print": 1, "read": 1, "write": 1,
+   "create": 1,
+   "print": 1,
+   "read": 1,
+   "write": 1,
    "role": "Accounts Manager"
   }
  ],

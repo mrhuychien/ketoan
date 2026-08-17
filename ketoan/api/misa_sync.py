@@ -15,6 +15,7 @@ from frappe import _
 from frappe.utils import flt, now_datetime, nowdate
 
 from ketoan.api.misa_client import MISAError, call, get_settings, invoice_path
+from ketoan.api.misa_desk import invoice_links
 
 # Field ERPNext nhận số hóa đơn về. Nhóm vn_einvoice_* là mặt hiển thị cho kế
 # toán (6 màn hình của app đang đọc), nhóm custom_misa_* là dữ liệu kỹ thuật.
@@ -273,6 +274,13 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
             "custom_misa_inv_date": inv_date,
             "custom_misa_transaction_id": _pick(inv, "TransactionID") or "",
             "custom_misa_invoice_code": _pick(inv, "InvoiceCode") or "",
+            "custom_misa_link": invoice_links({
+                "custom_misa_ref_id": si.custom_misa_ref_id,
+                "custom_misa_transaction_id": _pick(inv, "TransactionID"),
+                "custom_misa_inv_no": inv_no,
+                "custom_misa_inv_series": _pick(inv, "InvSeries"),
+                "custom_misa_invoice_code": _pick(inv, "InvoiceCode"),
+            }, settings).get("misa"),
             "custom_misa_status": status,
             "custom_misa_last_checked": now,
             # Đồng bộ ngược sang nhóm hiển thị — chỉ ghi khi đang trống, không đè

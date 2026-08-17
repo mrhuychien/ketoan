@@ -186,6 +186,35 @@ frappe.ui.form.on("Sales Invoice Item", {
 // -----------------------------------------------------------------------------
 frappe.ui.form.on("Sales Invoice", {
     refresh(frm) {
+        // Mở hóa đơn bên MISA. Mẫu URL khai trong MISA Settings nên sửa được
+        // mà không phải đụng code.
+        if (frm.doc.custom_misa_transaction_id || frm.doc.custom_misa_link) {
+            frm.add_custom_button("Mở hóa đơn trên MISA", async () => {
+                const r = await frappe.call({
+                    method: "ketoan.api.misa_desk.get_invoice_links",
+                    args: { sales_invoice: frm.doc.name }
+                });
+                const link = (r.message || {}).misa;
+                if (link) window.open(link, "_blank", "noopener");
+                else frappe.msgprint("Chưa khai mẫu link trong MISA Settings.");
+            }, "MISA");
+
+            frm.add_custom_button("Tra cứu công khai", async () => {
+                const r = await frappe.call({
+                    method: "ketoan.api.misa_desk.get_invoice_links",
+                    args: { sales_invoice: frm.doc.name }
+                });
+                const res = r.message || {};
+                if (res.lookup) window.open(res.lookup, "_blank", "noopener");
+                if (res.transaction_id) {
+                    frappe.show_alert({
+                        message: `Mã tra cứu: <b>${frappe.utils.escape_html(res.transaction_id)}</b>`,
+                        indicator: "blue"
+                    }, 15);
+                }
+            }, "MISA");
+        }
+
         // Nút đẩy tay — dùng khi đẩy tự động lỗi, hoặc khi kế toán muốn chủ động.
         if (frm.doc.docstatus === 1 && !frm.doc.is_return
             && !frm.doc.custom_misa_pushed_at && !frm.doc.vn_einvoice_lookup_code) {

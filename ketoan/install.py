@@ -238,13 +238,24 @@ MISA_CUSTOM_FIELDS = {
             "insert_after": "custom_misa_transaction_id",
         },
         {
+            # Data + options "URL" → Frappe render thành link bấm được.
+            "fieldname": "custom_misa_link",
+            "label": "Mở hóa đơn trên MISA",
+            "fieldtype": "Data",
+            "options": "URL",
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "description": "Dựng theo mẫu khai trong MISA Settings. Sửa mẫu rồi chạy backfill_links để cập nhật hàng loạt.",
+            "insert_after": "custom_misa_invoice_code",
+        },
+        {
             "fieldname": "custom_misa_ref_id",
             "label": "RefID (khóa nối MISA)",
             "fieldtype": "Data",
             "read_only": 1,
             "search_index": 1,
             "description": "Sinh trước khi ghi sổ, gửi kèm khi đẩy sang MISA. Không sửa tay.",
-            "insert_after": "custom_misa_invoice_code",
+            "insert_after": "custom_misa_link",
         },
         {
             "fieldname": "custom_misa_pushed_at",
