@@ -41,3 +41,13 @@ doc_events = {
         "before_submit": "ketoan.api.misa_sync.ensure_ref_id",
     },
 }
+
+# Job hỏi số hóa đơn. Đăng ký sẵn nhưng BẤT HOẠT: hàm dừng ở dòng đầu khi
+# MISA Settings.enable_auto_sync = 0 (mặc định). Chỉ bật sau khi chạy tay đạt.
+scheduler_events = {
+    "cron": {
+        "*/30 * * * *": [
+            "ketoan.api.misa_sync.scheduled_poll_pending",
+        ],
+    },
+}

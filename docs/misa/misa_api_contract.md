@@ -743,3 +743,100 @@ Quy ước: nhóm `vn_einvoice_*` là **mặt hiển thị cho kế toán** (6 m
 
 Đã có đủ để viết `misa_client.py`: endpoint lấy token, dạng body, header bắt buộc, tên field
 `access_token`, cách gắn bearer, và endpoint đẩy. Không còn phải đoán.
+
+---
+
+## M. U3 ĐÃ XÁC MINH — chi tiết hóa đơn sau phát hành (17/08/2026)
+
+Chạy `misa_probe.run` trên site thật. **Server tự lấy được token qua bề mặt API** — xác nhận
+§L.2, không cần trình duyệt, không đụng Cloudflare.
+
+```
+GET {base}/api/v2/code/v3sainvoice/afterpublishing/{RefID}
+→ object 194 field, kèm InvoiceDetails[] 74 field mỗi dòng
+```
+
+Bỏ tiền tố `code/` → trả **mảng rỗng**. Lần thứ tư xác nhận hóa đơn CÓ MÃ CQT: route `code/`
+là **bắt buộc**, không phải tùy chọn.
+
+### M.1 ✅ Có tách thuế — gỡ được nút thắt §H.2
+
+| Field | Mẫu | → ERPNext đối chiếu |
+|---|---|---|
+| `TotalAmountWithoutVAT` | `20395000.0` | `Sales Invoice.net_total` |
+| `TotalVATAmount` | `1631600.0` | `total_taxes_and_charges` |
+| `TotalAmount` | `22026600.0` | `grand_total` |
+| `TotalSaleAmount` `TotalDiscountAmount` | `20395000.0` `0.0` | trước/sau chiết khấu |
+| `VATRate` · `IsMoreVATRate` | `8.0` · `False` | cờ nhiều thuế suất |
+
+⇒ **So tiền 3 vế mà pack §6.3 yêu cầu nay làm được đầy đủ.**
+
+### M.2 Field khóa — dùng cho `poll_pending`
+
+| Field MISA | Mẫu | → ERPNext |
+|---|---|---|
+| `RefID` | GUID | khóa nối, khớp đúng cái gửi đi |
+| `InvNo` | `00007140` | `custom_misa_inv_no` + `vn_einvoice_number` |
+| `InvSeries` | `1C26THG` | `custom_misa_inv_series` |
+| `InvDate` | `2026-08-17T00:00:00+07:00` | `custom_misa_inv_date` + `vn_einvoice_date` |
+| `TransactionID` | `GJF2I1_8DELM` | `custom_misa_transaction_id` + `vn_einvoice_lookup_code` |
+| `InvoiceCode` | 34 ký tự hex | `custom_misa_invoice_code` |
+| `PublishingTime` | `2026-08-17T14:17:50+07:00` | thời điểm phát hành thật |
+
+> ⚠️ `InvDate` ở đây có **offset múi giờ** (`+07:00`), còn ở endpoint danh sách thì **không**
+> (§H.2). Phải cắt 10 ký tự đầu, không dùng thư viện parse tự đoán.
+
+### M.3 Vòng đời hóa đơn — hủy / thay thế
+
+| Field | Mẫu | Ý nghĩa |
+|---|---|---|
+| `IsInvoiceDeleted` | `False` | **cờ hủy** — dùng cho `match_status='Đã hủy'` |
+| `DeletedDate` `DeletedReason` | `None` | |
+| `OrgRefID` `OrgInvNo` `OrgInvSeries` `OrgInvDate` `OrgTransactionID` `OrgInvoiceCode` | rỗng | **hóa đơn GỐC** mà bản này thay thế |
+| `TypeChangeInvoice` `ChangeReason` | `None` | loại và lý do thay thế/điều chỉnh |
+| `OrgInvoiceType` | `0` | |
+| `ErrorInvoiceStatus` `ErrorAnnouncementID` | `0` `None` | thông báo sai sót gửi CQT |
+| `MessageCode` | `TCTA8E79…` | mã phản hồi của CQT |
+
+⇒ Cách nhận biết đúng, **không suy đoán từ `EInvoiceStatus`**:
+`IsInvoiceDeleted=True` → **Đã hủy**; `OrgRefID` có giá trị → bản này **thay thế** hóa đơn `OrgRefID`.
+
+### M.4 Tham số phát hành thật — có chỗ lệch với Client Script
+
+| Tham số | MISA trả về | Client Script gửi | |
+|---|---|---|---|
+| `CompanyID` | `156217` | `156217` | khớp |
+| `OrganizationUnitID` | `a5834b4e-…` | `a5834b4e-…` | khớp |
+| `InvTemplateNo` | `1` | `1` | khớp |
+| `UserID` | `23dd8700-…` | `23dd8700-…` | khớp |
+| `InvSeries` | **`1C26THG`** | `1C24THG` | ❌ script gửi ký hiệu 2024 |
+| `InvoiceTemplateID` | **`de202fcb-510f-4248-a54f-4c560920facd`** | `04b080d7-04fa-4375-b644-ec987b489b4d` | ❌ lệch hoàn toàn |
+
+MISA đang bỏ qua hai giá trị sai này và lấy theo mẫu hóa đơn đang hiệu lực. Khi viết luồng đẩy
+mới phải dùng **giá trị MISA trả về**, không chép lại từ script.
+
+Thêm: `SourceType=6`, `PublisherID=b7839dba-…`, `IsTaxReduction43=True`,
+`IsInheritFromOldTemplate=True`, `ModifiedBy` là email người thao tác trên MISA.
+
+### M.5 `InvoiceDetails[]` — 74 field/dòng
+
+Dùng được ngay: `RefDetailID`, `InventoryItemCode`, `Description`, `UnitName`, `Quantity`,
+`UnitPrice`, `Amount`/`AmountOC`, `VATRate`, `VATAmount`/`VATAmountOC`, `DiscountRate`,
+`DiscountAmount`, `SortOrder`, `InventoryItemType`.
+
+Mẫu dòng đầu: `H24 X` · `Bánh đậu xanh H24 300g` · `Hộp` · SL 30 · đơn giá 28.000 ·
+thành tiền 840.000 · VAT 8% = 67.200.
+
+⇒ `VATRate` nằm **ở từng dòng**, MISA hỗ trợ nhiều thuế suất trong một hóa đơn (`IsMoreVATRate`).
+Việc Client Script cứng 8% cho mọi dòng (§L.4.3) là sai *thiết kế*, không phải giới hạn của MISA.
+
+### M.6 Ba endpoint còn lại — chưa dùng được
+
+| Endpoint | Kết quả | Chẩn đoán |
+|---|---|---|
+| `code/v3sainvoice/paging` | mảng rỗng | thiếu tham số. Lưới thật gửi ~25 tham số (§J.3), mới thử 4 |
+| `v3report/ipusedamount/paging` | `ArgumentNullException` tại `SerializeUtil.DeserializeObject` | thiếu tham số **`paramReport`** dạng chuỗi JSON |
+| `resource/GetTotalUsedInvoiceQuantityByInvTemplate` | `NullReferenceException` | `invSeries` rỗng vì chưa khai `inv_series_list` |
+
+Không chặn gì: `afterpublishing` đã đủ cho `poll_pending`. Ba cái này phục vụ dò hóa đơn mồ côi
+(Phase 4–6), để sau.
