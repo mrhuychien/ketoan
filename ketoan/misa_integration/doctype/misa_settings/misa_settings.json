@@ -16,6 +16,12 @@
   "invoice_section",
   "use_code_route",
   "inv_series_list",
+  "column_break_inv",
+  "company_id",
+  "organization_unit_id",
+  "inv_template_no",
+  "invoice_template_id",
+  "misa_user_id",
   "sync_section",
   "enable_auto_sync",
   "lookback_days",
@@ -37,8 +43,8 @@
    "label": "Base URL (bộ chính thức)"
   },
   {
-   "default": "https://app3.meinvoice.vn",
-   "description": "Bộ web app. Host đo được thật là app3.meinvoice.vn (xem docs/misa/misa_api_contract.md §J.1).",
+   "default": "https://app.meinvoice.vn",
+   "description": "Bề mặt API (Bearer token) — /api/v2/... Lưới hóa đơn trên trình duyệt nằm ở app3.meinvoice.vn nhưng dùng cookie, không gọi từ server (xem docs/misa/misa_api_contract.md §L.2).",
    "fieldname": "base_url_webapp",
    "fieldtype": "Data",
    "label": "Base URL (bộ web app)"
@@ -89,6 +95,36 @@
    "fieldname": "inv_series_list",
    "fieldtype": "Small Text",
    "label": "Ký hiệu hóa đơn đang dùng"
+  },
+  {
+   "fieldname": "column_break_inv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Tham số phát hành của MISA. Lấy từ luồng đẩy hiện hành, không tự đặt.",
+   "fieldname": "company_id",
+   "fieldtype": "Data",
+   "label": "CompanyID"
+  },
+  {
+   "fieldname": "organization_unit_id",
+   "fieldtype": "Data",
+   "label": "OrganizationUnitID"
+  },
+  {
+   "fieldname": "inv_template_no",
+   "fieldtype": "Data",
+   "label": "InvTemplateNo"
+  },
+  {
+   "fieldname": "invoice_template_id",
+   "fieldtype": "Data",
+   "label": "InvoiceTemplateID"
+  },
+  {
+   "fieldname": "misa_user_id",
+   "fieldtype": "Data",
+   "label": "UserID trên MISA"
   },
   {
    "fieldname": "sync_section",

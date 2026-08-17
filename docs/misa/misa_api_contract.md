@@ -617,3 +617,129 @@ phải file trong app. Chúng không thể xuất hiện trong bất kỳ lần 
 
 **Chưa có script này thì chưa viết `misa_client.py`** — viết ra sẽ trùng hoặc đá nhau với luồng
 đang chạy, và ràng buộc 13.4 của pack cấm tự động sửa/hủy hóa đơn.
+
+---
+
+## L. Luồng đẩy hiện hành — đọc từ Client Script thật (17/08/2026)
+
+Nguồn: `Client Script` trên Sales Invoice của site production. **Credential trong script KHÔNG
+chép vào đây.**
+
+### L.1 🚨 SỰ CỐ BẢO MẬT — ưu tiên cao nhất, xử lý trước mọi việc khác
+
+Script chứa **username và mật khẩu MISA dạng chữ thường, không mã hóa**, hardcode ngay trong
+thân hàm `layToken()`.
+
+`Client Script` được Frappe **gửi xuống trình duyệt của MỌI người dùng có quyền vào Desk**. Bất
+kỳ ai trong công ty mở DevTools (hoặc xem `/api/method/frappe.client.get_list?doctype=Client Script`)
+đều đọc được mật khẩu tài khoản MISA — tài khoản **phát hành hóa đơn có giá trị pháp lý**.
+
+| Việc | Mức |
+|---|---|
+| Đổi mật khẩu MISA ngay | **khẩn** |
+| Gỡ credential khỏi Client Script | **khẩn** |
+| Rà `Client Script` / `Server Script` khác xem còn credential nào không | cao |
+| Chuyển credential vào `MISA Settings` (fieldtype `Password`, Frappe mã hóa) | cao |
+
+Đây chính là ràng buộc 13.6 của pack — *"Không để credential ngoài fieldtype `Password`"*.
+
+### L.2 ✅ XÁC THỰC — CÓ bearer token, §J.4 đã kết luận sai bề mặt
+
+MISA có **hai bề mặt khác nhau**, khảo sát trước đó nhầm lẫn chúng:
+
+| Bề mặt | Host | Xác thực | Dùng cho |
+|---|---|---|---|
+| **API** | `https://app.meinvoice.vn/api/v2/…` | **Bearer token** + header `TaxCode` | luồng đẩy đang chạy |
+| Web UI | `https://app3.meinvoice.vn/v3/…` | cookie phiên + anti-forgery + Cloudflare | lưới hóa đơn trên trình duyệt (§J) |
+
+⇒ **Cảnh báo Cloudflare ở §J.4 không áp dụng cho bề mặt API.** Hướng (B) tự động hóa từ server
+**làm được sạch sẽ** qua bề mặt API — không cần cookie jar, không đụng Cloudflare, không cần
+trình duyệt.
+
+**Lấy token** (đã chạy thật trong production):
+
+```
+POST {base}/api/v2/oauth
+Header: TaxCode: <MST công ty>
+Body  : form-urlencoded — grant_type=password & username=… & password=…
+→ response.access_token        (dùng làm "Bearer {access_token}")
+```
+
+**Gọi API sau đó**: header `Authorization: Bearer …` + `TaxCode: <MST>` + `Content-Type: application/json`.
+
+> Chưa quan sát được `expires_in` (script không đọc). Client sẽ cache thận trọng và tự lấy lại
+> token khi gặp 401.
+
+### L.3 Endpoint đẩy hóa đơn
+
+```
+POST {base}/api/v2/v3sainvoice/code
+Body: MẢNG JSON  [ { …1 hóa đơn… } ]
+```
+
+Đuôi `/code` — lần thứ ba xác nhận **hóa đơn có mã CQT** (§H.4, §J.1).
+
+Tham số cấu hình đang hardcode trong script, cần đưa vào `MISA Settings`:
+`CompanyID`, `OrganizationUnitID`, `InvTemplateNo`, `InvoiceTemplateID`, `UserID`, `InvSeries`.
+
+`OrganizationUnitID` trong script **trùng khớp** giá trị quan sát ở §H.2 → xác nhận chéo rằng
+hóa đơn trong bảng dữ liệu đúng là do luồng này đẩy lên.
+
+### L.4 🐞 Bốn lỗi trong luồng đang chạy
+
+**L.4.1 — RefID bị vứt mất (nghiêm trọng nhất về đối soát)**
+
+Script sinh `RefID = uuidv4()` cho hóa đơn, gửi sang MISA, rồi **không lưu lại**. Sau đó ghi:
+
+```js
+frappe.db.set_value(..., 'vn_einvoice_lookup_code', result.some_unique_id || uuidv4());
+```
+
+`some_unique_id` **không phải field nào của MISA** — nó là tên giữ chỗ. Biểu thức luôn rơi vào
+nhánh `|| uuidv4()`, tức là ghi **một uuid ngẫu nhiên hoàn toàn mới, chưa từng gửi cho MISA**.
+
+⇒ `vn_einvoice_lookup_code` hiện là **rác**, không tra cứu được gì. RefID thật đã mất vĩnh viễn
+với mọi hóa đơn cũ.
+
+⇒ Đính chính §H.5: RefID trong dữ liệu MISA **đúng là do ERPNext sinh** — nên tầng khớp 1 sẽ
+hoạt động **cho hóa đơn đẩy từ sau khi sửa lỗi này**. Hóa đơn cũ vẫn phải khớp bằng tầng 4
+(MST + ngày + tiền) vì ERPNext không giữ cả RefID lẫn số hóa đơn.
+
+**L.4.2 — `vn_einvoice_number` không bao giờ được ghi**
+
+`after_save` kiểm `!frm.doc.vn_einvoice_number` để chặn đẩy trùng, nhưng **không có dòng code
+nào trong toàn bộ script gán giá trị cho field này**. Nó rỗng vĩnh viễn.
+
+⇒ Giải thích trọn vẹn §A.2: 6 màn hình của app đọc `vn_einvoice_number` và luôn thấy rỗng.
+⇒ Chốt §C.0 câu 5 theo **hướng (a) đồng bộ ngược** — điền field này là 6 màn hình sống lại ngay.
+
+**L.4.3 — Thuế suất hardcode 8%**
+
+`VATRate: 8.0`, `VATAmount: amount * 0.08`, `TotalAmount: totalAmount * 1.08` — **cứng ở mọi
+dòng, mọi hóa đơn**, bỏ qua hoàn toàn bảng `taxes` của Sales Invoice.
+
+⇒ Hóa đơn nào không phải 8% là **phát hành sai thuế**. Rủi ro thuế thật.
+⇒ Cũng giải thích vì sao không thể tin tổng tiền MISA để đối soát cho tới khi sửa.
+
+**L.4.4 — Ký hiệu hóa đơn cũ**
+
+Script gửi `InvSeries: "1C24THG"`, trong khi dữ liệu thật đang phát hành **`1C26THG`** (§H.2).
+Giá trị gửi lên đang bị MISA bỏ qua (lấy theo mẫu hóa đơn), nhưng đây là bom hẹn giờ.
+
+### L.5 Custom field sẵn có trên Sales Invoice (49 field)
+
+Đã đối chiếu toàn bộ: **không field nào trùng tiền tố `custom_misa_`** → 12 field Phase 1 an toàn.
+
+Nhóm hóa đơn điện tử sẵn có: `vn_einvoice_section`, `vn_einvoice_col`, `vn_einvoice_number`,
+`vn_einvoice_date`, `vn_einvoice_lookup_code`, `vn_einvoice_status`.
+
+Quy ước: nhóm `vn_einvoice_*` là **mặt hiển thị cho kế toán** (6 màn hình app đang đọc); nhóm
+`custom_misa_*` là **dữ liệu kỹ thuật của đồng bộ**. Luồng ghi ngược sẽ điền cả hai.
+
+> Ghi chú: 30/49 custom field của site đặt tên **có dấu tiếng Việt** (`custom_thể_tích_lô`…),
+> trái ràng buộc 13.8 của pack. Không sửa — ngoài phạm vi, và đổi tên field đang chạy là phá.
+
+### L.6 Gate Phase 2 — MỞ
+
+Đã có đủ để viết `misa_client.py`: endpoint lấy token, dạng body, header bắt buộc, tên field
+`access_token`, cách gắn bearer, và endpoint đẩy. Không còn phải đoán.
