@@ -298,6 +298,35 @@ MISA_DOC_PERMS = {
 }
 
 
+def ensure_misa_fields(*fieldnames):
+    """Bảo đảm các custom field MISA đã tồn tại; thiếu thì tạo ngay rồi báo lại.
+
+    Frappe chỉ chạy mỗi patch ĐÚNG MỘT LẦN, nên field thêm vào MISA_CUSTOM_FIELDS
+    ở lần sửa sau sẽ không tới được site đã migrate — truy vấn gãy với
+    "Unknown column ... in 'SELECT'". Hàm này để code tự lành thay vì gãy.
+
+    Trả về danh sách field vừa được tạo bù (rỗng = đã đủ).
+    """
+    wanted = list(fieldnames) or [
+        f["fieldname"] for f in MISA_CUSTOM_FIELDS["Sales Invoice"]
+    ]
+    meta = frappe.get_meta("Sales Invoice")
+    missing = [f for f in wanted if not meta.has_field(f)]
+    if not missing:
+        return []
+
+    setup_misa_integration()
+    frappe.clear_cache(doctype="Sales Invoice")
+    meta = frappe.get_meta("Sales Invoice")
+    still = [f for f in missing if not meta.has_field(f)]
+    if still:
+        frappe.throw(
+            frappe._("Thiếu field {0} trên Sales Invoice. Chạy `bench --site <site> migrate` rồi thử lại.")
+            .format(", ".join(still))
+        )
+    return missing
+
+
 def _last_field_before_misa(doctype="Sales Invoice"):
     """Fieldname CUỐI CÙNG của form, bỏ qua nhóm custom_misa_*.
 

@@ -2,9 +2,9 @@
 
 Không chứa logic đồng bộ. Ở đây chỉ dựng đường dẫn mở hóa đơn bên MISA.
 
-Dạng URL sâu của MISA CHƯA được xác minh bằng bằng chứng, nên không hardcode:
-mẫu URL nằm trong `MISA Settings`, người dùng dán URL thật vào một lần là mọi
-hóa đơn có link đúng. Không phải sửa code.
+Link tra cứu đã xác minh trên hóa đơn thật (§N của misa_api_contract.md). Mẫu
+vẫn để trong `MISA Settings` chứ không hardcode, để MISA đổi dạng URL thì sửa
+cấu hình là xong, không phải sửa code.
 """
 
 from urllib.parse import quote
@@ -96,8 +96,12 @@ def backfill_links(limit=2000):
     """
     from ketoan.api._guard import guard_manager
     from ketoan.api.misa_client import get_settings
+    from ketoan.install import ensure_misa_fields
 
     guard_manager()
+    # Field có thể chưa tồn tại nếu site migrate trước khi field được thêm vào
+    # app — tạo bù tại chỗ thay vì để truy vấn gãy "Unknown column".
+    created = ensure_misa_fields("custom_misa_link", "custom_misa_transaction_id")
     settings = get_settings()
     rows = frappe.get_all(
         "Sales Invoice",
@@ -115,4 +119,4 @@ def backfill_links(limit=2000):
             if done % 100 == 0:
                 frappe.db.commit()
     frappe.db.commit()
-    return {"updated": done, "scanned": len(rows)}
+    return {"updated": done, "scanned": len(rows), "fields_created": created}
