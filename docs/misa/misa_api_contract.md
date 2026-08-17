@@ -289,3 +289,165 @@ response đoán mò, nên không vi phạm ràng buộc 13.5.
 
 `misa_client.py`, `misa_sync.py`, `misa_reconcile.py`, `misa_desk.py`, `scheduler_events`,
 `doc_events` → **Phase 2 trở đi, chờ payload/response thật (§C.1)**.
+
+---
+
+## H. Dữ liệu thật đợt 1 — endpoint danh sách hóa đơn (17/08/2026)
+
+Nguồn: DevTools trên `app.meinvoice.vn`, màn hình **danh sách hóa đơn**. Người dùng báo có
+**2 request cùng tên `list`** — chúng chia việc:
+
+| Request | Trả về | Ghi chú |
+|---|---|---|
+| `list` (A) — dữ liệu | `data` = **chuỗi JSON** chứa mảng 30 bản ghi | `recordsTotal` = **0** |
+| `list` (B) — đếm | `data` = `""` | `recordsTotal` = `recordsFiltered` = **968** |
+
+> ⚠️ **Bẫy phân trang**: response chứa dữ liệu KHÔNG mang tổng số. Vòng lặp phân trang phải
+> dừng khi **mảng rỗng**, tuyệt đối không dựa vào `recordsTotal` của response A.
+
+### H.1 Wrapper — CHỮ THƯỜNG, khác tài liệu bộ official
+
+```json
+{"SerializeConfig": null, "data": "<CHUỖI JSON>", "summary": null, "newdata": "",
+ "dataError": null, "success": true, "recordsTotal": 0, "recordsFiltered": 0,
+ "content": null, "error": null, "dataAdditional": null, "errorCode": [], "resultToken": null}
+```
+
+Bộ official (§B.1) tài liệu ghi `{Success, Data, ErrorCode, Errors}` — **viết hoa**. Bộ web app
+dùng `{success, data, errorCode, error}` — **viết thường**. `misa_client` phải đọc được cả hai
+(tra key không phân biệt hoa thường), không hardcode một kiểu.
+
+`data` là **chuỗi JSON lồng** → xác nhận cảnh báo của pack: phải `json.loads` hai lần, và parse
+phòng thủ (log_error thay vì raise khi hỏng).
+
+### H.2 Field map — ĐÃ XÁC MINH trên 30 bản ghi thật
+
+| Field MISA | Kiểu | Mẫu | → ERPNext | Ghi chú |
+|---|---|---|---|---|
+| `RefID` | str | `9ff87316-257a-4cc2-b25b-dfd049cf8ac6` | `snapshot.ref_id` | GUID **của MISA** — xem H.5 |
+| `InvSeries` | str | `1C26THG` | `snapshot.inv_series` | ký hiệu thật đang dùng |
+| `InvNo` | str | `00007140` | `snapshot.inv_no` | **8 chữ số**, zero-pad → `inv_no_norm` = `7140` |
+| `InvDate` | str | `2026-08-17T00:00:00` | `snapshot.inv_date` | ISO datetime → cắt 10 ký tự đầu |
+| `TransactionID` | str | `GJF2I1_8DELM` | `snapshot.transaction_id` | 12 ký tự, có `_` |
+| `InvoiceCode` | str | 34 ký tự HEX | `snapshot.invoice_code` | **mã CQT** — xem H.4 |
+| `AccountObjectTaxCode` | str | `0301175691-044` | `snapshot.buyer_tax_code` | 10 / 12 / 14 ký tự |
+| `AccountObjectName` | str | | `snapshot.buyer_name` | |
+| `TotalAmount` | float | `22026600.000000` | `snapshot.total_amount` | **có giá trị ÂM** |
+| `TotalAmountOC` | float | | — | bằng `TotalAmount` ở cả 30 dòng (VND) |
+| `PublishStatus` | int | `3` | `snapshot.publish_status` | |
+| `SendToTaxStatus` | int | `2` | `snapshot.send_tax_status` | |
+| `EInvoiceStatus` | int | `1/3/4/7` | *(chưa có field)* | **quan trọng** — xem H.6 |
+| `SendInvoiceStatus` | int | `3/4` | *(chưa có field)* | gửi mail cho khách, không phải gửi CQT |
+| `CurrencyCode` | str | `VND` | — | |
+| `ContactName` | str | | — | tên điểm giao / mã PO |
+| `ReceiverEmail` | str | | — | **VẮNG MẶT ở 2/30 dòng** |
+| `OrganizationUnitID` | str | GUID | — | 1 giá trị duy nhất = đơn vị phát hành |
+| `InvoiceType` `PaymentStatus` `BusinessArea` `SortOrder` | int | `1` `0` `0` `0` | — | hằng số ở mẫu này |
+| `ApproveStep` | int | `-3` | — | hằng số ở mẫu này |
+| `EditVersion` | int | `4/6/7/10` | — | số lần sửa |
+| `IsTemplatePetrol` `IsTradeDiscountInvoice` | bool | `false` | — | |
+| `AccountObjectCode` `ListNo` | str | `""` | — | rỗng toàn bộ |
+
+**KHÔNG có trong endpoint này**: `TotalAmountWithoutVAT`, `TotalVATAmount`,
+`TotalVATAmountOC`, `TotalVATAmountView`, `TotalVATAmountViewOC` — có mặt nhưng **bằng `0.0` ở
+cả 30 dòng**, tức là endpoint danh sách không trả tách thuế.
+
+> ⚠️ Hệ quả: **so tiền 3 vế** (trước thuế / thuế / tổng) mà pack §6.3 bắt buộc **không thực hiện
+> được** từ endpoint này. Chỉ so được `total_amount`. Muốn đủ 3 vế phải lấy được response của
+> `afterpublishing/{refID}` (U3, chưa có).
+
+### H.3 Định dạng đã đo
+
+| Thứ | Kết quả đo trên 30 dòng |
+|---|---|
+| `InvNo` | luôn 8 chữ số, toàn số. Dải 7111–7140 **liên tục, không thiếu số** |
+| `InvoiceCode` | luôn 34 ký tự, `[0-9A-F]`, không dòng nào rỗng |
+| `AccountObjectTaxCode` | độ dài 10 / 12 / 14. 12 số = hộ KD, cá nhân. 14 = MST + đuôi chi nhánh |
+| đuôi chi nhánh quan sát được | `-001` `-005` `-031` `-044` |
+| số bản ghi 1 trang | **30** (mặc định của web app) |
+| khóa tự nhiên `(InvSeries, inv_no_norm)` | **duy nhất** trên toàn mẫu ✅ |
+
+Hàm `norm_inv_no` / `norm_series` của Phase 1 đã test lại trên 30 bản ghi thật: **đúng 30/30**.
+
+### H.4 U4 ĐÃ TRẢ LỜI — hóa đơn **CÓ MÃ** cơ quan thuế
+
+`InvoiceCode` có giá trị 34 ký tự hex ở **cả 30/30 dòng**, không dòng nào rỗng.
+
+⇒ `MISA Settings.use_code_route` phải **BẬT**. Mọi route hóa đơn dùng tiền tố `code/`:
+`GET code/v3sainvoice/afterpublishing/{refID}`.
+
+### H.5 RefID — giả định của pack cần điều chỉnh
+
+Pack §7 giả định **ERPNext sinh `uuid4()`** rồi gửi kèm khi đẩy, nên tầng match 1 dựa vào
+`snapshot.ref_id == si.custom_misa_ref_id`. Nhưng dữ liệu thật cho thấy **mọi hóa đơn đã có
+RefID dạng GUID do MISA quản lý**.
+
+⇒ Với **toàn bộ hóa đơn hiện có**, tầng match 1 sẽ **không bao giờ trúng**. Đối soát dữ liệu cũ
+phải dựa **tầng 3 (ký hiệu + số hóa đơn)** — mà H.3 đã chứng minh khóa này duy nhất, nên tầng 3
+đủ mạnh. Tầng 1 chỉ có nghĩa cho hóa đơn ERPNext đẩy sang **sau khi** dựng luồng đẩy.
+
+Câu §C.0-1 (hiện đẩy sang MISA bằng cách nào) vì thế vẫn cần trả lời.
+
+### H.6 Enum — giá trị quan sát được, **ý nghĩa CHƯA xác nhận**
+
+| Enum | Giá trị (số dòng) | Suy đoán — **chưa dùng để code** |
+|---|---|---|
+| `PublishStatus` | `3` (30/30) | mẫu chỉ lọc hóa đơn đã phát hành nên không thấy giá trị khác |
+| `SendToTaxStatus` | `2` (30/30) | như trên |
+| `SendInvoiceStatus` | `3` (17), `4` (13) | trạng thái gửi mail cho khách |
+| `EInvoiceStatus` | `1` (27), `3` (1), `4` (1), `7` (1) | **cần xác nhận gấp** |
+| `InvoiceType` | `1` (30/30) | |
+
+3 dòng có `EInvoiceStatus` khác `1`:
+
+| Số HĐ | EInvoiceStatus | Tiền | Nghi ngờ |
+|---|---|---|---|
+| 00007131 | 3 | +106.951.590 | bị thay thế? bị điều chỉnh? |
+| 00007126 | 4 | **−786.240** | hóa đơn điều chỉnh giảm / trả hàng |
+| 00007119 | 7 | +107.566.650 | ? |
+
+⚠️ Ba trạng thái này quyết định `match_status` = `Đã hủy` / `Đã thay thế`. **Sai ở đây là sai báo
+cáo thuế** — không suy diễn, phải đối chiếu bằng mắt trên MISA (xem I.2).
+
+### H.7 Hệ quả kỹ thuật bắt buộc
+
+1. **Đọc field phải dùng `.get()`** — `ReceiverEmail` vắng mặt ở 2/30 dòng, index trực tiếp là `KeyError`.
+2. **Tiền có thể ÂM** — mọi so sánh tiền phải xử dấu; nhiều khả năng khớp với `Sales Invoice.is_return=1` bên ERPNext.
+3. **Phân trang dừng theo mảng rỗng**, không theo `recordsTotal` (H).
+4. **Wrapper tra key không phân biệt hoa/thường** (H.1).
+5. **So MST theo 2 vòng**: khớp đủ chuỗi trước (`0301175691-044`); chỉ strip đuôi chi nhánh ở vòng ngoài — mẫu đã có 4 chi nhánh khác nhau, strip sớm là nhập nhằng.
+
+---
+
+## I. Còn thiếu để mở Phase 2
+
+### I.1 Phần request của chính 2 cái `list` này
+
+Đã có response, **chưa có** phần gửi lên — mà không có nó thì không gọi được API:
+
+| Cần | Lấy ở đâu |
+|---|---|
+| **Request URL** đầy đủ | DevTools → click request → tab **Headers** → dòng `Request URL` |
+| **Request Headers** | chuột phải request → **Copy request headers** (che `Authorization`, `Cookie`) |
+| **Payload** | tab **Payload** → chuột phải → **Copy value** |
+
+Payload quan trọng nhất: tên tham số phân trang (`start`/`length`? `page`/`pageSize`?) và tham
+số lọc ngày (`fromDate`/`toDate`?). Chưa biết thì không kéo được theo tháng.
+
+### I.2 Ý nghĩa `EInvoiceStatus` (H.6)
+
+Cách xác nhận nhanh, không cần DevTools: trên MISA mở 3 hóa đơn **00007131**, **00007126**,
+**00007119**, xem cột/nhãn trạng thái hiển thị là gì → ghi lại.
+
+### I.3 Response `afterpublishing/{refID}` (U3)
+
+Cần để có tách thuế (trước thuế / thuế / tổng). Thiếu thì `check_amount_drift` chỉ so được tổng —
+đúng cảnh báo của pack: *lệch thuế suất mà tổng vẫn trùng là tình huống có thật*.
+
+### I.4 Request `oauth` (U5)
+
+Chưa biết lấy token thế nào và token sống bao lâu (`expires_in`).
+
+---
+
+**Gate Phase 2 vẫn ĐÓNG.** Có H.2 là biết đọc response, nhưng chưa biết **gọi** — thiếu I.1.
