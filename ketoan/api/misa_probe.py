@@ -127,3 +127,52 @@ def run(ref_id=None, from_date=None, to_date=None):
     print("\n" + "═" * 78)
     print("Xong. Chép TOÀN BỘ output ở trên gửi lại — giá trị đã được che sẵn.")
     print("═" * 78)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Soi bố cục form Sales Invoice — dùng khi nghi field bị nuốt vào section MISA
+# ═══════════════════════════════════════════════════════════════════════════
+
+def show_si_layout(around="custom_misa_section", context=40):
+    """In thứ tự field THẬT của Sales Invoice quanh section MISA.
+
+        bench --site <site> execute ketoan.api.misa_probe.show_si_layout
+
+    Section Break thu gọn nuốt mọi field đứng sau nó. Nếu thấy nhóm thông tin
+    xuất hóa đơn nằm SAU `custom_misa_section` thì đó chính là chỗ chúng "biến mất".
+    """
+    meta = frappe.get_meta("Sales Invoice")
+    fields = list(meta.fields)
+    names = [df.fieldname for df in fields]
+
+    if around not in names:
+        print(f"⚠ Không tìm thấy {around} trên form. Đã chạy migrate chưa?")
+        return
+
+    pos = names.index(around)
+    lo, hi = max(0, pos - context), min(len(fields), pos + context + 1)
+
+    print(f"Sales Invoice có {len(fields)} field. Đang xem quanh {around} (vị trí {pos + 1}).\n")
+    section = ""
+    for i in range(lo, hi):
+        df = fields[i]
+        if df.fieldtype in ("Section Break", "Tab Break"):
+            section = df.label or df.fieldname
+        mark = "  ◀── SECTION MISA BẮT ĐẦU TỪ ĐÂY" if df.fieldname == around else ""
+        cue = ">>" if i > pos and not df.fieldname.startswith("custom_misa") else "  "
+        print(f" {cue} {i + 1:3d}. {df.fieldtype:14s} {df.fieldname:34s} [{section[:24]}]{mark}")
+
+    after = [df.fieldname for df in fields[pos + 1:] if not df.fieldname.startswith("custom_misa")]
+    print()
+    if after:
+        print(f"🚨 CÓ {len(after)} field KHÔNG thuộc nhóm MISA nằm SAU section MISA — bị nuốt vào phần thu gọn:")
+        for n in after:
+            print(f"     · {n}")
+        print("\n   Sửa: bench --site <site> execute ketoan.install.repair_misa_field_order")
+    else:
+        print("✅ Không field nào bị nuốt — section MISA nằm ở cuối form, đúng vị trí.")
+
+    cf = frappe.db.get_value(
+        "Custom Field", "Sales Invoice-custom_misa_section", ["insert_after", "collapsible"], as_dict=True
+    )
+    print(f"\nCustom Field custom_misa_section: insert_after={cf and cf.insert_after!r} collapsible={cf and cf.collapsible}")

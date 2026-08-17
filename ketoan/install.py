@@ -281,8 +281,49 @@ MISA_DOC_PERMS = {
 }
 
 
+def _last_field_before_misa(doctype="Sales Invoice"):
+    """Fieldname CUỐI CÙNG của form, bỏ qua nhóm custom_misa_*.
+
+    Section Break KHÔNG khai insert_after sẽ bị Frappe đặt vào giữa form, và vì
+    nó thu gọn được nên MỌI field đứng sau bị nuốt vào trong — nhìn như mất field.
+    Neo tường minh vào cuối form là cách duy nhất chắc chắn không nuốt của ai.
+    """
+    try:
+        names = [
+            (df.fieldname or "")
+            for df in frappe.get_meta(doctype).fields
+            if not (df.fieldname or "").startswith("custom_misa")
+        ]
+        return names[-1] if names else None
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "ketoan: _last_field_before_misa")
+        return None
+
+
+def repair_misa_field_order():
+    """Neo lại section MISA vào cuối form Sales Invoice + trả field bị nuốt về chỗ cũ.
+
+    Chạy được nhiều lần. Trả về dict để soi khi chạy tay bằng bench execute.
+    """
+    name = "Sales Invoice-custom_misa_section"
+    if not frappe.db.exists("Custom Field", name):
+        return {"ok": False, "reason": "chưa có custom_misa_section"}
+
+    before = frappe.db.get_value("Custom Field", name, "insert_after")
+    anchor = _last_field_before_misa()
+    if not anchor:
+        return {"ok": False, "reason": "không xác định được field cuối form"}
+
+    if before != anchor:
+        frappe.db.set_value("Custom Field", name, "insert_after", anchor, update_modified=False)
+    frappe.clear_cache(doctype="Sales Invoice")
+    return {"ok": True, "insert_after_cu": before, "insert_after_moi": anchor}
+
+
 def setup_misa_integration():
     """Tạo role MISA Reconciler + custom field custom_misa_* + quyền 3 DocType. Idempotent."""
+    import copy
+
     from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
     from frappe.permissions import add_permission, update_permission_property
 
@@ -295,7 +336,14 @@ def setup_misa_integration():
         frappe.log_error(frappe.get_traceback(), f"ketoan: create role {MISA_ROLE}")
 
     try:
-        create_custom_fields(MISA_CUSTOM_FIELDS, ignore_validate=True)
+        # Neo section vào CUỐI form. Thiếu bước này, Frappe đặt Section Break vào
+        # giữa form và nó nuốt trọn các field đứng sau vào phần thu gọn.
+        fields = copy.deepcopy(MISA_CUSTOM_FIELDS)
+        anchor = _last_field_before_misa()
+        if anchor:
+            fields["Sales Invoice"][0]["insert_after"] = anchor
+        create_custom_fields(fields, ignore_validate=True)
+        repair_misa_field_order()
     except Exception:
         frappe.log_error(frappe.get_traceback(), "ketoan: misa custom fields")
 
