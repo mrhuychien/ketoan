@@ -169,10 +169,16 @@ MISA_STATUS_OPTIONS = "\n".join(
 MISA_CUSTOM_FIELDS = {
     "Sales Invoice": [
         {
+            # TAB Break, KHÔNG phải Section Break.
+            #
+            # Section Break thu gọn đặt nhầm chỗ sẽ NUỐT mọi field đứng sau vào
+            # phần gấp lại — người dùng thấy như mất hẳn nhóm field (đã xảy ra
+            # thật với nhóm "KẾ TOÁN" của Sales Invoice). Tab Break tách hẳn
+            # sang tab riêng: đặt sai thì cùng lắm là nằm nhầm tab, vẫn NHÌN
+            # THẤY được, không bao giờ biến mất.
             "fieldname": "custom_misa_section",
-            "label": "Hóa đơn điện tử MISA",
-            "fieldtype": "Section Break",
-            "collapsible": 1,
+            "label": "MISA",
+            "fieldtype": "Tab Break",
         },
         {
             "fieldname": "custom_misa_status",
@@ -301,23 +307,60 @@ def _last_field_before_misa(doctype="Sales Invoice"):
 
 
 def repair_misa_field_order():
-    """Neo lại section MISA vào cuối form Sales Invoice + trả field bị nuốt về chỗ cũ.
+    """Trả nhóm field MISA về đúng chỗ: Tab Break riêng, neo vào cuối form.
 
+    Sửa được site đã cài bản hỏng (Section Break thu gọn nuốt mất nhóm KẾ TOÁN).
     Chạy được nhiều lần. Trả về dict để soi khi chạy tay bằng bench execute.
     """
     name = "Sales Invoice-custom_misa_section"
     if not frappe.db.exists("Custom Field", name):
         return {"ok": False, "reason": "chưa có custom_misa_section"}
 
-    before = frappe.db.get_value("Custom Field", name, "insert_after")
+    before = frappe.db.get_value(
+        "Custom Field", name, ["insert_after", "fieldtype", "collapsible"], as_dict=True
+    )
     anchor = _last_field_before_misa()
     if not anchor:
         return {"ok": False, "reason": "không xác định được field cuối form"}
 
-    if before != anchor:
-        frappe.db.set_value("Custom Field", name, "insert_after", anchor, update_modified=False)
+    frappe.db.set_value(
+        "Custom Field", name,
+        {"insert_after": anchor, "fieldtype": "Tab Break", "label": "MISA", "collapsible": 0},
+        update_modified=False,
+    )
     frappe.clear_cache(doctype="Sales Invoice")
-    return {"ok": True, "insert_after_cu": before, "insert_after_moi": anchor}
+    return {
+        "ok": True,
+        "truoc": dict(before or {}),
+        "sau": {"insert_after": anchor, "fieldtype": "Tab Break", "collapsible": 0},
+    }
+
+
+def remove_misa_custom_fields():
+    """VAN AN TOÀN — gỡ toàn bộ custom field custom_misa_* khỏi form Sales Invoice.
+
+    Dùng khi nhóm field MISA làm hỏng bố cục form và cần trả giao diện về ngay.
+
+    KHÔNG mất dữ liệu nghiệp vụ: xóa Custom Field chỉ gỡ field khỏi form, cột dữ
+    liệu trong bảng `tabSales Invoice` vẫn còn nguyên. Chạy lại
+    `setup_misa_integration()` là dựng lại được đúng như cũ.
+
+        bench --site <site> execute ketoan.install.remove_misa_custom_fields
+    """
+    removed = []
+    for row in frappe.get_all(
+        "Custom Field",
+        filters={"dt": "Sales Invoice", "fieldname": ("like", "custom_misa%")},
+        pluck="name",
+    ):
+        try:
+            frappe.delete_doc("Custom Field", row, ignore_permissions=True, force=True)
+            removed.append(row)
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), f"ketoan: remove {row}")
+    frappe.db.commit()
+    frappe.clear_cache(doctype="Sales Invoice")
+    return {"removed": removed, "note": "Cột dữ liệu vẫn còn. Chạy setup_misa_integration() để dựng lại."}
 
 
 def setup_misa_integration():
