@@ -28,3 +28,16 @@ jinja = {
 
 # P0 read-only + deep-link → KHÔNG doc_events ghi sổ.
 # (P1: scheduler_events daily snapshot cảnh báo + email digest.)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MISA meInvoice — sinh khóa nối trước khi ghi sổ.
+#
+# before_submit là thời điểm cuối còn ghi được field thường. Hàm bọc try/except
+# toàn bộ: tích hợp MISA hỏng KHÔNG được chặn kế toán ghi sổ.
+# Chưa bật scheduler_events — job theo lịch chỉ bật sau khi chạy tay đạt.
+# ═══════════════════════════════════════════════════════════════════════════
+doc_events = {
+    "Sales Invoice": {
+        "before_submit": "ketoan.api.misa_sync.ensure_ref_id",
+    },
+}
