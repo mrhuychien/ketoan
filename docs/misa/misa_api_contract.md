@@ -575,3 +575,45 @@ bộ tầng đối soát của Phase 5–6 — khi có AppID thì chỉ thay t�
 (B) chỉ nên làm nếu chấp nhận nó sẽ hỏng.
 
 **Gate Phase 2 vẫn ĐÓNG** — chờ chốt hướng ở J.7.
+
+---
+
+## K. ĐÍNH CHÍNH U1 (17/08/2026) — có luồng đẩy đang chạy
+
+Người dùng xác nhận: **hóa đơn đang được đẩy từ ERPNext sang MISA bằng một `Client Script` trên
+Sales Invoice.**
+
+Kết luận U1 ở §A.1 **đúng nhưng không đủ**: khảo sát quét *code trong app* (`grep` trên
+`ketoan/`), mà `Client Script` và `Server Script` là **bản ghi trong database của site**, không
+phải file trong app. Chúng không thể xuất hiện trong bất kỳ lần grep nào.
+
+⇒ Bài học cho mọi khảo sát sau: "app không có" **≠** "site không có". Phải kiểm thêm
+`Client Script`, `Server Script`, `Custom Field`, `Property Setter`, `Webhook`, `Scheduled Job Type`
+— tất cả đều là dữ liệu, không phải file.
+
+### K.1 Điều này giải thích được
+
+- **`vn_einvoice_number`**: §A.2 ghi nhận app chỉ ĐỌC, không bao giờ GHI, và không do app này
+  ship. Giờ rõ: **Client Script kia là bên ghi**. 6 màn hình đang đọc field đó thực chất đang
+  đọc kết quả của luồng đẩy hiện hành.
+- **`RefID` dạng GUID** (§H.5): có thể do chính Client Script sinh và gửi kèm, chứ không hẳn
+  của MISA. Nếu đúng thì tầng khớp theo `ref_id` **dùng được cho cả dữ liệu cũ** — tốt hơn nhiều
+  so với đánh giá ở §H.5.
+- **Xác thực** (§J.4): Client Script chạy **trong trình duyệt của kế toán**, nơi đã sẵn cookie
+  phiên MISA. Đó là lý do luồng hiện tại không cần bearer token. Nhưng cũng có nghĩa là nó
+  **chỉ chạy khi có người mở trình duyệt** — không thể chạy theo lịch.
+
+### K.2 Cần đọc script đó trước khi viết bất cứ dòng nào
+
+Đây giờ là hiện vật quan trọng nhất, quan trọng hơn mọi capture còn lại. Nó trả lời một lượt:
+
+| Câu hỏi | Vì sao cần |
+|---|---|
+| Gọi thẳng MISA từ trình duyệt, hay gọi qua whitelisted method / Server Script? | quyết định (B) làm được ở server hay bắt buộc ở trình duyệt |
+| Endpoint đẩy là gì, payload ra sao | không có thì không viết được luồng đẩy |
+| `RefID` do ERPNext sinh hay MISA trả về | quyết định tầng khớp 1 (§H.5) |
+| Ghi ngược số hóa đơn vào field nào, lúc nào | quyết định §C.0 câu 5 |
+| Xác thực bằng gì | mấu chốt của hướng (B) |
+
+**Chưa có script này thì chưa viết `misa_client.py`** — viết ra sẽ trùng hoặc đá nhau với luồng
+đang chạy, và ràng buộc 13.4 của pack cấm tự động sửa/hủy hóa đơn.
