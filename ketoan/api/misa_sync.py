@@ -280,7 +280,7 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
                 "custom_misa_inv_no": inv_no,
                 "custom_misa_inv_series": _pick(inv, "InvSeries"),
                 "custom_misa_invoice_code": _pick(inv, "InvoiceCode"),
-            }, settings).get("misa"),
+            }, settings).get("primary"),
             "custom_misa_status": status,
             "custom_misa_last_checked": now,
             # Đồng bộ ngược sang nhóm hiển thị — chỉ ghi khi đang trống, không đè

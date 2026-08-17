@@ -240,7 +240,7 @@ MISA_CUSTOM_FIELDS = {
         {
             # Data + options "URL" → Frappe render thành link bấm được.
             "fieldname": "custom_misa_link",
-            "label": "Mở hóa đơn trên MISA",
+            "label": "Tra cứu hóa đơn MISA",
             "fieldtype": "Data",
             "options": "URL",
             "allow_on_submit": 1,

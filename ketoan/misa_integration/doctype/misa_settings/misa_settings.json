@@ -182,9 +182,9 @@
   {
    "fieldname": "invoice_url_template",
    "fieldtype": "Data",
-   "label": "Mẫu link mở hóa đơn trên MISA",
+   "label": "Link mở trên trang quản trị MISA",
    "default": "https://app3.meinvoice.vn/v3/hoa-don",
-   "description": "Dán URL thật khi mở 1 hóa đơn trên MISA, thay phần mã bằng chỗ giữ. Dùng được: {ref_id} {transaction_id} {inv_no} {inv_series} {invoice_code} {taxcode}. Vd: https://app3.meinvoice.vn/v3/hoa-don/{ref_id}"
+   "description": "Tùy chọn. app3.meinvoice.vn mở hóa đơn bằng cửa sổ nổi nên thường KHÔNG có link riêng cho từng hóa đơn — để nguyên thì nút này mở trang danh sách. Nếu tìm được link sâu thì dán vào đây, chỗ giữ: {ref_id} {transaction_id} {inv_no} {inv_series} {invoice_code} {taxcode}."
   },
   {
    "fieldname": "column_break_url",
@@ -193,9 +193,9 @@
   {
    "fieldname": "lookup_url_template",
    "fieldtype": "Data",
-   "label": "Mẫu link tra cứu công khai",
-   "default": "https://www.meinvoice.vn/tra-cuu",
-   "description": "Trang tra cứu cho khách hàng. Chỗ giữ như trên, thường dùng {transaction_id}."
+   "label": "Link tra cứu hóa đơn",
+   "default": "https://www.meinvoice.vn/tra-cuu/?sc={transaction_id}",
+   "description": "Trang tra cứu công khai — mở đúng 1 hóa đơn, dùng được cho cả kế toán lẫn khách hàng. `sc` là mã tra cứu MISA cấp. Đã xác minh trên hóa đơn thật."
   }
  ],
  "links": [],

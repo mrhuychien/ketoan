@@ -13,8 +13,15 @@ import frappe
 from frappe import _
 
 # Mẫu mặc định — dùng tạm khi chưa khai trong MISA Settings.
+#
+# Link tra cứu ĐÃ XÁC MINH trên hóa đơn thật: tham số `sc` chính là mã tra cứu
+# MISA cấp, tức field TransactionID. Các tham số khác trong link MISA gửi khách
+# (m, n, c, b, d, t, r) chỉ điền sẵn email/tên người mua — bỏ đi vẫn mở đúng.
+#
+# Trang quản trị app3 mở hóa đơn bằng cửa sổ nổi, KHÔNG đổi URL, nên không có
+# link sâu tới từng hóa đơn. Vì vậy link tra cứu mới là đường dẫn chính.
 DEFAULT_INVOICE_URL = "https://app3.meinvoice.vn/v3/hoa-don"
-DEFAULT_LOOKUP_URL = "https://www.meinvoice.vn/tra-cuu"
+DEFAULT_LOOKUP_URL = "https://www.meinvoice.vn/tra-cuu/?sc={transaction_id}"
 
 PLACEHOLDERS = ("ref_id", "transaction_id", "inv_no", "inv_series", "invoice_code", "taxcode")
 
@@ -54,9 +61,14 @@ def invoice_links(si, settings=None):
         "invoice_code": si.get("custom_misa_invoice_code"),
         "taxcode": (settings.taxcode or "").strip(),
     }
+    misa = build_url(settings.invoice_url_template or DEFAULT_INVOICE_URL, **ctx)
+    lookup = build_url(settings.lookup_url_template or DEFAULT_LOOKUP_URL, **ctx)
     return {
-        "misa": build_url(settings.invoice_url_template or DEFAULT_INVOICE_URL, **ctx),
-        "lookup": build_url(settings.lookup_url_template or DEFAULT_LOOKUP_URL, **ctx),
+        "misa": misa,
+        "lookup": lookup,
+        # Link lưu vào hóa đơn: ưu tiên link tra cứu vì nó mở ĐÚNG hóa đơn đó.
+        # Link quản trị chỉ mở trang danh sách nên không đáng lưu.
+        "primary": lookup or misa,
         "transaction_id": ctx["transaction_id"],
         "inv_no": ctx["inv_no"],
     }
@@ -96,7 +108,7 @@ def backfill_links(limit=2000):
     )
     done = 0
     for si in rows:
-        url = invoice_links(si, settings).get("misa")
+        url = invoice_links(si, settings).get("primary")
         if url and url != si.get("custom_misa_link"):
             frappe.db.set_value("Sales Invoice", si.name, "custom_misa_link", url, update_modified=False)
             done += 1

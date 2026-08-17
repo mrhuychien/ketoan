@@ -840,3 +840,31 @@ Việc Client Script cứng 8% cho mọi dòng (§L.4.3) là sai *thiết kế*,
 
 Không chặn gì: `afterpublishing` đã đủ cho `poll_pending`. Ba cái này phục vụ dò hóa đơn mồ côi
 (Phase 4–6), để sau.
+
+---
+
+## N. Link tra cứu hóa đơn — ĐÃ XÁC MINH (17/08/2026)
+
+Nguồn: link MISA gửi kèm email hóa đơn cho khách hàng.
+
+```
+https://www.meinvoice.vn/tra-cuu/?sc={TransactionID}
+```
+
+| Tham số | Vai trò |
+|---|---|
+| `sc` | **mã tra cứu** = field `TransactionID` (§M.2). Bắt buộc |
+| `m` `n` | email + tên người mua — chỉ điền sẵn ô tra cứu |
+| `c` `b` `d` `t` `r` | cờ hiển thị |
+
+Chỉ giữ `sc` là mở đúng hóa đơn. Đã kiểm: hàm dựng URL cho ra **trùng khớp
+tuyệt đối** với link thật.
+
+### N.1 Trang quản trị KHÔNG có link sâu
+
+`app3.meinvoice.vn/v3/hoa-don` mở hóa đơn bằng cửa sổ nổi, URL không đổi ⇒ không
+có đường dẫn riêng cho từng hóa đơn trên trang quản trị.
+
+⇒ Link tra cứu công khai chính là đường dẫn chi tiết hóa đơn duy nhất dùng được,
+nên `custom_misa_link` lưu link này (`primary`). Nút "Mở trên trang quản trị"
+chỉ mở danh sách — giữ lại phòng khi MISA bổ sung link sâu sau này.
