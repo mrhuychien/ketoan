@@ -23,6 +23,7 @@
   "invoice_template_id",
   "misa_user_id",
   "sync_section",
+  "enable_push",
   "enable_auto_sync",
   "lookback_days",
   "column_break_sync",
@@ -130,6 +131,13 @@
    "fieldname": "sync_section",
    "fieldtype": "Section Break",
    "label": "Đồng bộ"
+  },
+  {
+   "default": "0",
+   "description": "Công tắc chặn cứng luồng đẩy hóa đơn sang MISA. Tắt = mọi lời gọi push_invoice bị từ chối ngay.",
+   "fieldname": "enable_push",
+   "fieldtype": "Check",
+   "label": "Cho phép đẩy hóa đơn"
   },
   {
    "default": "0",
