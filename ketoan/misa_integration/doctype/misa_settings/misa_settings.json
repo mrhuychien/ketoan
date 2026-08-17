@@ -37,8 +37,8 @@
    "label": "Base URL (bộ chính thức)"
   },
   {
-   "default": "https://app.meinvoice.vn",
-   "description": "Bộ web app (không cần AppID) — dùng để kéo bảng kê hóa đơn đã sử dụng.",
+   "default": "https://app3.meinvoice.vn",
+   "description": "Bộ web app. Host đo được thật là app3.meinvoice.vn (xem docs/misa/misa_api_contract.md §J.1).",
    "fieldname": "base_url_webapp",
    "fieldtype": "Data",
    "label": "Base URL (bộ web app)"

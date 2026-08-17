@@ -451,3 +451,127 @@ Chưa biết lấy token thế nào và token sống bao lâu (`expires_in`).
 ---
 
 **Gate Phase 2 vẫn ĐÓNG.** Có H.2 là biết đọc response, nhưng chưa biết **gọi** — thiếu I.1.
+
+---
+
+## J. Request thật của endpoint danh sách (17/08/2026)
+
+> Cookie và `__RequestVerificationToken` do người dùng gửi **KHÔNG được lưu ở đây** và không
+> commit vào repo. Chỉ ghi lại cấu trúc.
+
+### J.1 Định danh endpoint
+
+| | |
+|---|---|
+| Method | `POST` |
+| URL | `https://app3.meinvoice.vn/v3/sainvoicewithcode/list` |
+| Content-Type | **`application/x-www-form-urlencoded; charset=UTF-8`** |
+
+Ba điểm khác hẳn giả định ban đầu (§B.2):
+
+1. Host là **`app3.meinvoice.vn`**, không phải `app.meinvoice.vn`. `MISA Settings.base_url_webapp`
+   mặc định đang **sai**, phải đổi.
+2. Path là **`sainvoicewithcode`** — lần thứ hai xác nhận **hóa đơn CÓ MÃ CQT** (§H.4).
+3. Body là **form-urlencoded**, **không phải JSON**. `misa_client.call_webapp` phải gửi `data=`
+   chứ không `json=`.
+
+### J.2 Header cần thiết
+
+| Header | Giá trị | Vai trò |
+|---|---|---|
+| `CompanyTaxCode` | MST công ty | = `MISA Settings.taxcode` |
+| `Content-Type` | `application/x-www-form-urlencoded; charset=UTF-8` | bắt buộc |
+| `X-Requested-With` | `XMLHttpRequest` | ASP.NET phân biệt AJAX |
+| `__RequestVerificationToken` | token chống CSRF | **phải khớp cookie cùng tên** |
+| `__InvType` | `5` | loại hóa đơn của màn hình |
+| `__SysVersion` | `41` | phiên bản hệ thống |
+| `Origin` / `Referer` | `https://app3.meinvoice.vn` / `.../v3/hoa-don` | Cloudflare kiểm |
+| `Cookie` | phiên đăng nhập | **xem J.4** |
+
+### J.3 Payload — form-urlencoded
+
+| Tham số | Giá trị mẫu | Ghi chú |
+|---|---|---|
+| `start` | `0` | **offset phân trang** |
+| `length` | `30` | **kích thước trang** |
+| `pagingType` | `0` | |
+| `draw` | `2` | bộ đếm kiểu DataTables, gửi số tăng dần là được |
+| `fromDate` | `"2026-07-19T00:00:00.000Z"` | ⚠️ giá trị **có kèm dấu nháy kép** trong chuỗi |
+| `toDate` | `"2026-08-17T23:59:59.000Z"` | như trên |
+| `publishStatus` | `6` | ⚠️ **xem J.5** |
+| `sendEmailStatus` `sendToTaxStatus` | `-1` | −1 = tất cả |
+| `filterInvoiceStatus` | `0` | |
+| `invoiceSummaryStatus` | `-2` | |
+| `searchField` | `AccountObjectCode,AccountObjectName` | |
+| `gridSort` | ``​`PublishStatus` ASC,`InvDate` DESC, `InvNo` DESC, `SortOrder` ASC`` | sắp xếp, dùng dấu backtick |
+| `columns` | 33 tên cột, ngăn bằng dấu phẩy | **xem J.6 — quan trọng** |
+| `filter` | mảng JSON điều kiện lọc | trùng nghĩa với `publishStatus` |
+| `searchKey` `keyValue` `buyerSignature` `filterPaymentStatus` `lstOrganizationUnit` `invTemplate` `approveSteps` `sort` | rỗng | |
+| `filterCustomField` | `false` | |
+
+⇒ Phân trang: **`start` + `length`**, đúng như pack dự đoán. Kéo cả tháng = tăng `start` thêm
+`length` mỗi vòng, **dừng khi mảng rỗng** (§H).
+
+### J.4 🚨 XÁC THỰC — không có Bearer token
+
+**Không có header `Authorization` nào.** Bộ web app này xác thực bằng:
+
+1. **Cookie phiên ASP.NET** (`ASP.NET_SessionId`, `_mstoken`, `TaxCode`, `LastUserID`…)
+2. **Anti-forgery double-submit**: `__RequestVerificationToken` phải có **đồng thời** ở header
+   và ở cookie, và hai giá trị phải là một cặp hợp lệ do server phát.
+3. **`cf_clearance` — cookie của Cloudflare**, chỉ cấp sau khi vượt kiểm tra trình duyệt.
+
+Điều này **phủ định giả định §B.2** rằng có `POST /api/v2/oauth` trả bearer token. Hệ quả:
+
+| Hệ quả | Mức |
+|---|---|
+| `misa_client.get_token(scope="webapp")` theo thiết kế pack **không áp dụng được** | **cao** |
+| Muốn tự động hóa phải: login bằng form → giữ cookie jar → bóc `__RequestVerificationToken` từ HTML → kèm vào mọi request | **cao** |
+| `cf_clearance` gắn với User-Agent + IP + JA3 của trình duyệt thật. Server Frappe gọi bằng `requests` **rất dễ bị Cloudflare chặn**, và chặn lúc nào là ngoài tầm kiểm soát | **rất cao** |
+| Phiên hết hạn / MISA đổi `__SysVersion` là luồng chết im lặng | **cao** |
+
+Đây đúng là điều pack cảnh báo ở ràng buộc 13.7 — *"bộ web app không ổn định, phải cô lập"* —
+nhưng thực tế còn nặng hơn: **không chỉ không ổn định mà có thể không tự động hóa được**.
+
+### J.5 Bẫy: `publishStatus` lúc lọc ≠ `PublishStatus` trong bản ghi
+
+Request lọc `publishStatus=6`, `DisplayText` là `"Phát hành"`. Nhưng **30/30 bản ghi trả về mang
+`PublishStatus: 3`**.
+
+⇒ Giá trị enum dùng để **lọc** và giá trị enum trong **dữ liệu** là hai bảng mã khác nhau. Cấm
+lấy `6` đem so với field `publish_status` của snapshot. Chưa xác minh được bảng mã nào là nào →
+chưa code phần này.
+
+### J.6 `columns` do client quyết định — cơ hội gỡ nút thắt tách thuế
+
+`columns` là **tham số gửi lên**, liệt kê đúng các cột lưới đang hiển thị. Ngoài 33 cột ở mẫu,
+response còn kèm sẵn `TotalAmountWithoutVAT`, `TotalVATAmount`, `TotalVATAmountOC`,
+`TotalVATAmountView`, `TotalVATAmountViewOC` nhưng **đều bằng 0.0** — vì chúng **không nằm trong
+`columns`**.
+
+**Giả thuyết**: thêm `TotalAmountWithoutVAT` và `TotalVATAmount` vào `columns` thì server sẽ trả
+giá trị thật ⇒ **so tiền 3 vế làm được ngay từ endpoint danh sách**, không cần
+`afterpublishing/{refID}`.
+
+Cách kiểm chứng **không cần lập trình**: trên lưới hóa đơn của MISA, mở phần **chọn cột hiển
+thị**, tick thêm **"Tiền chưa thuế"** và **"Tiền thuế"**, rồi bấm tìm kiếm lại và chụp lại
+response. Nếu hai field đó có số → giả thuyết đúng.
+
+Cột đáng chú ý khác đã lộ tên qua `columns` (chưa thấy giá trị): `BuyerSignatureStatus`,
+`SendExplanationStatus`, `CustomData`, `ListDate`, `ReceiverMobile`.
+
+### J.7 Khuyến nghị kiến trúc — cần người dùng chốt
+
+Vì J.4, có ba hướng:
+
+| Hướng | Được | Mất |
+|---|---|---|
+| **(A) Đăng ký AppID, dùng Open API chính thức** `api.meinvoice.vn/api/v3` | bearer token, có tài liệu, ổn định, không đụng Cloudflare | phải làm thủ tục với MISA |
+| **(B) Tự động hóa bộ web app bằng cookie jar** | làm được ngay, không cần xin gì | Cloudflare chặn lúc nào không biết; mỗi lần MISA đổi `__SysVersion`/anti-forgery là chết; phải giữ mật khẩu để tự đăng nhập lại |
+| **(C) Nhập khẩu thủ công** — kế toán xuất Excel/CSV từ MISA rồi tải lên portal, hệ thống upsert snapshot + đối soát | không phụ thuộc API, chạy được ngay, rủi ro bằng 0 | mỗi kỳ tốn 2 phút thao tác tay |
+
+**Đề xuất: (A) là đích, (C) là cầu tạm.** (C) dùng lại nguyên vẹn `MISA Invoice Snapshot` và toàn
+bộ tầng đối soát của Phase 5–6 — khi có AppID thì chỉ thay tầng nạp dữ liệu, không phải viết lại.
+(B) chỉ nên làm nếu chấp nhận nó sẽ hỏng.
+
+**Gate Phase 2 vẫn ĐÓNG** — chờ chốt hướng ở J.7.

@@ -24,7 +24,13 @@
   "total_amount",
   "status_section",
   "publish_status",
+  "einvoice_status",
   "send_tax_status",
+  "send_invoice_status",
+  "invoice_type",
+  "currency_code",
+  "organization_unit_id",
+  "edit_version",
   "is_deleted",
   "deleted_date",
   "deleted_reason",
@@ -156,9 +162,47 @@
    "label": "Trạng thái phát hành"
   },
   {
+   "description": "MISA: EInvoiceStatus. Quyết định hóa đơn bị hủy / thay thế — ý nghĩa các mã phải xác nhận trước khi dùng.",
+   "fieldname": "einvoice_status",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Trạng thái HĐĐT"
+  },
+  {
    "fieldname": "send_tax_status",
    "fieldtype": "Data",
    "label": "Trạng thái gửi CQT"
+  },
+  {
+   "description": "MISA: SendInvoiceStatus — gửi hóa đơn cho khách, không phải gửi CQT.",
+   "fieldname": "send_invoice_status",
+   "fieldtype": "Data",
+   "label": "Trạng thái gửi khách"
+  },
+  {
+   "fieldname": "invoice_type",
+   "fieldtype": "Data",
+   "label": "Loại hóa đơn"
+  },
+  {
+   "default": "VND",
+   "description": "Khác VND thì KHÔNG được so tiền trực tiếp với hóa đơn ERPNext.",
+   "fieldname": "currency_code",
+   "fieldtype": "Data",
+   "label": "Tiền tệ"
+  },
+  {
+   "description": "MISA: OrganizationUnitID — đơn vị phát hành, cần khi công ty có nhiều chi nhánh.",
+   "fieldname": "organization_unit_id",
+   "fieldtype": "Data",
+   "label": "Đơn vị phát hành"
+  },
+  {
+   "default": "0",
+   "description": "MISA: EditVersion — số lần hóa đơn bị sửa bên MISA.",
+   "fieldname": "edit_version",
+   "fieldtype": "Int",
+   "label": "Số lần sửa"
   },
   {
    "default": "0",
