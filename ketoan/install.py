@@ -151,10 +151,174 @@ REPORT_ROLES = {
 }
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# MISA meInvoice — role + custom field trên Sales Invoice + quyền 3 DocType.
+#
+# Ship bằng add_permission/create_custom_fields chứ KHÔNG bằng fixtures: đúng
+# quy ước sẵn có của app (DocPerm hash name) và không cần bench export-fixtures.
+# Fieldname ASCII, label tiếng Việt. Field ghi sau khi submit → allow_on_submit=1,
+# thiếu là chết ngay lần poll đầu ("Not allowed to change ... after submission").
+# ═══════════════════════════════════════════════════════════════════════════
+
+MISA_ROLE = "MISA Reconciler"
+
+MISA_STATUS_OPTIONS = "\n".join(
+    ("", "Chưa đẩy", "Đã đẩy (nháp)", "Đã phát hành", "Phát hành lỗi", "Lệch tiền", "Đã hủy", "Đã thay thế")
+)
+
+MISA_CUSTOM_FIELDS = {
+    "Sales Invoice": [
+        {
+            "fieldname": "custom_misa_section",
+            "label": "Hóa đơn điện tử MISA",
+            "fieldtype": "Section Break",
+            "collapsible": 1,
+        },
+        {
+            "fieldname": "custom_misa_status",
+            "label": "Trạng thái MISA",
+            "fieldtype": "Select",
+            "options": MISA_STATUS_OPTIONS,
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "in_standard_filter": 1,
+            "insert_after": "custom_misa_section",
+        },
+        {
+            "fieldname": "custom_misa_inv_series",
+            "label": "Ký hiệu hóa đơn",
+            "fieldtype": "Data",
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "insert_after": "custom_misa_status",
+        },
+        {
+            "fieldname": "custom_misa_inv_no",
+            "label": "Số hóa đơn MISA",
+            "fieldtype": "Data",
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "search_index": 1,
+            "insert_after": "custom_misa_inv_series",
+        },
+        {
+            "fieldname": "custom_misa_inv_date",
+            "label": "Ngày phát hành MISA",
+            "fieldtype": "Date",
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "insert_after": "custom_misa_inv_no",
+        },
+        {
+            "fieldname": "custom_misa_column_break",
+            "fieldtype": "Column Break",
+            "insert_after": "custom_misa_inv_date",
+        },
+        {
+            "fieldname": "custom_misa_transaction_id",
+            "label": "Mã tra cứu MISA",
+            "fieldtype": "Data",
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "search_index": 1,
+            "insert_after": "custom_misa_column_break",
+        },
+        {
+            "fieldname": "custom_misa_invoice_code",
+            "label": "Mã CQT",
+            "fieldtype": "Data",
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "insert_after": "custom_misa_transaction_id",
+        },
+        {
+            "fieldname": "custom_misa_ref_id",
+            "label": "RefID (khóa nối MISA)",
+            "fieldtype": "Data",
+            "read_only": 1,
+            "search_index": 1,
+            "description": "Sinh trước khi ghi sổ, gửi kèm khi đẩy sang MISA. Không sửa tay.",
+            "insert_after": "custom_misa_invoice_code",
+        },
+        {
+            "fieldname": "custom_misa_pushed_at",
+            "label": "Đẩy sang MISA lúc",
+            "fieldtype": "Datetime",
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "insert_after": "custom_misa_ref_id",
+        },
+        {
+            "fieldname": "custom_misa_last_checked",
+            "label": "Kiểm tra lần cuối",
+            "fieldtype": "Datetime",
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "insert_after": "custom_misa_pushed_at",
+        },
+        {
+            "fieldname": "custom_misa_note",
+            "label": "Ghi chú xử lý MISA",
+            "fieldtype": "Small Text",
+            "allow_on_submit": 1,
+            "insert_after": "custom_misa_last_checked",
+        },
+    ]
+}
+
+# Role → DocType → quyền, cho 3 DocType của module MISA Integration.
+# (System Manager / Accounts Manager / Accounts User đã nằm sẵn trong DocType JSON.)
+MISA_DOC_PERMS = {
+    "Ke Toan Truong": {
+        "MISA Settings": ("read", "write"),
+        "MISA Invoice Snapshot": ("read", "write", "create", "delete", "report", "print", "export"),
+        "MISA Sync Run": ("read", "delete", "report"),
+    },
+    MISA_ROLE: {
+        "MISA Invoice Snapshot": ("read", "write", "report", "print"),
+        "MISA Sync Run": ("read", "report"),
+    },
+}
+
+
+def setup_misa_integration():
+    """Tạo role MISA Reconciler + custom field custom_misa_* + quyền 3 DocType. Idempotent."""
+    from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+    from frappe.permissions import add_permission, update_permission_property
+
+    try:
+        if not frappe.db.exists("Role", MISA_ROLE):
+            frappe.get_doc({"doctype": "Role", "role_name": MISA_ROLE, "desk_access": 1}).insert(
+                ignore_permissions=True
+            )
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), f"ketoan: create role {MISA_ROLE}")
+
+    try:
+        create_custom_fields(MISA_CUSTOM_FIELDS, ignore_validate=True)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "ketoan: misa custom fields")
+
+    for role, doc_perms in MISA_DOC_PERMS.items():
+        for doctype, rights in doc_perms.items():
+            try:
+                if not (frappe.db.exists("DocType", doctype) and frappe.db.exists("Role", role)):
+                    continue
+                add_permission(doctype, role, 0)
+                for right in rights:
+                    if right == "read":
+                        continue  # add_permission đã set read
+                    update_permission_property(doctype, role, 0, right, 1)
+                update_permission_property(doctype, role, 0, "if_owner", 0)
+            except Exception:
+                frappe.log_error(frappe.get_traceback(), f"ketoan misa perms: {role} @ {doctype}")
+
+
 def after_install():
     create_portal_roles()
     grant_settings_permissions()
     grant_business_permissions()
+    setup_misa_integration()
 
 
 def create_portal_roles():

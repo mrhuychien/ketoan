@@ -1,0 +1,149 @@
+{
+ "actions": [],
+ "creation": "2026-08-17 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "issingle": 1,
+ "field_order": [
+  "connection_section",
+  "base_url_official",
+  "base_url_webapp",
+  "taxcode",
+  "appid",
+  "column_break_conn",
+  "username",
+  "password",
+  "invoice_section",
+  "use_code_route",
+  "inv_series_list",
+  "sync_section",
+  "enable_auto_sync",
+  "lookback_days",
+  "column_break_sync",
+  "poll_interval_min",
+  "amount_tolerance"
+ ],
+ "fields": [
+  {
+   "fieldname": "connection_section",
+   "fieldtype": "Section Break",
+   "label": "Kết nối MISA meInvoice"
+  },
+  {
+   "default": "https://api.meinvoice.vn",
+   "description": "Bộ Open API chính thức (cần AppID). Môi trường test: https://testapi.meinvoice.vn",
+   "fieldname": "base_url_official",
+   "fieldtype": "Data",
+   "label": "Base URL (bộ chính thức)"
+  },
+  {
+   "default": "https://app.meinvoice.vn",
+   "description": "Bộ web app (không cần AppID) — dùng để kéo bảng kê hóa đơn đã sử dụng.",
+   "fieldname": "base_url_webapp",
+   "fieldtype": "Data",
+   "label": "Base URL (bộ web app)"
+  },
+  {
+   "description": "Mã số thuế công ty — gửi kèm mọi request (header CompanyTaxCode / taxcode).",
+   "fieldname": "taxcode",
+   "fieldtype": "Data",
+   "label": "Mã số thuế",
+   "reqd": 1
+  },
+  {
+   "description": "Để TRỐNG nếu chưa đăng ký tích hợp với MISA. Khi trống, chỉ dùng được bộ web app.",
+   "fieldname": "appid",
+   "fieldtype": "Password",
+   "label": "AppID"
+  },
+  {
+   "fieldname": "column_break_conn",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "username",
+   "fieldtype": "Data",
+   "label": "Tên đăng nhập",
+   "reqd": 1
+  },
+  {
+   "fieldname": "password",
+   "fieldtype": "Password",
+   "label": "Mật khẩu",
+   "reqd": 1
+  },
+  {
+   "fieldname": "invoice_section",
+   "fieldtype": "Section Break",
+   "label": "Hóa đơn"
+  },
+  {
+   "default": "0",
+   "description": "Bật nếu công ty dùng hóa đơn CÓ MÃ của cơ quan thuế (đổi route sang code/v3sainvoice/...).",
+   "fieldname": "use_code_route",
+   "fieldtype": "Check",
+   "label": "Hóa đơn có mã CQT"
+  },
+  {
+   "description": "Mỗi dòng 1 ký hiệu hóa đơn đang dùng (vd 1C26MHG). Dùng để dò số hóa đơn bị thiếu.",
+   "fieldname": "inv_series_list",
+   "fieldtype": "Small Text",
+   "label": "Ký hiệu hóa đơn đang dùng"
+  },
+  {
+   "fieldname": "sync_section",
+   "fieldtype": "Section Break",
+   "label": "Đồng bộ"
+  },
+  {
+   "default": "0",
+   "description": "Tắt = mọi job theo lịch dừng ngay ở dòng đầu. Chỉ bật sau khi đã chạy thử tay.",
+   "fieldname": "enable_auto_sync",
+   "fieldtype": "Check",
+   "label": "Bật đồng bộ tự động"
+  },
+  {
+   "default": "7",
+   "description": "Số ngày lùi lại khi đối soát hằng đêm.",
+   "fieldname": "lookback_days",
+   "fieldtype": "Int",
+   "label": "Số ngày đối soát lùi"
+  },
+  {
+   "fieldname": "column_break_sync",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "30",
+   "fieldname": "poll_interval_min",
+   "fieldtype": "Int",
+   "label": "Chu kỳ hỏi số hóa đơn (phút)"
+  },
+  {
+   "default": "1",
+   "description": "Chênh lệch tiền nhỏ hơn ngưỡng này thì vẫn coi là khớp (làm tròn).",
+   "fieldname": "amount_tolerance",
+   "fieldtype": "Currency",
+   "label": "Ngưỡng lệch tiền"
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-17 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MISA Integration",
+ "name": "MISA Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1, "delete": 1, "email": 1, "print": 1, "read": 1, "share": 1, "write": 1,
+   "role": "System Manager"
+  },
+  {
+   "create": 1, "print": 1, "read": 1, "write": 1,
+   "role": "Accounts Manager"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

@@ -247,3 +247,45 @@ response — chưa có trong contract thì chưa code.*
 **Có thể làm ngay mà không cần chờ MISA** (nếu người dùng muốn chạy song song): Phase 1 —
 DocType `MISA Settings` / `MISA Invoice Snapshot` / `MISA Sync Run`, custom field `custom_misa_*`,
 role + patch. Ba thứ này chỉ phụ thuộc quyết định §C.0 câu 2/5, **không** phụ thuộc tên field response.
+
+---
+
+## G. Phase 1 — ĐÃ THI CÔNG (17/08/2026)
+
+Người dùng duyệt gate Phase 0. Phase 1 dựng xong phần **không phụ thuộc tên field response
+của MISA**. Giả định đang áp dụng (đổi được, chưa có code nào khóa cứng):
+
+| Câu hỏi §C.0 | Giả định tạm | Đổi ý thì phải sửa gì |
+|---|---|---|
+| 2 — có AppID chưa | `MISA Settings.appid` **để trống được**; `has_appid()` quyết định có dùng bộ official hay không | không sửa gì, chỉ điền field |
+| 3/U4 — hóa đơn có mã CQT | thêm cờ `MISA Settings.use_code_route` (mặc định **tắt** = không mã) | không sửa gì, chỉ tick |
+| 4 — ký hiệu hóa đơn | thêm field `inv_series_list` (mỗi dòng 1 ký hiệu) phục vụ `detect_number_gaps` | không sửa gì, chỉ điền |
+| 5 — `vn_einvoice_number` | chọn **hướng (a) đồng bộ ngược**; nhưng code ghi ngược nằm ở Phase 3 | đổi sang (b) trước Phase 3 là không tốn gì |
+
+### G.1 Đã ship
+
+- Module mới **`MISA Integration`** (`ketoan/misa_integration/`), thêm vào `modules.txt`.
+- 3 DocType: `MISA Settings` (Single) · `MISA Invoice Snapshot` (autoname hash) · `MISA Sync Run`
+  (naming series `MISA-SYNC-.YYYY.-`).
+- 12 custom field `custom_misa_*` trên Sales Invoice — fieldname ASCII, label tiếng Việt,
+  9 field ghi-sau-submit đều `allow_on_submit=1`, `custom_misa_ref_id` cố ý `allow_on_submit=0`.
+- Role `MISA Reconciler` + quyền 3 DocType cho Kế toán trưởng và role mới.
+- Patch `v0_0_6.misa_integration_setup` (post_model_sync), idempotent.
+
+### G.2 Lệch so với pack — có chủ ý
+
+| Pack yêu cầu | Làm thực tế | Lý do |
+|---|---|---|
+| Ship Custom Field + Role qua `fixtures/` (§10) | `install.py` + patch `v0_0_6`, dùng `create_custom_fields` / `add_permission` | rủi ro **E1**: trái quy ước app (`hooks.py` ghi rõ *KHÔNG ship DocPerm qua fixtures*), và container không có bench để `export-fixtures` — pack cấm viết fixtures tay |
+| `references/validate_shipped_docs.py` (§11) | bộ kiểm tra ở §D.7 + validator DocType JSON viết riêng | file đó không tồn tại trên máy (D.4) |
+| `MISA Settings` chỉ Accounts Manager (§9) | thêm **Ke Toan Truong** read+write | trong app này Kế toán trưởng mới là vai chief (`_guard.CHIEF_ROLES`) |
+
+### G.3 Field thêm ngoài spec
+
+`use_code_route` (U4) và `inv_series_list` (Q4) — đều là **cấu hình**, không phải tên field
+response đoán mò, nên không vi phạm ràng buộc 13.5.
+
+### G.4 Chưa làm (đúng gate)
+
+`misa_client.py`, `misa_sync.py`, `misa_reconcile.py`, `misa_desk.py`, `scheduler_events`,
+`doc_events` → **Phase 2 trở đi, chờ payload/response thật (§C.1)**.

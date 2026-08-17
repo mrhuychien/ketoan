@@ -1,0 +1,276 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-08-17 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "invoice_section",
+  "inv_series",
+  "inv_no",
+  "inv_no_norm",
+  "inv_date",
+  "column_break_inv",
+  "transaction_id",
+  "ref_id",
+  "invoice_code",
+  "reference_type",
+  "buyer_section",
+  "buyer_tax_code",
+  "buyer_name",
+  "column_break_buyer",
+  "amount_before_vat",
+  "vat_amount",
+  "total_amount",
+  "status_section",
+  "publish_status",
+  "send_tax_status",
+  "is_deleted",
+  "deleted_date",
+  "deleted_reason",
+  "column_break_status",
+  "origin",
+  "sales_invoice",
+  "match_status",
+  "match_method",
+  "match_confidence",
+  "note",
+  "meta_section",
+  "source_api",
+  "last_synced_at",
+  "raw_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "invoice_section",
+   "fieldtype": "Section Break",
+   "label": "Hóa đơn trên MISA"
+  },
+  {
+   "fieldname": "inv_series",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Ký hiệu",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "inv_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Số hóa đơn",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "description": "Số hóa đơn đã bỏ số 0 ở đầu — dùng để join, không sửa tay.",
+   "fieldname": "inv_no_norm",
+   "fieldtype": "Data",
+   "label": "Số hóa đơn (chuẩn hóa)",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "inv_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày phát hành",
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_inv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Mã tra cứu hóa đơn do MISA cấp.",
+   "fieldname": "transaction_id",
+   "fieldtype": "Data",
+   "label": "Mã tra cứu",
+   "search_index": 1
+  },
+  {
+   "description": "RefID do ERPNext sinh khi đẩy — khóa nối gốc.",
+   "fieldname": "ref_id",
+   "fieldtype": "Data",
+   "label": "RefID",
+   "search_index": 1
+  },
+  {
+   "description": "Mã do cơ quan thuế cấp (hóa đơn có mã).",
+   "fieldname": "invoice_code",
+   "fieldtype": "Data",
+   "label": "Mã CQT"
+  },
+  {
+   "description": "Giá trị thô của MISA — ý nghĩa xác nhận trong misa_api_contract.md, không suy diễn.",
+   "fieldname": "reference_type",
+   "fieldtype": "Data",
+   "label": "Loại tham chiếu"
+  },
+  {
+   "fieldname": "buyer_section",
+   "fieldtype": "Section Break",
+   "label": "Người mua & tiền"
+  },
+  {
+   "fieldname": "buyer_tax_code",
+   "fieldtype": "Data",
+   "label": "MST người mua",
+   "search_index": 1
+  },
+  {
+   "fieldname": "buyer_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên người mua"
+  },
+  {
+   "fieldname": "column_break_buyer",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "amount_before_vat",
+   "fieldtype": "Currency",
+   "label": "Tiền trước thuế"
+  },
+  {
+   "fieldname": "vat_amount",
+   "fieldtype": "Currency",
+   "label": "Tiền thuế GTGT"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Tổng tiền"
+  },
+  {
+   "fieldname": "status_section",
+   "fieldtype": "Section Break",
+   "label": "Trạng thái & đối soát"
+  },
+  {
+   "fieldname": "publish_status",
+   "fieldtype": "Data",
+   "label": "Trạng thái phát hành"
+  },
+  {
+   "fieldname": "send_tax_status",
+   "fieldtype": "Data",
+   "label": "Trạng thái gửi CQT"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_deleted",
+   "fieldtype": "Check",
+   "label": "Đã xóa bỏ trên MISA"
+  },
+  {
+   "depends_on": "is_deleted",
+   "fieldname": "deleted_date",
+   "fieldtype": "Date",
+   "label": "Ngày xóa bỏ"
+  },
+  {
+   "depends_on": "is_deleted",
+   "fieldname": "deleted_reason",
+   "fieldtype": "Small Text",
+   "label": "Lý do xóa bỏ"
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Chưa xác định",
+   "description": "Hệ thống KHÔNG tự kết luận — kế toán chốt tay khi review.",
+   "fieldname": "origin",
+   "fieldtype": "Select",
+   "label": "Nguồn gốc",
+   "options": "\nTừ ERPNext\nXuất trực tiếp trên MISA\nChưa xác định"
+  },
+  {
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Hóa đơn ERPNext",
+   "options": "Sales Invoice",
+   "search_index": 1
+  },
+  {
+   "default": "Chưa xác định",
+   "fieldname": "match_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Kết quả đối soát",
+   "options": "\nKhớp\nLệch tiền\nChỉ có trên MISA\nĐã hủy\nĐã thay thế\nChưa xác định"
+  },
+  {
+   "fieldname": "match_method",
+   "fieldtype": "Select",
+   "label": "Cách khớp",
+   "options": "\nref_id\ntransaction_id\nso_hoa_don\nmst_ngay_tien\nthu_cong"
+  },
+  {
+   "fieldname": "match_confidence",
+   "fieldtype": "Select",
+   "label": "Độ tin cậy",
+   "options": "\nChắc chắn\nCần review"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú của kế toán"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "meta_section",
+   "fieldtype": "Section Break",
+   "label": "Nguồn dữ liệu"
+  },
+  {
+   "fieldname": "source_api",
+   "fieldtype": "Select",
+   "label": "API nguồn",
+   "options": "\nofficial\nstatement",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_synced_at",
+   "fieldtype": "Datetime",
+   "label": "Đồng bộ lúc",
+   "read_only": 1
+  },
+  {
+   "description": "Bản ghi thô MISA trả về — giữ để đối chiếu khi nghi ngờ.",
+   "fieldname": "raw_json",
+   "fieldtype": "Long Text",
+   "label": "Dữ liệu thô",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-17 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MISA Integration",
+ "name": "MISA Invoice Snapshot",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1,
+   "role": "System Manager"
+  },
+  {
+   "create": 1, "delete": 1, "export": 1, "print": 1, "read": 1, "report": 1, "write": 1,
+   "role": "Accounts Manager"
+  },
+  {
+   "read": 1, "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

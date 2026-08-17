@@ -1,0 +1,171 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-08-17 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "job_type",
+  "trigger_type",
+  "status",
+  "column_break_head",
+  "from_date",
+  "to_date",
+  "started_at",
+  "finished_at",
+  "counter_section",
+  "fetched",
+  "created",
+  "updated",
+  "column_break_counter",
+  "matched",
+  "mismatched",
+  "log_section",
+  "error_log"
+ ],
+ "fields": [
+  {
+   "default": "MISA-SYNC-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Chuỗi đánh số",
+   "options": "MISA-SYNC-.YYYY.-",
+   "read_only": 1
+  },
+  {
+   "fieldname": "job_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Loại job",
+   "options": "\npoll_pending\npull_official\npull_statement\nreconcile",
+   "reqd": 1
+  },
+  {
+   "default": "Manual",
+   "fieldname": "trigger_type",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Kích hoạt bởi",
+   "options": "Manual\nScheduled"
+  },
+  {
+   "default": "Đang chạy",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trạng thái",
+   "options": "\nĐang chạy\nThành công\nThành công một phần\nLỗi"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "label": "Từ ngày"
+  },
+  {
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "label": "Đến ngày"
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Bắt đầu",
+   "read_only": 1
+  },
+  {
+   "fieldname": "finished_at",
+   "fieldtype": "Datetime",
+   "label": "Kết thúc",
+   "read_only": 1
+  },
+  {
+   "fieldname": "counter_section",
+   "fieldtype": "Section Break",
+   "label": "Kết quả"
+  },
+  {
+   "default": "0",
+   "fieldname": "fetched",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Bản ghi kéo về",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "created",
+   "fieldtype": "Int",
+   "label": "Tạo mới",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "updated",
+   "fieldtype": "Int",
+   "label": "Cập nhật",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_counter",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "matched",
+   "fieldtype": "Int",
+   "label": "Khớp",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "mismatched",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Lệch / chưa khớp",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "log_section",
+   "fieldtype": "Section Break",
+   "label": "Nhật ký lỗi"
+  },
+  {
+   "description": "Chỉ chứa mã lỗi và mô tả — KHÔNG chứa token/mật khẩu.",
+   "fieldname": "error_log",
+   "fieldtype": "Long Text",
+   "label": "Nhật ký lỗi",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-17 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MISA Integration",
+ "name": "MISA Sync Run",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1,
+   "role": "System Manager"
+  },
+  {
+   "delete": 1, "export": 1, "read": 1, "report": 1,
+   "role": "Accounts Manager"
+  },
+  {
+   "read": 1, "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 0
+}
