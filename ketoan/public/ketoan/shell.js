@@ -25,7 +25,7 @@ const ROUTES = [
   { pattern: "/doi-chieu-npp", view: "views/npp.js", cap: "npp", ws: "npp", title: "Đối chiếu NPP" },
   { pattern: "/khach/:id", view: "views/customer.js", cap: "salesany", title: "360° khách" },
   { pattern: "/tien-ich", view: "views/utilities.js", cap: "salesany", title: "Tiện ích" },
-  { pattern: "/hoa-don-vat", view: "views/vat.js", cap: "salesany", title: "Hóa đơn VAT" },
+  { pattern: "/hoa-don-vat", view: "views/vat.js", cap: "salesany", ws: "vat", title: "Hóa đơn VAT" },
   { pattern: "/cong-no-ncc", view: "views/payables.js", cap: "purchase", ws: "purchase", title: "Công nợ phải trả" },
   { pattern: "/ncc/:id", view: "views/supplier.js", cap: "purchase", ws: "purchase", title: "360° NCC" },
   { pattern: "/quy", view: "views/cash.js", cap: "gl", ws: "gl", title: "Sổ quỹ" },
@@ -63,6 +63,9 @@ function renderShell() {
           ${NAV_WS.map(
             (w) => html`<a class="kt-nav-item" data-nav="${w.key}" href="#${workHome(w)}"><i class="fas ${w.icon}"></i><span>${w.label}</span></a>`
           )}
+          ${CAPS.salesany
+            ? html`<a class="kt-nav-item" data-nav="vat" href="#/hoa-don-vat"><i class="fas fa-receipt"></i><span>Hóa đơn VAT</span></a>`
+            : ""}
         </nav>
         <main class="kt-main" id="kt-view"><div class="kt-boot"><div class="kt-spinner"></div></div></main>
       </div>
