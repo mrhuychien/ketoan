@@ -83,14 +83,21 @@ def _status(snap, si_name, tolerance):
     si = frappe.db.get_value(
         "Sales Invoice", si_name, ["net_total", "total_taxes_and_charges", "grand_total"], as_dict=True
     ) or {}
+    # Endpoint danh sách của MISA KHÔNG trả tách thuế — TotalAmountWithoutVAT và
+    # TotalVATAmount về 0.0 ở cả 30/30 bản ghi thật (§H.2). So 0 đó với net_total
+    # thật của ERPNext thì MỌI hóa đơn khớp đều bị gắn "Lệch tiền" — rổ cảnh báo
+    # đầy báo động giả, kế toán mất niềm tin rồi bỏ qua cả cảnh báo thật.
+    #
+    # Nguyên tắc: chỉ so vế nào MISA THẬT SỰ có số. Riêng tổng tiền thì luôn có
+    # nên luôn so — và một mình nó đã đủ bắt lệch tiền.
     pairs = (
-        (snap.get("amount_before_vat"), si.get("net_total")),
-        (snap.get("vat_amount"), si.get("total_taxes_and_charges")),
-        (snap.get("total_amount"), si.get("grand_total")),
+        ("truoc_thue", snap.get("amount_before_vat"), si.get("net_total"), False),
+        ("thue", snap.get("vat_amount"), si.get("total_taxes_and_charges"), False),
+        ("tong", snap.get("total_amount"), si.get("grand_total"), True),
     )
-    for m, e in pairs:
-        if m in (None, 0) and not e:
-            continue
+    for _key, m, e, always in pairs:
+        if not always and not flt(m):
+            continue   # MISA không cấp số cho vế này → không có gì để so
         if abs(abs(flt(m)) - abs(flt(e))) > flt(tolerance):
             return "Lệch tiền"
     return "Khớp"
@@ -109,6 +116,8 @@ def match_snapshots(from_date, to_date, relink=0):
     guard_manager()
     tolerance = flt(get_settings().amount_tolerance) or 1.0
 
+    # Snapshot thiếu inv_date (file nhập tay có thể thiếu) sẽ bị "between" loại
+    # sạch — chúng lại chính là loại dễ thành hóa đơn mồ côi nhất. Gộp riêng.
     filters = {"inv_date": ("between", [from_date, to_date])}
     if not int(relink or 0):
         filters["sales_invoice"] = ("is", "not set")
@@ -163,6 +172,18 @@ def relink_snapshot(snapshot, sales_invoice=None, note=None):
     guard_manager()
     if sales_invoice and not frappe.db.exists("Sales Invoice", sales_invoice):
         frappe.throw(frappe._("Không tìm thấy hóa đơn {0}").format(sales_invoice))
+
+    # Một hóa đơn ERPNext chỉ được nối với MỘT hóa đơn MISA. Nối chồng là ghi
+    # nhận hai hóa đơn điện tử cho cùng một lần bán.
+    if sales_invoice:
+        taken = frappe.db.get_value(
+            "MISA Invoice Snapshot",
+            {"sales_invoice": sales_invoice, "name": ("!=", snapshot)},
+            ["name", "inv_series", "inv_no"], as_dict=True)
+        if taken:
+            frappe.throw(frappe._(
+                "Hóa đơn {0} đã được nối với hóa đơn MISA {1} số {2}. Gỡ liên kết cũ trước."
+            ).format(sales_invoice, taken.inv_series, taken.inv_no))
 
     snap = frappe.db.get_value(
         "MISA Invoice Snapshot", snapshot,

@@ -34,6 +34,7 @@ PO_IN_NAME = {"Mega Market", "Winmart", "ST KingFood Mart"}
 PO_COMMA = {"BigC"}
 
 AMOUNT_GUARD = 1.0  # đồng — lệch quá mức này thì DỪNG, không đẩy
+PRICE_PRECISION = 2  # số lẻ của đơn giá gửi MISA
 
 # Đường dẫn đẩy hóa đơn có mã. HẬU TỐ /code, không phải tiền tố code/ như
 # đường đọc — xác minh từ luồng đang chạy trên production (§L.3).
@@ -110,13 +111,17 @@ def _line(row, idx, ref_id, by_box, vat_rate):
     cf = flt(row.conversion_factor) or 1.0
     if by_box:
         qty = flt(row.stock_qty) or flt(row.qty) * cf
-        unit_price = flt(row.net_rate) / cf if cf else flt(row.net_rate)
+        # LÀM TRÒN đơn giá. Chia 1.000.000 cho 48 ra 20833,333333333332; gửi
+        # nguyên số đó thì trên hóa đơn in và trong XML gửi cơ quan thuế,
+        # Số lượng × Đơn giá KHÔNG bằng Thành tiền — hóa đơn tự mâu thuẫn.
+        unit_price = flt(flt(row.net_rate) / cf, PRICE_PRECISION) if cf else flt(row.net_rate)
         unit_name = "Gói" if row.item_code in GOI_ITEMS else "Hộp"
     else:
         qty = flt(row.qty)
         unit_price = flt(row.net_rate)
         unit_name = row.uom
 
+    # Thành tiền tính TỪ đơn giá đã làm tròn, để ba con số trên hóa đơn nhất quán.
     amount = flt(qty * unit_price, 2)
     vat_amount = flt(amount * vat_rate / 100.0, 2)
 
@@ -221,10 +226,20 @@ def build_payload(si, settings):
         ("tổng tiền", flt(total_net + total_vat, 2), flt(si.grand_total)),
     ):
         if abs(abs(built) - abs(book)) > AMOUNT_GUARD:
+            hint = ""
+            if by_box:
+                # Nguyên nhân hay gặp nhất khi xuất theo hộp: đơn giá thùng không
+                # chia hết cho số hộp/thùng, làm tròn xong thành tiền lệch vài đồng.
+                le = [r.item_code for r in si.items
+                      if flt(r.conversion_factor) > 1
+                      and flt(flt(r.net_rate) / flt(r.conversion_factor), PRICE_PRECISION)
+                      * flt(r.conversion_factor) != flt(r.net_rate)]
+                if le:
+                    hint = _(" Mặt hàng đơn giá không chia hết theo hộp: {0}.").format(", ".join(le[:5]))
             frappe.throw(
-                _("Không đẩy hóa đơn {0}: {1} dựng ra {2:,.0f} nhưng trên sổ là {3:,.0f}. "
+                _("Không đẩy hóa đơn {0}: {1} dựng ra {2:,.0f} nhưng trên sổ là {3:,.0f}.{4} "
                   "Kiểm tra lại thuế suất / đơn giá trước khi phát hành.")
-                .format(si.name, label, built, book)
+                .format(si.name, label, built, book, hint)
             )
 
     payload = {

@@ -152,15 +152,34 @@ function bind(container, state, ov) {
     const old = sync.innerHTML;
     sync.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang đồng bộ…';
     try {
+      // Đồng bộ chạy NỀN: một tháng có tới hơn nghìn hóa đơn, chạy trong request
+      // là chắc chắn timeout gateway và để lại dữ liệu nạp dở.
       const r = await api.vatSync({ from_date: state.from, to_date: state.to });
-      toast(`Đồng bộ xong: kéo ${r.pulled?.fetched ?? 0} hóa đơn · khớp ${r.matched?.matched ?? 0} · lệch ${r.matched?.mismatched ?? 0}`, "success");
-      location.reload();
+      toast(r.message || "Đã xếp lịch đồng bộ, đang chạy nền", "success");
+      sync.innerHTML = '<i class="fas fa-hourglass-half"></i> Đang chạy nền…';
+      frappe_hint(container);
     } catch (e) {
       toast(e.message, "error");
       sync.disabled = false;
       sync.innerHTML = old;
     }
   });
+}
+
+// Đồng bộ chạy nền nên trang không tự có dữ liệu mới — nói rõ chứ đừng để
+// người dùng ngồi chờ một cái sẽ không tự đến.
+function frappe_hint(container) {
+  const head = container.querySelector(".kt-view-head");
+  if (!head || container.querySelector("#vat-bg-note")) return;
+  const note = document.createElement("div");
+  note.id = "vat-bg-note";
+  note.className = "kt-card kt-mb";
+  note.style.borderLeft = "4px solid var(--kt-primary)";
+  setHTML(note, html`<div class="kt-card-body kt-sub">
+    Đồng bộ đang chạy nền. Vài phút nữa <b>tải lại trang</b> để xem kết quả —
+    tiến độ chi tiết xem ở <a target="_blank" href="/desk/misa-sync-run">MISA Sync Run</a>.
+  </div>`);
+  head.insertAdjacentElement("afterend", note);
 }
 
 async function loadTab(container, state) {

@@ -659,6 +659,11 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
     # Đối chiếu số lượng: MISA khai bao nhiêu, ta ghi được bao nhiêu.
     # KHÔNG được im lặng khi thiếu — trang sẽ báo "không có hóa đơn ngoài sổ"
     # trong khi thực tế chưa kéo hết, tức là sai theo hướng nguy hiểm nhất.
+    if stat["fetched"] and not reported:
+        errors.append(
+            "Không đọc được tổng số MISA khai (recordsTotal) nên KHÔNG đối chiếu được đã kéo "
+            "đủ chưa. Coi kết quả là chưa đầy đủ cho tới khi kiểm tay."
+        )
     if reported and stat["fetched"] < reported:
         errors.append(
             f"KÉO THIẾU: MISA khai {reported} hóa đơn trong khoảng {from_date} → {to_date} "

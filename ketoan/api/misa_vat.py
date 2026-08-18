@@ -14,6 +14,7 @@ bên xuất hóa đơn mà không có trong sổ.
 """
 
 import frappe
+from frappe import _
 from frappe.utils import add_months, flt, nowdate
 
 from ketoan.api._guard import guard_sales_any, is_chief
@@ -73,12 +74,16 @@ def get_overview(company=None, from_date=None, to_date=None):
         WHERE inv_date BETWEEN %(fd)s AND %(td)s AND match_status = 'Lệch tiền'
     """, p, as_dict=True)[0]
 
-    # Hóa đơn ERPNext bị MISA báo lệch mà chưa có snapshot — vẫn phải đếm.
+    # Hóa đơn ERPNext bị MISA báo lệch mà CHƯA có snapshot nào trỏ tới — phải
+    # cộng thêm chứ không lấy max: hai tập này rời nhau, max sẽ đếm thiếu.
     si_mismatch = frappe.db.sql("""
-        SELECT COUNT(*) AS cnt FROM `tabSales Invoice`
-        WHERE docstatus = 1 AND company = %(company)s
-          AND posting_date BETWEEN %(fd)s AND %(td)s
-          AND custom_misa_status = 'Lệch tiền'
+        SELECT COUNT(*) AS cnt FROM `tabSales Invoice` si
+        WHERE si.docstatus = 1 AND si.company = %(company)s
+          AND si.posting_date BETWEEN %(fd)s AND %(td)s
+          AND si.custom_misa_status = 'Lệch tiền'
+          AND NOT EXISTS (
+              SELECT 1 FROM `tabMISA Invoice Snapshot` s WHERE s.sales_invoice = si.name
+          )
     """, p, as_dict=True)[0]
 
     last = frappe.get_all(
@@ -96,7 +101,7 @@ def get_overview(company=None, from_date=None, to_date=None):
             "linked": {"count": linked.cnt, "amount": flt(linked.amt)},
             "erp_only": {"count": erp_only.cnt, "amount": flt(erp_only.amt)},
             "misa_only": {"count": misa_only.cnt, "amount": flt(misa_only.amt)},
-            "mismatch": {"count": max(mismatch.cnt, si_mismatch.cnt), "amount": flt(mismatch.amt)},
+            "mismatch": {"count": mismatch.cnt + si_mismatch.cnt, "amount": flt(mismatch.amt)},
         },
         "last_sync": last[0] if last else None,
         "has_snapshot": has_snapshot,
@@ -194,17 +199,37 @@ def search_invoices(txt=None, company=None, limit=20):
 
 @frappe.whitelist()
 def sync_now(company=None, from_date=None, to_date=None):
-    """Nút "Đồng bộ MISA" trên trang: kéo danh sách + hỏi số hóa đơn + khớp.
+    """Nút "Đồng bộ MISA": đưa việc kéo + hỏi số + khớp sang hàng đợi nền.
 
-    Chỉ kế toán trưởng. Chạy đồng bộ trong request vì khoảng ngày mặc định là
-    1 tháng; kéo dài hơn thì dùng bench execute cho khỏi timeout gateway.
+    Chỉ kế toán trưởng.
+
+    KHÔNG chạy trong request: một tháng có tới 1260 hóa đơn (§P) và bước hỏi số
+    gọi MISA MỘT LẦN cho mỗi hóa đơn — chạy đồng bộ là chắc chắn timeout gateway,
+    và tệ hơn là timeout GIỮA CHỪNG để lại dữ liệu nạp dở.
     """
     from ketoan.api._guard import guard_manager
-    from ketoan.api.misa_reconcile import match_snapshots
-    from ketoan.api.misa_sync import _poll_pending, _pull_invoices
 
     guard_manager()
     from_date, to_date = _range(from_date, to_date)
+
+    frappe.enqueue(
+        "ketoan.api.misa_vat._run_sync",
+        queue="long", timeout=1800,
+        from_date=from_date, to_date=to_date,
+    )
+    return {
+        "queued": True,
+        "from_date": from_date,
+        "to_date": to_date,
+        "message": _("Đã xếp lịch đồng bộ {0} → {1}. Chạy nền vài phút, xem tiến độ ở MISA Sync Run.")
+        .format(from_date, to_date),
+    }
+
+
+def _run_sync(from_date, to_date):
+    """Thân của sync_now — chạy trong hàng đợi long."""
+    from ketoan.api.misa_reconcile import match_snapshots
+    from ketoan.api.misa_sync import _poll_pending, _pull_invoices
 
     result = {"from_date": from_date, "to_date": to_date}
 
