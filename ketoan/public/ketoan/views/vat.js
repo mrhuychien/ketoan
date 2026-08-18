@@ -30,6 +30,7 @@ export async function render({ container, query }) {
     from: query?.from || monthsAgo(1),
     to: query?.to || todayISO(),
     search: "",
+    page: 1,
   };
 
   let ov;
@@ -59,6 +60,7 @@ function shell(state, ov) {
         <input type="date" class="kt-input kt-input--sm" id="vat-from" value="${state.from}">
         <span class="kt-sub">→</span>
         <input type="date" class="kt-input kt-input--sm" id="vat-to" value="${state.to}">
+        ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-legacy"><i class="fas fa-right-left"></i> Chuyển số HĐ cũ</button>` : ""}
         ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-import"><i class="fas fa-file-import"></i> Nhập file MISA</button>` : ""}
         ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-sync"><i class="fas fa-rotate"></i> Đồng bộ MISA</button>` : ""}
       </div>
@@ -118,6 +120,7 @@ function bind(container, state, ov) {
     const btn = e.target.closest("button[data-tab]");
     if (!btn) return;
     state.tab = btn.dataset.tab;
+    state.page = 1;   // rổ khác, số trang cũ vô nghĩa
     container.querySelectorAll("#vat-tabs button").forEach((x) => x.classList.toggle("is-active", x === btn));
     container.querySelector("#vat-hint").textContent = BUCKETS.find((x) => x.key === state.tab).hint;
     reload();
@@ -139,12 +142,16 @@ function bind(container, state, ov) {
   let timer = null;
   container.querySelector("#vat-search").addEventListener("input", (e) => {
     state.search = e.target.value.trim();
+    state.page = 1;   // lọc lại thì phải về trang đầu, không thì rơi vào trang trống
     clearTimeout(timer);
     timer = setTimeout(() => loadTab(container, state), 350);
   });
 
   const imp = container.querySelector("#vat-import");
   if (imp) imp.addEventListener("click", () => pickFile(container, state));
+
+  const leg = container.querySelector("#vat-legacy");
+  if (leg) leg.addEventListener("click", () => openLegacyModal());
 
   const sync = container.querySelector("#vat-sync");
   if (sync) sync.addEventListener("click", async () => {
@@ -188,21 +195,79 @@ async function loadTab(container, state) {
   setHTML(body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
   let res;
   try {
-    res = await api.vatInvoices(state.tab, { from_date: state.from, to_date: state.to, search: state.search });
+    res = await api.vatInvoices(state.tab, {
+      from_date: state.from, to_date: state.to, search: state.search, page: state.page,
+    });
   } catch (e) {
     setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
     return;
+  }
+  // Xóa dữ liệu / đổi bộ lọc có thể làm trang đang xem rơi ra ngoài phạm vi.
+  // Rơi vào trang trống mà báo "không có hóa đơn nào" là nói dối người dùng.
+  if (!res.rows.length && (res.total || 0) > 0 && state.page > 1) {
+    state.page = res.pages || 1;
+    return loadTab(container, state);
   }
   if (!res.rows.length) {
     setHTML(body, html`<div class="kt-empty"><i class="fas fa-circle-check"></i><p>Không có hóa đơn nào trong rổ này.</p></div>`);
     return;
   }
-  setHTML(body, res.source === "erp" ? erpTable(state.tab, res.rows) : misaTable(state.tab, res.rows));
+  setHTML(body, res.source === "erp" ? erpTable(state.tab, res.rows, res) : misaTable(state.tab, res.rows, res));
   if (res.source === "misa") bindMisaRows(container, state);
+  bindPager(container, state);
+}
+
+// ── Chia trang ─────────────────────────────────────────────────────────────
+// Tổng số ở đây là tổng THẬT của cả rổ (backend đếm riêng), không phải số dòng
+// đang hiển thị — đọc nhầm hai con số này là đếm sót hóa đơn.
+function pager(res, unit) {
+  const total = res.total || 0;
+  const pages = res.pages || 1;
+  const page = res.page || 1;
+  const from = (page - 1) * (res.page_size || 20) + 1;
+  const to = from + (res.rows.length - 1);
+
+  const btn = (p, label, disabled, active) => html`<button
+    class="kt-btn kt-btn--sm ${active ? "" : "kt-btn--outline"}"
+    data-page="${p}" ${disabled ? "disabled" : ""}>${label}</button>`;
+
+  // Cửa sổ 5 trang quanh trang hiện tại — 63 trang mà in hết là vỡ hàng.
+  let lo = Math.max(1, page - 2);
+  const hi = Math.min(pages, lo + 4);
+  lo = Math.max(1, hi - 4);
+  const nums = [];
+  for (let p = lo; p <= hi; p++) nums.push(p);
+
+  return html`
+    <div class="kt-pager" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:10px">
+      <span class="kt-sub">${from}–${to} / ${total} ${unit}</span>
+      ${pages > 1 ? html`<span style="margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        ${btn(1, html`<i class="fas fa-angles-left"></i>`, page <= 1, false)}
+        ${btn(page - 1, html`<i class="fas fa-angle-left"></i>`, page <= 1, false)}
+        ${lo > 1 ? html`<span class="kt-sub">…</span>` : ""}
+        ${nums.map((p) => btn(p, String(p), false, p === page))}
+        ${hi < pages ? html`<span class="kt-sub">…</span>` : ""}
+        ${btn(page + 1, html`<i class="fas fa-angle-right"></i>`, page >= pages, false)}
+        ${btn(pages, html`<i class="fas fa-angles-right"></i>`, page >= pages, false)}
+      </span>` : ""}
+    </div>`;
+}
+
+function bindPager(container, state) {
+  container.querySelectorAll(".kt-pager button[data-page]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const p = parseInt(b.dataset.page, 10);
+      if (!p || p === state.page) return;
+      state.page = p;
+      loadTab(container, state);
+      const body = container.querySelector("#vat-body");
+      if (body) body.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
 }
 
 // ── Bảng phía ERPNext ──────────────────────────────────────────────────────
-function erpTable(tab, rows) {
+function erpTable(tab, rows, res) {
   const linked = tab === "linked";
   return html`
     <div class="kt-card"><div class="kt-card-body">
@@ -215,7 +280,7 @@ function erpTable(tab, rows) {
         </tr></thead>
         <tbody>${rows.map((r) => html`<tr>
           <td><a target="_blank" href="/desk/sales-invoice/${q(r.name)}">${r.name}</a>
-            ${r.is_return ? html`<span class="kt-badge kt-badge--amber">trả hàng</span>` : ""}</td>
+            ${r.is_return ? html`<span class="kt-badge kt-badge--yellow">trả hàng</span>` : ""}</td>
           <td>${formatDate(r.posting_date)}</td>
           <td class="kt-cell-wrap">${r.customer_name || r.customer}</td>
           <td class="num">${formatVND(r.net_total)}</td>
@@ -229,12 +294,12 @@ function erpTable(tab, rows) {
           </td>
         </tr>`)}</tbody>
       </table></div>
-      <div class="kt-sub" style="margin-top:8px">${rows.length} hóa đơn</div>
+      ${pager(res, "hóa đơn")}
     </div></div>`;
 }
 
 // ── Bảng phía MISA ─────────────────────────────────────────────────────────
-function misaTable(tab, rows) {
+function misaTable(tab, rows, res) {
   return html`
     <div class="kt-card"><div class="kt-card-body">
       <div class="kt-table-wrap"><table class="kt-table">
@@ -250,7 +315,7 @@ function misaTable(tab, rows) {
           <td class="num">${formatVND(r.vat_amount)}</td>
           <td class="num">${formatVND(r.total_amount)}</td>
           <td>${statusBadge(r.match_status)}
-            ${r.match_confidence === "Cần review" ? html`<span class="kt-badge kt-badge--amber">cần review</span>` : ""}</td>
+            ${r.match_confidence === "Cần review" ? html`<span class="kt-badge kt-badge--yellow">cần review</span>` : ""}</td>
           <td>${r.sales_invoice
             ? html`<a target="_blank" href="/desk/sales-invoice/${q(r.sales_invoice)}">${r.sales_invoice}</a>`
             : html`<span class="kt-sub">chưa nối</span>`}</td>
@@ -261,7 +326,7 @@ function misaTable(tab, rows) {
           </td>
         </tr>`)}</tbody>
       </table></div>
-      <div class="kt-sub" style="margin-top:8px">${rows.length} hóa đơn trên MISA</div>
+      ${pager(res, "hóa đơn trên MISA")}
     </div></div>`;
 }
 
@@ -269,11 +334,11 @@ function statusBadge(s) {
   const map = {
     "Khớp": "green", "Đã phát hành": "green",
     "Lệch tiền": "red", "Phát hành lỗi": "red", "Chỉ có trên MISA": "red",
-    "Đã hủy": "grey", "Đã thay thế": "amber",
-    "Đã đẩy (nháp)": "amber", "Chưa đẩy": "amber", "Chưa xác định": "grey",
+    "Đã hủy": "gray", "Đã thay thế": "yellow",
+    "Đã đẩy (nháp)": "yellow", "Chưa đẩy": "yellow", "Chưa xác định": "gray",
   };
-  if (!s) return html`<span class="kt-badge kt-badge--grey">—</span>`;
-  return html`<span class="kt-badge kt-badge--${map[s] || "grey"}">${s}</span>`;
+  if (!s) return html`<span class="kt-badge kt-badge--gray">—</span>`;
+  return html`<span class="kt-badge kt-badge--${map[s] || "gray"}">${s}</span>`;
 }
 
 // ── Chốt liên kết tay ──────────────────────────────────────────────────────
@@ -313,7 +378,7 @@ function openLinkModal(container, state, snapshot) {
           <td>${r.name}</td><td>${formatDate(r.posting_date)}</td>
           <td class="kt-cell-wrap">${r.customer_name}</td>
           <td class="num">${formatVND(r.grand_total)}</td>
-          <td>${r.inv_no ? html`<span class="kt-badge kt-badge--amber">đã có số ${r.inv_no}</span>` : ""}</td>
+          <td>${r.inv_no ? html`<span class="kt-badge kt-badge--yellow">đã có số ${r.inv_no}</span>` : ""}</td>
           <td class="num"><button class="kt-btn kt-btn--sm" data-pick="${escapeHtml(r.name)}">Chọn</button></td>
         </tr>`)}</tbody></table>`);
         box.querySelectorAll("button[data-pick]").forEach((b) => {
@@ -440,6 +505,178 @@ async function showPreview(container, state, content, filename) {
       const im = r.imported || {};
       const mt = r.matched || {};
       toast(`Nạp xong: ${im.created || 0} mới · ${im.updated || 0} cập nhật · khớp ${mt.matched || 0} · lệch ${mt.mismatched || 0}`, "success");
+      modal.close();
+      location.reload();
+    } catch (e) {
+      toast(e.message, "error");
+      go.disabled = false;
+      go.innerHTML = "Thử lại";
+    }
+  });
+}
+
+
+// ── Chuyển số hóa đơn nhập tay sang nhóm field MISA ─────────────────────────
+// Trước khi có tích hợp, kế toán gõ số vào `vn_einvoice_number`. Đối soát chỉ
+// đọc `custom_misa_inv_no`, nên hóa đơn cũ trông như chưa có số. Màn hình này
+// chép ngược — XEM TRƯỚC rồi mới ghi, vì ghi sai số hóa đơn là sai báo cáo thuế.
+function openLegacyModal() {
+  const modal = openModal({
+    title: "Chuyển số hóa đơn nhập tay sang nhóm MISA",
+    icon: "fa-right-left",
+    maxWidth: 900,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  const st = { year: "", series: "" };
+  loadLegacy(modal, st);
+}
+
+async function loadLegacy(modal, st) {
+  setHTML(modal.body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let p;
+  try {
+    p = await api.vatLegacyPreview({ year: st.year || undefined, default_series: st.series || undefined });
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+  if (!p.supported) {
+    setHTML(modal.body, html`<div class="kt-empty"><p>${p.note}</p></div>`);
+    return;
+  }
+
+  const years = p.years || [];
+  const opts = p.default_series_options || [];
+
+  setHTML(modal.body, html`
+    <p class="kt-sub">
+      Chép <b>vn_einvoice_number</b> → <b>Số hóa đơn MISA</b> cho hóa đơn cũ.
+      Chỉ ghi khi ô số MISA đang trống — không đè số do đồng bộ tự động điền.
+      Mã tra cứu cũ dạng uuid là rác của luồng cũ nên <b>không</b> được chép.
+    </p>
+
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+      <div>
+        <label class="kt-label">Năm</label>
+        <select class="kt-input kt-input--sm" id="lg-year">
+          <option value="">Tất cả</option>
+          ${years.map((y) => html`<option value="${y.year}" ${String(st.year) === String(y.year) ? "selected" : ""}>
+            ${y.year} (${y.total})</option>`)}
+        </select>
+      </div>
+      <div>
+        <label class="kt-label">Ký hiệu mặc định (dùng cho dòng chỉ có số)</label>
+        ${opts.length
+          ? html`<select class="kt-input kt-input--sm" id="lg-series">
+              <option value="">— không đặt —</option>
+              ${opts.map((s) => html`<option value="${s}" ${st.series === s ? "selected" : ""}>${s}</option>`)}
+            </select>`
+          : html`<input class="kt-input kt-input--sm" id="lg-series" placeholder="vd 1C25MHG" value="${st.series}">`}
+      </div>
+    </div>
+
+    <div class="kt-stats kt-mb">
+      <div class="kt-stat"><div class="kt-stat-label">Chép được</div>
+        <div class="kt-stat-value">${p.ok}</div>
+        <div class="kt-stat-sub">${p.on_misa} khớp sẵn bên MISA</div></div>
+      <div class="kt-stat"><div class="kt-stat-label">Bỏ qua</div>
+        <div class="kt-stat-value ${p.skipped ? "warn" : ""}">${p.skipped}</div></div>
+      <div class="kt-stat"><div class="kt-stat-label">Không có ngày phát hành</div>
+        <div class="kt-stat-value ${p.no_date ? "warn" : ""}">${p.no_date}</div>
+        <div class="kt-stat-sub">để trống, không lấy ngày ghi sổ thay</div></div>
+    </div>
+
+    ${p.truncated
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)">Danh sách bị cắt bớt</b>
+          <div class="kt-sub">Còn hóa đơn chưa được đưa vào lượt này. Chạy từng năm một để chép hết.</div>
+        </div></div>`
+      : ""}
+
+    ${years.length > 1 || (years.length === 1 && !st.year)
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <div class="kt-sub" style="margin-bottom:6px">Ký hiệu đọc được theo từng năm — chạy riêng từng năm nếu ký hiệu khác nhau</div>
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Năm</th><th class="num">Tổng</th><th class="num">Chép được</th><th class="num">Bỏ qua</th><th>Ký hiệu</th></tr></thead>
+            <tbody>${years.map((y) => html`<tr>
+              <td>${y.year || "—"}</td><td class="num">${y.total}</td>
+              <td class="num">${y.ok}</td>
+              <td class="num ${y.skipped ? "warn" : ""}">${y.skipped}</td>
+              <td>${(y.series || []).map((s) => html`<span class="kt-badge kt-badge--gray">${s[0]} × ${s[1]}</span> `)}</td>
+            </tr>`)}</tbody>
+          </table></div></div></div>`
+      : ""}
+
+    ${(p.problem_counts || []).length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body">
+          <b>${p.skipped} dòng KHÔNG được chép</b>
+          <div class="kt-sub" style="margin:6px 0">Máy không đoán số hóa đơn. Những dòng này phải sửa tay trên Sales Invoice.</div>
+          <div class="kt-table-wrap"><table class="kt-table">
+            <tbody>${p.problem_counts.map((c) => html`<tr><td>${c.label}</td><td class="num">${c.count}</td></tr>`)}</tbody>
+          </table></div>
+          <details style="margin-top:8px"><summary class="kt-sub" style="cursor:pointer">Xem chi tiết ${Math.min(p.skipped, 100)} dòng đầu</summary>
+            <div class="kt-table-wrap" style="max-height:240px;overflow:auto;margin-top:6px"><table class="kt-table">
+              <thead><tr><th>Hóa đơn</th><th>Ngày</th><th>Giá trị đang có</th><th>Lý do</th></tr></thead>
+              <tbody>${(p.problems || []).map((x) => html`<tr>
+                <td><a target="_blank" href="/desk/sales-invoice/${q(x.name)}">${x.name}</a></td>
+                <td>${formatDate(x.posting_date)}</td>
+                <td><code>${x.legacy_no}</code></td>
+                <td>${x.reason_label}${x.conflict_with ? html` — ${x.conflict_with}` : ""}</td>
+              </tr>`)}</tbody>
+            </table></div>
+          </details>
+        </div></div>`
+      : ""}
+
+    ${(p.sample || []).length
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <div class="kt-sub" style="margin-bottom:6px">${p.sample.length} dòng đầu sẽ được ghi — kiểm giúp ký hiệu và số</div>
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Hóa đơn</th><th>Ngày</th><th>Khách</th><th>Đang có</th><th>→ Ký hiệu</th><th>→ Số</th><th>Bên MISA</th></tr></thead>
+            <tbody>${p.sample.map((x) => html`<tr>
+              <td><a target="_blank" href="/desk/sales-invoice/${q(x.name)}">${x.name}</a></td>
+              <td>${formatDate(x.posting_date)}</td>
+              <td class="kt-cell-wrap">${x.customer_name || "—"}</td>
+              <td><code>${x.legacy_no}</code></td>
+              <td>${x.inv_series}</td><td><b>${x.inv_no}</b></td>
+              <td>${x.on_misa
+                ? html`<span class="kt-badge kt-badge--green">có</span>`
+                : html`<span class="kt-sub">chưa thấy</span>`}</td>
+            </tr>`)}</tbody>
+          </table></div></div></div>`
+      : ""}
+
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="kt-btn kt-btn--outline" id="lg-cancel">Đóng</button>
+      <button class="kt-btn" id="lg-go" ${p.ok && p.can_run ? "" : "disabled"}>
+        <i class="fas fa-right-left"></i> Chép ${p.ok} số hóa đơn
+      </button>
+    </div>
+  `);
+
+  const reload = () => {
+    st.year = modal.body.querySelector("#lg-year").value;
+    st.series = modal.body.querySelector("#lg-series").value.trim();
+    loadLegacy(modal, st);
+  };
+  modal.body.querySelector("#lg-year").addEventListener("change", reload);
+  modal.body.querySelector("#lg-series").addEventListener("change", reload);
+  modal.body.querySelector("#lg-cancel").addEventListener("click", () => modal.close());
+
+  const go = modal.body.querySelector("#lg-go");
+  if (go) go.addEventListener("click", async () => {
+    if (!confirm(`Ghi số hóa đơn cho ${p.ok} chứng từ đã ghi sổ. Xác nhận?`)) return;
+    go.disabled = true;
+    go.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang chép…';
+    try {
+      const r = await api.vatLegacyCommit({
+        year: st.year || undefined,
+        default_series: st.series || undefined,
+        // Vân tay của đúng kế hoạch vừa hiện trên màn hình. Ai đó sửa số hóa
+        // đơn trong lúc này thì backend dừng, không ghi gì.
+        expected_hash: p.plan_hash,
+      });
+      toast(r.message + (r.rematch_queued ? " · đang đối soát lại ở nền" : ""), "success");
       modal.close();
       location.reload();
     } catch (e) {

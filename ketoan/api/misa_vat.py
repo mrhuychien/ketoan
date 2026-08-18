@@ -113,13 +113,18 @@ def get_overview(company=None, from_date=None, to_date=None):
 # Danh sách từng rổ
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _si_rows(company, from_date, to_date, linked: bool, search, limit):
-    p = {"company": company, "fd": from_date, "td": to_date, "limit": limit}
+def _si_rows(company, from_date, to_date, linked: bool, search, limit, offset=0):
+    p = {"company": company, "fd": from_date, "td": to_date, "limit": limit, "offset": offset}
     where = "IFNULL(si.custom_misa_inv_no, '') != ''" if linked else "IFNULL(si.custom_misa_inv_no, '') = ''"
     if search:
         p["kw"] = f"%{search}%"
         where += " AND (si.name LIKE %(kw)s OR si.customer_name LIKE %(kw)s OR si.custom_misa_inv_no LIKE %(kw)s)"
-    return frappe.db.sql(f"""
+    total = frappe.db.sql(f"""
+        SELECT COUNT(*) FROM `tabSales Invoice` si
+        WHERE si.docstatus = 1 AND si.company = %(company)s
+          AND si.posting_date BETWEEN %(fd)s AND %(td)s AND {where}
+    """, p)[0][0]
+    rows = frappe.db.sql(f"""
         SELECT si.name, si.posting_date, si.customer, si.customer_name,
                si.net_total, si.total_taxes_and_charges, si.grand_total, si.is_return,
                si.custom_misa_inv_series AS inv_series, si.custom_misa_inv_no AS inv_no,
@@ -131,17 +136,22 @@ def _si_rows(company, from_date, to_date, linked: bool, search, limit):
         WHERE si.docstatus = 1 AND si.company = %(company)s
           AND si.posting_date BETWEEN %(fd)s AND %(td)s AND {where}
         ORDER BY si.posting_date DESC, si.name DESC
-        LIMIT %(limit)s
+        LIMIT %(limit)s OFFSET %(offset)s
     """, p, as_dict=True)
+    return rows, total
 
 
-def _snapshot_rows(from_date, to_date, where_extra, search, limit):
-    p = {"fd": from_date, "td": to_date, "limit": limit}
+def _snapshot_rows(from_date, to_date, where_extra, search, limit, offset=0):
+    p = {"fd": from_date, "td": to_date, "limit": limit, "offset": offset}
     where = where_extra
     if search:
         p["kw"] = f"%{search}%"
         where += " AND (s.inv_no LIKE %(kw)s OR s.buyer_name LIKE %(kw)s OR s.buyer_tax_code LIKE %(kw)s)"
-    return frappe.db.sql(f"""
+    total = frappe.db.sql(f"""
+        SELECT COUNT(*) FROM `tabMISA Invoice Snapshot` s
+        WHERE s.inv_date BETWEEN %(fd)s AND %(td)s AND {where}
+    """, p)[0][0]
+    rows = frappe.db.sql(f"""
         SELECT s.name, s.inv_series, s.inv_no, s.inv_date, s.buyer_name, s.buyer_tax_code,
                s.amount_before_vat, s.vat_amount, s.total_amount, s.transaction_id,
                s.invoice_code, s.sales_invoice, s.match_status, s.match_method,
@@ -149,30 +159,49 @@ def _snapshot_rows(from_date, to_date, where_extra, search, limit):
         FROM `tabMISA Invoice Snapshot` s
         WHERE s.inv_date BETWEEN %(fd)s AND %(td)s AND {where}
         ORDER BY s.inv_date DESC, s.inv_no DESC
-        LIMIT %(limit)s
+        LIMIT %(limit)s OFFSET %(offset)s
     """, p, as_dict=True)
+    return rows, total
+
+
+PAGE_SIZE = 20
 
 
 @frappe.whitelist()
-def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None, limit=500):
-    """Danh sách hóa đơn của 1 rổ. bucket ∈ linked | erp_only | misa_only | mismatch."""
+def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None,
+                 page=1, page_size=PAGE_SIZE):
+    """Một TRANG hóa đơn của 1 rổ. bucket ∈ linked | erp_only | misa_only | mismatch.
+
+    Phân trang ở tầng SQL chứ không nạp hết rồi cắt ở trình duyệt: một tháng có
+    tới hơn nghìn hóa đơn.
+    """
     guard_sales_any()
     if bucket not in BUCKETS:
-        frappe.throw(frappe._("Rổ không hợp lệ: {0}").format(bucket))
+        frappe.throw(_("Rổ không hợp lệ: {0}").format(bucket))
     from_date, to_date = _range(from_date, to_date)
     company = _company(company)
-    limit = min(int(limit or 500), 2000)
+    page = max(1, int(page or 1))
+    page_size = min(max(1, int(page_size or PAGE_SIZE)), 200)
+    offset = (page - 1) * page_size
     search = (search or "").strip()
 
     if bucket == "linked":
-        return {"source": "erp", "rows": _si_rows(company, from_date, to_date, True, search, limit)}
-    if bucket == "erp_only":
-        return {"source": "erp", "rows": _si_rows(company, from_date, to_date, False, search, limit)}
-    if bucket == "misa_only":
-        return {"source": "misa", "rows": _snapshot_rows(
-            from_date, to_date, "IFNULL(s.sales_invoice, '') = '' AND IFNULL(s.is_deleted, 0) = 0", search, limit)}
-    return {"source": "misa", "rows": _snapshot_rows(
-        from_date, to_date, "s.match_status = 'Lệch tiền'", search, limit)}
+        source, (rows, total) = "erp", _si_rows(company, from_date, to_date, True, search, page_size, offset)
+    elif bucket == "erp_only":
+        source, (rows, total) = "erp", _si_rows(company, from_date, to_date, False, search, page_size, offset)
+    elif bucket == "misa_only":
+        source, (rows, total) = "misa", _snapshot_rows(
+            from_date, to_date, "IFNULL(s.sales_invoice, '') = '' AND IFNULL(s.is_deleted, 0) = 0",
+            search, page_size, offset)
+    else:
+        source, (rows, total) = "misa", _snapshot_rows(
+            from_date, to_date, "s.match_status = 'Lệch tiền'", search, page_size, offset)
+
+    return {
+        "source": source, "rows": rows, "total": total,
+        "page": page, "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+    }
 
 
 @frappe.whitelist()

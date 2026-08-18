@@ -133,7 +133,8 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 
 /* ===== Inputs ===== */
 .kt-field { margin-bottom: 14px; }
-.kt-field > label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--kt-text-2); margin-bottom: 6px; }
+.kt-field > label, .kt-label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--kt-text-2); margin-bottom: 6px; }
+.kt-label { margin-top: 2px; }
 .kt-input, .kt-select, .kt-textarea { width: 100%; padding: 10px 14px; background: #fff; border: 1px solid var(--kt-border); border-radius: var(--kt-r-md); color: var(--kt-text); font-family: inherit; font-size: 13px; }
 .kt-input:focus, .kt-select:focus, .kt-textarea:focus { outline: none; border-color: var(--kt-primary); box-shadow: 0 0 0 3px rgb(99 102 241 / 0.12); }
 .kt-input--sm { width: auto; padding: 7px 10px; font-size: 12px; }

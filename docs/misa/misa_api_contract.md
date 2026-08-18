@@ -960,3 +960,54 @@ POST {base}/api/v2/code/v3sainvoice/paging     ·  form-urlencoded
 `columns` chưa được kiểm chứng cùng biến thể chạy được, nên `_paging_call` thử bộ
 đầy đủ trước; trả rỗng thì tự lùi về **bộ tối giản đã xác minh** rồi ghi log. Thà
 lấy được dữ liệu với ít cột còn hơn im lặng trả rỗng.
+
+---
+
+## Q — Chuyển tiếp số hóa đơn nhập tay (`vn_einvoice_number` → `custom_misa_inv_no`)
+
+### Q.1 Vấn đề
+
+Trước tích hợp, kế toán gõ tay số hóa đơn vào `vn_einvoice_number` (§A.2). Luồng
+tự động lại ghi vào `custom_misa_inv_no`. Toàn bộ đối soát (`misa_reconcile`,
+`misa_vat`) chỉ đọc nhóm `custom_misa_*` ⇒ **mọi hóa đơn cũ trông như chưa xuất**:
+rơi vào rổ "Chỉ có trên phần mềm", còn bản MISA tương ứng rơi vào rổ "Chỉ có trên
+MISA". Hai rổ cảnh báo đầy báo động giả.
+
+### Q.2 Cách xử lý — `ketoan/api/misa_legacy.py`
+
+Xem trước bắt buộc (`preview`, cho kế toán bán hàng) rồi mới ghi (`commit`, chỉ
+kế toán trưởng). Ghi bằng `db_set(update_modified=False)`, **không** `save()`.
+
+Chép: `custom_misa_inv_series`, `custom_misa_inv_no`, `custom_misa_inv_date`
+(lấy `vn_einvoice_date`, không có thì `posting_date`), `custom_misa_status =
+'Đã phát hành'`.
+
+### Q.3 Tách ký hiệu khỏi số
+
+Lấy **cụm số ở cuối chuỗi** làm số hóa đơn, phần đầu làm ký hiệu.
+
+| Giá trị đang có | → ký hiệu | → số | Ghi |
+|---|---|---|---|
+| `1C25MHG/0000123` | `1C25MHG` | `0000123` | ✅ |
+| `AA/20E 0001234` | `AA/20E` | `0001234` | ✅ mẫu TT32 cũ |
+| `0000123` | ký hiệu mặc định chọn ở màn hình | `0000123` | ✅ |
+| `2025-000123` | — | — | ❌ `2025` không có chữ cái → không phải ký hiệu |
+| `1C25MHG` | — | — | ❌ không có số ở cuối |
+| `123 (đã hủy)` | — | — | ❌ không đọc được |
+
+Ký hiệu hợp lệ phải **có ít nhất một chữ cái**, 5–12 ký tự, cho phép một gạch
+chéo. Không đoán: dòng nào không chắc thì bỏ lại cho người sửa tay.
+
+### Q.4 Bốn chốt chặn
+
+1. Chỉ ghi khi `custom_misa_inv_no` **đang trống** — luồng tự động đáng tin hơn.
+2. Trùng `(ký hiệu, số)` với hóa đơn khác → bỏ qua, liệt kê tên hóa đơn đang giữ
+   số đó. Hai hóa đơn cùng số là sai báo cáo thuế.
+3. `vn_einvoice_lookup_code` **chỉ** được chép sang `custom_misa_transaction_id`
+   khi khớp khuôn mã tra cứu thật (chữ+số liền, 8–24 ký tự). uuid rác của luồng
+   cũ (§L.4.1) có gạch nối nên rớt — đúng ý đồ.
+4. Xem trước tách theo **năm** kèm phân bố ký hiệu đọc được, để chạy riêng từng
+   năm với ký hiệu mặc định đúng của năm đó.
+
+Chép xong `commit` xếp `match_snapshots(relink=1)` chạy nền cho đúng khoảng ngày
+vừa động tới — không chạy lại đối soát thì rổ không đổi.

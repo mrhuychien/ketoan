@@ -133,6 +133,9 @@ export const api = {
   vatMarkOrigin: (snapshot, origin, note) => callMethod(NS + "misa_reconcile.mark_origin", { snapshot, origin, note }),
   vatImportPreview: (content) => callMethod(NS + "misa_import.preview", { content }),
   vatImportCommit: (content) => callMethod(NS + "misa_import.commit", { content }),
+  vatLegacyPreview: (a) => callMethod(NS + "misa_legacy.preview", withCompany(a)),
+  vatLegacyCommit: (a) => callMethod(NS + "misa_legacy.commit", withCompany(a)),
+  // `expected_hash` đi kèm trong `a` — backend từ chối nạp nếu thiếu.
 
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
