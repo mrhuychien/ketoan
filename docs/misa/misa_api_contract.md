@@ -1081,15 +1081,32 @@ lệ* — cả ba đều là "chưa có mã". Tách được phải có enum (R.
 
 1. **Enum `EInvoiceStatus`** — chưa biết số nào ứng với mục nào. Ba mục nguy
    hiểm nhất (*Từ chối cấp mã*, *TĐ không hợp lệ*, *Phát hành lỗi*) hiện gộp
-   chung vào `Chờ cấp mã`. Dò bằng:
+   chung vào `Chờ cấp mã`.
+
+   ❌ **Lối lọc đã thử và ĐÃ LOẠI.** `find_status_enum` gửi tham số `filter`
+   dạng `comboboxenum` giống lưới web, chạy 18/08/2026 trên khoảng
+   2026-01-01 → 2026-08-18:
+
+   | giá trị lọc | tổng khai |
+   |---|---|
+   | (không lọc) | 7787 |
+   | 0 … 9 (mọi giá trị) | 7787 |
+
+   Giá trị **8 và 9 không hề có trong ô chọn** mà vẫn ra đúng 7787. ⇒ Bề mặt
+   `/api/v2` **BỎ QUA** tham số `filter`. Không suy ra được gì về enum từ đây —
+   và đừng đọc bảng trên thành "trạng thái nào cũng có 7787 hóa đơn".
+
+   ✅ **Lối đang dùng — đối chiếu dữ liệu thật, không cần lọc:**
 
    ```
-   bench --site <site> execute ketoan.api.misa_probe.find_status_enum \
-       --kwargs "{'prop': 'EInvoiceStatus', 'from_date': '2026-01-01'}"
+   bench --site <site> execute ketoan.api.misa_probe.cross_status \
+       --kwargs "{'from_date': '2026-01-01', 'pages': 5}"
    ```
 
-   rồi **đối chiếu số dòng với lưới web** khi lọc từng mục. Khớp mới ghi vào
-   đây, ghi vào đây rồi mới được code.
+   Kéo hóa đơn thật về rồi lập bảng chéo `EInvoiceStatus` × (có mã CQT chưa) ×
+   (đã cấp số chưa) × `PublishStatus`/`SendToTaxStatus`, kèm **số hóa đơn mẫu**
+   cho từng giá trị enum. Mở MISA tra đúng những số đó, đọc trạng thái màn hình
+   hiện — đó là bằng chứng trực tiếp. Ghi vào đây rồi mới được code.
 
 2. **Enum `TypeChangeInvoice`** — tách *thay thế* với *điều chỉnh*. Khác biệt
    thật về thuế: hóa đơn **thay thế** xóa hiệu lực bản gốc; hóa đơn **điều
@@ -1100,3 +1117,15 @@ lệ* — cả ba đều là "chưa có mã". Tách được phải có enum (R.
 3. **So tiền cho hóa đơn điều chỉnh** — bản điều chỉnh mang số CHÊNH, không
    phải tổng. So với `grand_total` của Sales Invoice sẽ luôn ra "Lệch tiền".
    Chưa tách được loại thì chưa sửa được chỗ này.
+
+### R.6 Số đo khối lượng thật (18/08/2026)
+
+`recordsTotal` trên khoảng 2026-01-01 → 2026-08-18: **7787 hóa đơn** (~8 tháng)
+⇒ khoảng **12.000/năm**.
+
+Hệ quả: `MAX_PAGES = 100` (10.000 hóa đơn/lượt) không đủ cho một lượt kéo cả
+năm — đã nới lên **300**. Chốt chặn "KÉO THIẾU" ở cuối `pull_invoices` vẫn giữ
+nguyên, nó so `recordsTotal` với số ghi được nên chạm trần là báo đỏ chứ không
+im lặng.
+
+Con số 1260 ở §P là của khoảng ngày HẸP hơn — không mâu thuẫn.

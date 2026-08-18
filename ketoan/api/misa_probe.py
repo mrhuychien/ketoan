@@ -541,8 +541,8 @@ def find_status_enum(prop="EInvoiceStatus", from_date=None, to_date=None, hi=9):
         "fromDate": f"{from_date}T00:00:00.000Z",
         "toDate": f"{to_date}T23:59:59.000Z",
     }
-    http, rows, total, note = _probe_once(path, dict(base))
-    print(f"{'(không lọc)':>8} │ {str(rows):>8} │ {str(total):>10} │ {note or ''}")
+    http, rows, baseline, note = _probe_once(path, dict(base))
+    print(f"{'(không lọc)':>8} │ {str(rows):>8} │ {str(baseline):>10} │ {note or ''}")
     print("─" * 78)
 
     found = {}
@@ -552,18 +552,124 @@ def find_status_enum(prop="EInvoiceStatus", from_date=None, to_date=None, hi=9):
         mark = ""
         if http != 200:
             mark = f"HTTP {http}"
-        elif total:
+        elif total and total != baseline:
             found[v] = total
-            mark = "← có dữ liệu"
+            mark = "← lọc CÓ tác dụng"
+        elif total == baseline:
+            mark = "= y hệt lượt không lọc"
         print(f"{v:>8} │ {str(rows):>8} │ {str(total):>10} │ {note or ''} {mark}")
 
     print("═" * 78)
     if not found:
-        print("Không giá trị nào ra dữ liệu → tham số `filter` chưa có tác dụng ở")
-        print("bề mặt API này. Đừng suy ra enum từ đây; lấy bằng DevTools trên lưới")
-        print("web (chọn từng mục rồi đọc `filter` trong request) sẽ chắc chắn hơn.")
+        # Mọi giá trị ra ĐÚNG tổng của lượt không lọc — kể cả giá trị không có
+        # trong ô chọn. Đó là bằng chứng `filter` bị BỎ QUA, tuyệt đối không
+        # phải bằng chứng "trạng thái nào cũng có ngần ấy hóa đơn".
+        print("Mọi giá trị đều ra đúng tổng của lượt KHÔNG lọc ⇒ tham số `filter`")
+        print("bị bề mặt API BỎ QUA. Không suy ra được gì về enum từ đây.")
+        print()
+        print("Dùng cách khác — kéo dữ liệu thật rồi đối chiếu, không cần lọc:")
+        print("    bench --site <site> execute ketoan.api.misa_probe.cross_status \\")
+        print(f"        --kwargs \"{{'from_date': '{from_date}', 'pages': 5}}\"")
     else:
-        print("Giá trị có dữ liệu:", ", ".join(f"{k} ({v} hóa đơn)" for k, v in found.items()))
+        print("Giá trị lọc có tác dụng:", ", ".join(f"{k} ({v} hóa đơn)" for k, v in found.items()))
         print("Đối chiếu số này với số dòng lưới web báo khi lọc từng mục.")
         print("Khớp thì mới ghi vào misa_api_contract.md rồi mới được code.")
     return found
+
+
+def cross_status(from_date=None, to_date=None, pages=5, prop="EInvoiceStatus"):
+    """Lập bảng chéo trạng thái ↔ dữ liệu THẬT, kèm số hóa đơn để tra tay.
+
+        bench --site <site> execute ketoan.api.misa_probe.cross_status \
+            --kwargs "{'from_date': '2026-01-01', 'pages': 5}"
+
+    Vì sao không dùng `find_status_enum` nữa: tham số `filter` bị bề mặt API
+    BỎ QUA — mọi giá trị, kể cả 8 và 9 vốn không có trong ô chọn, đều trả về
+    đúng tổng của lượt không lọc. Lọc không có tác dụng thì không suy ra được
+    gì từ nó.
+
+    Cách này không cần lọc: kéo hóa đơn thật về rồi đối chiếu từng giá trị
+    enum với những thứ ĐÃ xác minh — có mã CQT chưa (`InvoiceCode`, 34 ký tự
+    HEX, §H.3), đã cấp số chưa (`InvNo`) — và in kèm vài số hóa đơn mẫu.
+
+    Mở MISA, tra đúng những số hóa đơn đó, đọc trạng thái màn hình hiện. Đó là
+    bằng chứng trực tiếp cho từng giá trị enum. Chỉ ĐỌC, không ghi gì.
+    """
+    from ketoan.api.misa_sync import (
+        MAX_PAGES, PAGE_SIZE, PAGING_BASE, PAGING_COLUMNS, _paging_call,
+    )
+
+    s = get_settings()
+    to_date = to_date or frappe.utils.nowdate()
+    from_date = from_date or frappe.utils.add_days(to_date, -180)
+    pages = min(int(pages or 5), MAX_PAGES)
+
+    print("═" * 78)
+    print(f"BẢNG CHÉO {prop} · {from_date} → {to_date} · tối đa {pages} trang")
+    print("═" * 78)
+
+    buckets = {}
+    dropped = set()
+    total_rows = 0
+
+    for page in range(pages):
+        payload = dict(PAGING_BASE)
+        payload.update({
+            "draw": str(page + 1),
+            "fromDate": f"{from_date}T00:00:00.000Z",
+            "toDate": f"{to_date}T23:59:59.000Z",
+            "columns": PAGING_COLUMNS,
+            "start": str(page * PAGE_SIZE),
+            "length": str(PAGE_SIZE),
+        })
+        try:
+            rows, _meta = _paging_call(s, payload, dropped)
+        except MISAError as e:
+            print(f"  trang {page + 1}: [{e.code}] {e.message}")
+            break
+        if not rows:
+            break
+        total_rows += len(rows)
+
+        for row in rows:
+            v = _pick(row, prop)
+            key = str(v)
+            b = buckets.setdefault(key, {
+                "n": 0, "co_ma": 0, "co_so": 0, "publish": {}, "sendtax": {}, "mau": [],
+            })
+            b["n"] += 1
+
+            code = str(_pick(row, "InvoiceCode") or "").strip()
+            if len(code) >= 30:
+                b["co_ma"] += 1
+            no = str(_pick(row, "InvNo") or "").strip()
+            if no and not no.startswith("<"):
+                b["co_so"] += 1
+
+            for f, k in (("PublishStatus", "publish"), ("SendToTaxStatus", "sendtax")):
+                b[k][str(_pick(row, f))] = b[k].get(str(_pick(row, f)), 0) + 1
+            if len(b["mau"]) < 3:
+                b["mau"].append(f"{_pick(row, 'InvSeries') or '?'} {no or '<chưa cấp số>'}")
+
+    if not total_rows:
+        print("Không kéo được dòng nào — kiểm tra lại khoảng ngày và kết nối.")
+        return {}
+
+    print(f"Đã đọc {total_rows} hóa đơn.\n")
+    print(f"{prop:>10} │ {'số HĐ':>6} │ {'có mã CQT':>10} │ {'đã cấp số':>10} │ Publish/SendTax")
+    print("─" * 78)
+    for k in sorted(buckets, key=lambda x: -buckets[x]["n"]):
+        b = buckets[k]
+        pub = ",".join(f"{a}×{c}" for a, c in sorted(b["publish"].items()))
+        stx = ",".join(f"{a}×{c}" for a, c in sorted(b["sendtax"].items()))
+        print(f"{k:>10} │ {b['n']:>6} │ {b['co_ma']:>10} │ {b['co_so']:>10} │ {pub} / {stx}")
+
+    print("\n" + "═" * 78)
+    print("TRA TAY — mở MISA, tìm đúng những số dưới đây, đọc trạng thái màn hình:")
+    for k in sorted(buckets, key=lambda x: -buckets[x]["n"]):
+        print(f"  {prop}={k:<4} → " + "  ·  ".join(buckets[k]["mau"]))
+    print("═" * 78)
+    print("Ghi kết quả vào misa_api_contract.md §R.5 rồi mới được code.")
+    print("Suy luận sẵn có: nhóm nào 'có mã CQT' = 'số HĐ' thì chính là ĐÃ CẤP MÃ;")
+    print("nhóm nào chưa cấp số thì nằm ở nửa 'chưa phát hành'.")
+    return {k: {"n": v["n"], "co_ma": v["co_ma"], "mau": v["mau"]} for k, v in buckets.items()}

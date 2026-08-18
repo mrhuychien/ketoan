@@ -528,7 +528,12 @@ PAGING_COLUMNS = ",".join([
 PAGING_BASE = {}
 
 PAGE_SIZE = 100  # server tôn trọng length (đã thử 5); vòng lặp tiến theo số dòng THẬT
-MAX_PAGES = 100
+
+# Đo thật: 7787 hóa đơn trong 8 tháng đầu 2026 ⇒ ~12.000/năm. Trần 100 trang
+# (10.000 hóa đơn) là chưa đủ cho một lượt kéo cả năm. Chốt chặn "KÉO THIẾU" ở
+# cuối hàm vẫn bắt được nếu chạm trần, nhưng để chạm trần rồi mới báo thì lượt
+# đồng bộ nào cũng đỏ — nới cho đủ dùng vài năm.
+MAX_PAGES = 300
 
 
 # Cột MISA báo thiếu → tham số cần gỡ. Bảng hóa đơn có mã và không mã khác nhau
