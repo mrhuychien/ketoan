@@ -280,3 +280,58 @@ def diagnose_vat(from_date=None, to_date=None):
         print("   Endpoint danh sách trên bề mặt API không dùng được → cần đường khác.")
         print("   Gửi em nguyên output này.")
     print("═" * 78)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# raw — in PHẢN HỒI THÔ, bỏ toàn bộ tầng bóc tách của app ra khỏi phương trình
+# ═══════════════════════════════════════════════════════════════════════════
+
+def raw(path, payload=None, method="POST", form=1, chars=3000):
+    """Gọi 1 endpoint MISA và in NGUYÊN VĂN phản hồi.
+
+        bench --site <site> execute ketoan.api.misa_probe.raw \\
+          --kwargs "{'path': 'code/v3sainvoice/paging', 'payload': {'start':'0','length':'2'}}"
+
+    Khi kết quả không như mong đợi, đây là thứ phải xem TRƯỚC: nó loại bỏ mọi
+    khả năng do _unwrap / parse_nested_data hiểu sai. In cả mã HTTP, header
+    phản hồi, và thân phản hồi nguyên bản.
+
+    KHÔNG in Authorization và không in credential.
+    """
+    import requests
+
+    from ketoan.api.misa_client import _base_url, _taxcode, get_token
+
+    s = get_settings()
+    url = f"{_base_url(s)}/api/v2/{str(path).lstrip('/')}"
+    headers = {"Authorization": get_token(), "TaxCode": _taxcode(s)}
+    kwargs = {"headers": headers, "timeout": 60}
+    if payload is not None:
+        if int(form or 0):
+            kwargs["data"] = payload
+        else:
+            headers["Content-Type"] = "application/json"
+            kwargs["data"] = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    print(f"{method} {url}")
+    print(f"header  : Authorization=<che>, TaxCode={_taxcode(s)}"
+          + (f", Content-Type={headers.get('Content-Type')}" if headers.get("Content-Type") else ""))
+    if payload is not None:
+        body = json.dumps(payload, ensure_ascii=False)
+        print(f"body    : {body[:800]}{'…' if len(body) > 800 else ''}")
+    print("─" * 78)
+
+    try:
+        res = requests.request(str(method).upper(), url, **kwargs)
+    except Exception as e:
+        print(f"✗ {type(e).__name__}: {e}")
+        return
+
+    print(f"HTTP {res.status_code}  ·  {len(res.content)} byte  ·  {res.headers.get('Content-Type', '')}")
+    print("─" * 78)
+    text = res.text or ""
+    print(text[:int(chars)])
+    if len(text) > int(chars):
+        print(f"\n… (còn {len(text) - int(chars)} ký tự)")
+    print("─" * 78)
+    print("Chép nguyên phần trên gửi lại. Nhớ che nếu có tên khách / MST.")
