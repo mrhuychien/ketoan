@@ -54,6 +54,7 @@ def ensure_ref_id(doc, method=None):
             for f in ("custom_misa_inv_no", "custom_misa_inv_series", "custom_misa_inv_date",
                       "custom_misa_transaction_id", "custom_misa_invoice_code", "custom_misa_link",
                       "custom_misa_pushed_at", "custom_misa_last_checked", "custom_misa_note",
+                      "custom_misa_relation", "custom_misa_org_ref_id", "custom_misa_org_inv",
                       "vn_einvoice_number", "vn_einvoice_date", "vn_einvoice_lookup_code"):
                 if doc.meta.has_field(f):
                     doc.set(f, None)
@@ -166,6 +167,39 @@ def check_amount_drift(si, misa, tolerance):
     return out
 
 
+def _mark_superseded(org_ref_id, by_si, by_inv_no, by_inv_series):
+    """Đánh dấu hóa đơn GỐC đã bị hóa đơn khác thay thế/điều chỉnh.
+
+    Chỉ ghi trạng thái + giao việc. Hệ thống KHÔNG tự hủy Sales Invoice dựa
+    trên dữ liệu MISA (ràng buộc 13.4) — người quyết định.
+    """
+    try:
+        org = frappe.db.get_value(
+            "Sales Invoice", {"custom_misa_ref_id": org_ref_id},
+            ["name", "docstatus", "custom_misa_status"], as_dict=True)
+        if not org or org.name == by_si:
+            return  # MISA giữ bản gốc mà ERPNext không có — không bịa ra liên kết
+        if org.custom_misa_status == "Đã thay thế":
+            return
+
+        frappe.db.set_value("Sales Invoice", org.name, {
+            "custom_misa_status": "Đã thay thế",
+            "custom_misa_relation": "Bị thay thế/điều chỉnh",
+            "custom_misa_org_inv": " ".join(
+                x for x in (str(by_inv_series or "").strip(), str(by_inv_no or "").strip()) if x),
+        }, update_modified=False)
+
+        if org.docstatus == 1:
+            # Bản gốc vẫn đang ghi sổ trong khi bản thay thế cũng đã phát hành:
+            # một lần bán đang được ghi nhận hai lần.
+            _todo(org.name, _(
+                "Hóa đơn {0} đã BỊ hóa đơn {1} thay thế/điều chỉnh trên MISA nhưng vẫn đang ghi sổ "
+                "— kiểm tra xem có khai trùng doanh thu không"
+            ).format(org.name, by_si))
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), f"misa_sync._mark_superseded {org_ref_id}")
+
+
 def _todo(si_name, description):
     """Giao việc cho kế toán. Hệ thống KHÔNG tự sửa/hủy hóa đơn (ràng buộc 13.4)."""
     try:
@@ -208,7 +242,9 @@ def poll_pending(limit=500, lookback_days=60, trigger_type="Manual"):
       · có số       → ghi ký hiệu/số/ngày/mã tra cứu/mã CQT + nhóm vn_einvoice_*
                     → so tiền 3 vế; lệch thì đặt 'Lệch tiền' và tạo ToDo
       · bị hủy      → 'Đã hủy'    (IsInvoiceDeleted=True)
-      · bị thay thế → 'Đã thay thế' (OrgRefID có giá trị)
+      · chưa có mã CQT → 'Chờ cấp mã' (có số nhưng InvoiceCode rỗng)
+      · có OrgRefID → bản này LÀ bản thay thế/điều chỉnh (còn hiệu lực);
+                      hóa đơn GỐC mới bị đặt 'Đã thay thế'
     Luôn cập nhật custom_misa_last_checked, kể cả khi chưa có số.
 
     Trả về tên bản ghi `MISA Sync Run`.
@@ -222,6 +258,10 @@ def poll_pending(limit=500, lookback_days=60, trigger_type="Manual"):
 def _poll_pending(limit, lookback_days, trigger_type="Manual"):
     settings = get_settings()
     tolerance = flt(settings.amount_tolerance) or 1.0
+    # Hóa đơn CÓ mã của cơ quan thuế thì mã CQT là điều kiện hợp lệ. Đơn vị dùng
+    # hóa đơn KHÔNG mã thì không bao giờ có mã đó — bắt buộc phải nhìn cờ này,
+    # không thì mọi hóa đơn của họ đứng vĩnh viễn ở "Chờ cấp mã".
+    needs_tax_code = bool(settings.use_code_route)
 
     run = frappe.get_doc({
         "doctype": "MISA Sync Run",
@@ -311,14 +351,41 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
             continue
 
         drift = check_amount_drift(si, inv, tolerance)
+        inv_code = str(_pick(inv, "InvoiceCode") or "").strip()
+        org_ref = str(_pick(inv, "OrgRefID") or "").strip()
+
+        # ─ TRỤC 1: giá trị pháp lý ────────────────────────────────────────
+        #
+        # `OrgRefID` KHÔNG thuộc trục này. §M.3: "OrgRefID có giá trị → bản này
+        # THAY THẾ hóa đơn OrgRefID" — tức bản đang xét là bản MỚI, còn hiệu
+        # lực. Bản cũ dán nhãn "Đã thay thế" lên chính nó là ngược: hóa đơn
+        # sống bị coi như đã chết, còn hóa đơn chết thật (bản gốc) thì không ai
+        # đụng tới và vẫn hiện "Đã phát hành".
+        #
+        # Mã CQT là ranh giới pháp lý thật: có số hóa đơn mới chỉ là MISA đã
+        # đánh số, phải có mã cơ quan thuế cấp thì hóa đơn mới hợp lệ. Gọi
+        # "Đã phát hành" khi chưa có mã là khẳng định sai nghĩa vụ thuế.
         if _pick(inv, "IsInvoiceDeleted") is True:
             status = "Đã hủy"
-        elif _pick(inv, "OrgRefID"):
-            status = "Đã thay thế"
+        elif needs_tax_code and not inv_code:
+            status = "Chờ cấp mã"
         elif drift:
             status = "Lệch tiền"
         else:
             status = "Đã phát hành"
+
+        # ─ TRỤC 2: quan hệ thay thế/điều chỉnh ────────────────────────────
+        #
+        # Chỉ chốt "có quan hệ" hay "không", chưa tách thay thế với điều chỉnh:
+        # phân biệt hai loại phải đọc `TypeChangeInvoice`, mà bảng giá trị của
+        # enum đó chưa xác minh (§M.3 mẫu thật trả None). Đoán ở đây là sai kỳ
+        # kê khai — hóa đơn thay thế xóa hiệu lực bản gốc, hóa đơn điều chỉnh
+        # thì bản gốc vẫn còn hiệu lực và chỉ cộng thêm phần chênh.
+        relation = "Hóa đơn thay thế/điều chỉnh" if org_ref else "Hóa đơn mới"
+        org_inv = " ".join(x for x in (
+            str(_pick(inv, "OrgInvSeries") or "").strip(),
+            str(_pick(inv, "OrgInvNo") or "").strip(),
+        ) if x)
 
         inv_date = misa_date(_pick(inv, "InvDate"))
         values = {
@@ -326,7 +393,10 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
             "custom_misa_inv_series": _pick(inv, "InvSeries") or "",
             "custom_misa_inv_date": inv_date,
             "custom_misa_transaction_id": _pick(inv, "TransactionID") or "",
-            "custom_misa_invoice_code": _pick(inv, "InvoiceCode") or "",
+            "custom_misa_invoice_code": inv_code,
+            "custom_misa_relation": relation,
+            "custom_misa_org_ref_id": org_ref,
+            "custom_misa_org_inv": org_inv,
             "custom_misa_link": invoice_links({
                 "custom_misa_ref_id": si.custom_misa_ref_id,
                 "custom_misa_transaction_id": _pick(inv, "TransactionID"),
@@ -358,6 +428,16 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
             stat["matched"] += 1
         if status in ("Đã hủy", "Đã thay thế"):
             _todo(si.name, _("Hóa đơn {0} trên MISA đang ở trạng thái {1} — cần xử lý").format(si.name, status))
+        if status == "Chờ cấp mã":
+            _todo(si.name, _(
+                "Hóa đơn {0} đã có số nhưng cơ quan thuế CHƯA cấp mã — chưa hợp lệ để giao khách"
+            ).format(si.name))
+
+        # Bản gốc mới là bản hết hiệu lực. Không dán nhãn cho nó thì hai hóa đơn
+        # cùng hiện "Đã phát hành" cho một lần bán — doanh thu và thuế đầu ra
+        # bị khai gấp đôi.
+        if org_ref:
+            _mark_superseded(org_ref, si.name, inv_no, _pick(inv, "InvSeries"))
 
         if (i + 1) % 50 == 0:
             frappe.db.commit()

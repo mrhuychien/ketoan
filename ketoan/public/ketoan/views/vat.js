@@ -287,8 +287,9 @@ function erpTable(tab, rows, res) {
           <td class="num">${formatVND(r.total_taxes_and_charges)}</td>
           <td class="num">${formatVND(r.grand_total)}</td>
           ${linked
-            ? html`<td>${r.inv_series || "—"}</td><td><b>${r.inv_no}</b></td><td>${formatDate(r.inv_date)}</td>`
-            : html`<td>${statusBadge(r.misa_status)}${r.note ? html`<div class="kt-sub">${r.note}</div>` : ""}</td>`}
+            ? html`<td>${r.inv_series || "—"}</td>
+                <td><b>${r.inv_no}</b>${relationBadge(r)}</td><td>${formatDate(r.inv_date)}</td>`
+            : html`<td>${statusBadge(r.misa_status)}${relationBadge(r)}${r.note ? html`<div class="kt-sub">${r.note}</div>` : ""}</td>`}
           <td class="num" style="white-space:nowrap">
             ${r.link ? html`<a class="kt-btn-icon" target="_blank" href="${r.link}" title="Tra cứu trên MISA"><i class="fas fa-up-right-from-square"></i></a>` : ""}
           </td>
@@ -330,11 +331,22 @@ function misaTable(tab, rows, res) {
     </div></div>`;
 }
 
+// Quan hệ thay thế/điều chỉnh là TRỤC RIÊNG, không phải một giá trị của trạng
+// thái phát hành: một hóa đơn thay thế vẫn phải đi hết vòng cấp mã của nó.
+function relationBadge(r) {
+  if (!r.relation || r.relation === "Hóa đơn mới") return "";
+  const bi = r.relation === "Bị thay thế/điều chỉnh";
+  const title = (bi ? "Bị thay thế/điều chỉnh bởi " : "Thay thế/điều chỉnh cho ") + (r.org_inv || "hóa đơn khác");
+  return html` <span class="kt-badge kt-badge--${bi ? "red" : "yellow"}" title="${title}">
+    <i class="fas ${bi ? "fa-ban" : "fa-rotate-left"}"></i> ${bi ? "bị thay thế" : "bản thay thế"}</span>`;
+}
+
 function statusBadge(s) {
   const map = {
     "Khớp": "green", "Đã phát hành": "green",
     "Lệch tiền": "red", "Phát hành lỗi": "red", "Chỉ có trên MISA": "red",
-    "Đã hủy": "gray", "Đã thay thế": "yellow",
+    "Đã hủy": "gray", "Đã thay thế": "red",
+    "Chờ cấp mã": "yellow",
     "Đã đẩy (nháp)": "yellow", "Chưa đẩy": "yellow", "Chưa xác định": "gray",
   };
   if (!s) return html`<span class="kt-badge kt-badge--gray">—</span>`;

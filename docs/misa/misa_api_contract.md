@@ -1011,3 +1011,92 @@ chéo. Không đoán: dòng nào không chắc thì bỏ lại cho người sử
 
 Chép xong `commit` xếp `match_snapshots(relink=1)` chạy nền cho đúng khoảng ngày
 vừa động tới — không chạy lại đối soát thì rổ không đổi.
+
+---
+
+## R — Trạng thái hóa đơn MISA ↔ ERPNext
+
+### R.1 Màn hình MISA có HAI ô chọn, là HAI TRỤC khác nhau
+
+| Ô chọn | Trả lời câu hỏi | Field MISA |
+|---|---|---|
+| Chưa phát hành · Đang phát hành · Phát hành lỗi · Chờ cấp mã · Đã cấp mã · Từ chối cấp mã · TĐ không hợp lệ | hóa đơn **có giá trị pháp lý chưa** | `EInvoiceStatus` / `PublishStatus` (enum **chưa xác minh**) |
+| Hóa đơn mới · thay thế · điều chỉnh · đã bị hủy · đã bị thay thế · đã bị điều chỉnh | hóa đơn **còn hiệu lực hay đã bị bản khác thay** | `OrgRefID`, `TypeChangeInvoice`, `IsInvoiceDeleted` |
+
+Hai trục **độc lập**: một hóa đơn thay thế vẫn phải đi hết vòng cấp mã của
+chính nó. Gộp vào một field là mất thông tin — nên ERPNext tách làm hai:
+`custom_misa_status` (trục 1) và `custom_misa_relation` (trục 2).
+
+### R.2 Lỗi đã sửa — dán nhãn ngược
+
+Bản cũ: `OrgRefID` có giá trị → đặt `custom_misa_status = 'Đã thay thế'` cho
+chính hóa đơn đang xét.
+
+Sai chiều. §M.3 nói rõ: `OrgRefID` có giá trị nghĩa là **bản này thay thế hóa
+đơn `OrgRefID`** — bản đang xét là bản MỚI, còn hiệu lực. Hậu quả:
+
+- hóa đơn **sống** bị đánh dấu như đã chết, lại còn bị vòng quét thứ 2 loại ra
+  nên không bao giờ được chấm lại;
+- hóa đơn **chết thật** (bản gốc) không ai đụng tới, vẫn hiện "Đã phát hành";
+- hai hóa đơn cùng hiện hợp lệ cho một lần bán ⇒ **khai trùng doanh thu và
+  thuế đầu ra**.
+
+Nay: bản đang xét nhận `relation='Hóa đơn thay thế/điều chỉnh'` và giữ nguyên
+trục 1; `_mark_superseded` tìm ngược Sales Invoice theo `OrgRefID` để đặt
+`'Đã thay thế'` cho **bản gốc**, kèm ToDo nếu bản gốc vẫn đang ghi sổ.
+
+### R.3 "Đã phát hành" phải chờ mã CQT
+
+Có số hóa đơn mới chỉ là MISA đã đánh số. Hợp lệ hay không do **cơ quan thuế
+cấp mã** quyết định. Bản cũ gọi mọi hóa đơn có số là "Đã phát hành" ⇒ hóa đơn
+đang *Chờ cấp mã* hoặc bị *Từ chối cấp mã* vẫn hiện như đã phát hành hợp lệ.
+
+Mốc dùng được ngay, **không cần enum**: `InvoiceCode` (mã CQT, 34 ký tự HEX,
+§H.3/§M.2). Rỗng ⇒ `'Chờ cấp mã'` + ToDo. Chỉ áp dụng khi `use_code_route` bật
+— đơn vị dùng hóa đơn KHÔNG mã thì không bao giờ có mã này.
+
+⚠️ Mốc này **không tách được** *Chờ cấp mã* với *Từ chối cấp mã* / *TĐ không hợp
+lệ* — cả ba đều là "chưa có mã". Tách được phải có enum (R.5).
+
+### R.4 Bảng ánh xạ
+
+| MISA | ERPNext `custom_misa_status` | Việc kế toán phải làm |
+|---|---|---|
+| Chưa phát hành | `Đã đẩy (nháp)` / `Chưa đẩy` | phát hành trên MISA |
+| Đang phát hành | *(chưa tách)* → `Chờ cấp mã` | đợi, hệ thống tự hỏi lại |
+| Phát hành lỗi | `Phát hành lỗi` | sửa dữ liệu rồi đẩy lại |
+| Chờ cấp mã | `Chờ cấp mã` | **chưa được giao hóa đơn cho khách** |
+| Đã cấp mã | `Đã phát hành` | — |
+| Từ chối cấp mã | *(chưa tách)* → `Chờ cấp mã` | **gấp**: sửa và phát hành lại |
+| TĐ không hợp lệ | *(chưa tách)* → `Chờ cấp mã` | **gấp**: sai định dạng gửi CQT |
+
+| MISA | ERPNext `custom_misa_relation` | Việc kế toán phải làm |
+|---|---|---|
+| Hóa đơn mới | `Hóa đơn mới` | — |
+| Hóa đơn thay thế / điều chỉnh | `Hóa đơn thay thế/điều chỉnh` | bản này còn hiệu lực |
+| Đã bị thay thế / điều chỉnh | `Bị thay thế/điều chỉnh` + trục 1 = `Đã thay thế` | bản gốc còn `docstatus=1` ⇒ kiểm khai trùng |
+| Đã bị hủy | trục 1 = `Đã hủy` (`IsInvoiceDeleted`) | hủy/điều chỉnh chứng từ bên ERPNext |
+
+### R.5 Còn thiếu — CHƯA được code
+
+1. **Enum `EInvoiceStatus`** — chưa biết số nào ứng với mục nào. Ba mục nguy
+   hiểm nhất (*Từ chối cấp mã*, *TĐ không hợp lệ*, *Phát hành lỗi*) hiện gộp
+   chung vào `Chờ cấp mã`. Dò bằng:
+
+   ```
+   bench --site <site> execute ketoan.api.misa_probe.find_status_enum \
+       --kwargs "{'prop': 'EInvoiceStatus', 'from_date': '2026-01-01'}"
+   ```
+
+   rồi **đối chiếu số dòng với lưới web** khi lọc từng mục. Khớp mới ghi vào
+   đây, ghi vào đây rồi mới được code.
+
+2. **Enum `TypeChangeInvoice`** — tách *thay thế* với *điều chỉnh*. Khác biệt
+   thật về thuế: hóa đơn **thay thế** xóa hiệu lực bản gốc; hóa đơn **điều
+   chỉnh** giữ bản gốc còn hiệu lực và chỉ cộng thêm phần chênh. Chưa tách được
+   thì **không** được tự kết luận bản gốc hết hiệu lực — hiện `_mark_superseded`
+   chỉ đặt trạng thái + giao việc, không đụng chứng từ (ràng buộc 13.4).
+
+3. **So tiền cho hóa đơn điều chỉnh** — bản điều chỉnh mang số CHÊNH, không
+   phải tổng. So với `grand_total` của Sales Invoice sẽ luôn ra "Lệch tiền".
+   Chưa tách được loại thì chưa sửa được chỗ này.

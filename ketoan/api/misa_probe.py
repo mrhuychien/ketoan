@@ -477,3 +477,93 @@ def find_list_endpoint(from_date=None, to_date=None):
     print("═" * 92)
     print("Chép nguyên bảng trên gửi lại.")
     print("═" * 92)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dò bảng giá trị enum trạng thái hóa đơn
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Đúng thứ tự hai ô chọn trên màn hình MISA. Thứ tự này KHÔNG phải giá trị enum
+# — MISA không đảm bảo mục thứ n mang giá trị n. Vì vậy mới phải dò từng giá
+# trị rồi đối chiếu số dòng với chính lưới web, thay vì đoán theo thứ tự.
+ENUM_LABELS = {
+    "EInvoiceStatus": [
+        "Chưa phát hành", "Đang phát hành", "Phát hành lỗi", "Chờ cấp mã",
+        "Đã cấp mã", "Từ chối cấp mã", "TĐ không hợp lệ",
+    ],
+    "ReferenceType": [
+        "Hóa đơn mới", "Hóa đơn thay thế", "Hóa đơn điều chỉnh",
+        "Hóa đơn đã bị hủy", "Hóa đơn đã bị thay thế", "Hóa đơn đã bị điều chỉnh",
+    ],
+}
+
+
+def _enum_filter(prop, value):
+    return json.dumps([{
+        "FilterValue": value, "FilterOperator": "=", "FilterType": "comboboxenum",
+        "FilterProperty": prop, "DisplayText": "", "enumname": prop,
+    }], ensure_ascii=False)
+
+
+def find_status_enum(prop="EInvoiceStatus", from_date=None, to_date=None, hi=9):
+    """Dò xem mỗi giá trị enum trạng thái ứng với bao nhiêu hóa đơn.
+
+        bench --site <site> execute ketoan.api.misa_probe.find_status_enum \
+            --kwargs "{'prop': 'EInvoiceStatus', 'from_date': '2026-01-01'}"
+
+    Chỉ ĐỌC. Cách dùng kết quả: mở lưới hóa đơn trên MISA, lọc lần lượt từng
+    mục trong ô chọn, ghi lại số dòng web báo, rồi so với bảng dưới đây. Giá
+    trị nào ra ĐÚNG số đó chính là enum của mục đó — đây là bằng chứng, không
+    phải suy đoán, nên mới được phép đưa vào code.
+    """
+    from ketoan.api.misa_sync import PAGING_COLUMNS
+    from ketoan.api.misa_client import invoice_path
+
+    s = get_settings()
+    to_date = to_date or frappe.utils.nowdate()
+    from_date = from_date or frappe.utils.add_days(to_date, -180)
+    path = invoice_path("v3sainvoice/paging", s)
+
+    print("═" * 78)
+    print(f"DÒ ENUM {prop} · {from_date} → {to_date}")
+    print(f"đường dẫn: {path}")
+    labels = ENUM_LABELS.get(prop) or []
+    if labels:
+        print("mục trên màn hình MISA (thứ tự hiển thị, CHƯA phải giá trị enum):")
+        for i, lb in enumerate(labels):
+            print(f"    {i + 1}. {lb}")
+    print("═" * 78)
+    print(f"{'giá trị':>8} │ {'số dòng':>8} │ {'tổng khai':>10} │ ghi chú")
+    print("─" * 78)
+
+    base = {
+        "draw": "1", "columns": PAGING_COLUMNS, "start": "0", "length": "1",
+        "fromDate": f"{from_date}T00:00:00.000Z",
+        "toDate": f"{to_date}T23:59:59.000Z",
+    }
+    http, rows, total, note = _probe_once(path, dict(base))
+    print(f"{'(không lọc)':>8} │ {str(rows):>8} │ {str(total):>10} │ {note or ''}")
+    print("─" * 78)
+
+    found = {}
+    for v in range(0, int(hi) + 1):
+        payload = dict(base, **{"filter": _enum_filter(prop, v)})
+        http, rows, total, note = _probe_once(path, payload)
+        mark = ""
+        if http != 200:
+            mark = f"HTTP {http}"
+        elif total:
+            found[v] = total
+            mark = "← có dữ liệu"
+        print(f"{v:>8} │ {str(rows):>8} │ {str(total):>10} │ {note or ''} {mark}")
+
+    print("═" * 78)
+    if not found:
+        print("Không giá trị nào ra dữ liệu → tham số `filter` chưa có tác dụng ở")
+        print("bề mặt API này. Đừng suy ra enum từ đây; lấy bằng DevTools trên lưới")
+        print("web (chọn từng mục rồi đọc `filter` trong request) sẽ chắc chắn hơn.")
+    else:
+        print("Giá trị có dữ liệu:", ", ".join(f"{k} ({v} hóa đơn)" for k, v in found.items()))
+        print("Đối chiếu số này với số dòng lưới web báo khi lọc từng mục.")
+        print("Khớp thì mới ghi vào misa_api_contract.md rồi mới được code.")
+    return found

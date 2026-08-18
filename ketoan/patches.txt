@@ -12,3 +12,4 @@ ketoan.patches.v0_0_6.misa_integration_setup
 ketoan.patches.v0_0_7.fix_misa_field_order
 ketoan.patches.v0_0_8.misa_tab_break
 ketoan.patches.v0_0_9.misa_link_field
+ketoan.patches.v0_0_10.misa_lifecycle_fields

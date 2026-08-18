@@ -162,8 +162,23 @@ REPORT_ROLES = {
 
 MISA_ROLE = "MISA Reconciler"
 
+# TRỤC 1 — hóa đơn có giá trị pháp lý tới đâu.
+#
+# "Đã phát hành" CHỈ dành cho hóa đơn đã được cơ quan thuế cấp mã. Có số hóa đơn
+# mà chưa có mã CQT thì vẫn là "Chờ cấp mã": nói "đã phát hành" lúc đó là khẳng
+# định sai về nghĩa vụ thuế.
+#
+# "Đã thay thế" nghĩa là hóa đơn NÀY đã BỊ hóa đơn khác thay thế (hết hiệu lực),
+# KHÔNG phải nó là bản thay thế. Bản thay thế nằm ở trục 2 bên dưới.
 MISA_STATUS_OPTIONS = "\n".join(
-    ("", "Chưa đẩy", "Đã đẩy (nháp)", "Đã phát hành", "Phát hành lỗi", "Lệch tiền", "Đã hủy", "Đã thay thế")
+    ("", "Chưa đẩy", "Đã đẩy (nháp)", "Chờ cấp mã", "Đã phát hành", "Phát hành lỗi",
+     "Lệch tiền", "Đã hủy", "Đã thay thế")
+)
+
+# TRỤC 2 — quan hệ thay thế/điều chỉnh. Độc lập với trục 1: một hóa đơn thay thế
+# vẫn phải đi hết vòng cấp mã của nó. Gộp hai trục vào một field là mất thông tin.
+MISA_RELATION_OPTIONS = "\n".join(
+    ("", "Hóa đơn mới", "Hóa đơn thay thế/điều chỉnh", "Bị thay thế/điều chỉnh")
 )
 
 MISA_CUSTOM_FIELDS = {
@@ -258,12 +273,41 @@ MISA_CUSTOM_FIELDS = {
             "insert_after": "custom_misa_link",
         },
         {
+            "fieldname": "custom_misa_relation",
+            "label": "Quan hệ thay thế/điều chỉnh",
+            "fieldtype": "Select",
+            "options": MISA_RELATION_OPTIONS,
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "in_standard_filter": 1,
+            "insert_after": "custom_misa_ref_id",
+        },
+        {
+            # OrgRefID của MISA — khóa để tìm ngược hóa đơn gốc bên ERPNext.
+            "fieldname": "custom_misa_org_ref_id",
+            "label": "RefID hóa đơn gốc",
+            "fieldtype": "Data",
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "search_index": 1,
+            "insert_after": "custom_misa_relation",
+        },
+        {
+            "fieldname": "custom_misa_org_inv",
+            "label": "Hóa đơn gốc / hóa đơn thay thế",
+            "fieldtype": "Data",
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "description": "Ký hiệu + số của hóa đơn bên kia quan hệ thay thế/điều chỉnh.",
+            "insert_after": "custom_misa_org_ref_id",
+        },
+        {
             "fieldname": "custom_misa_pushed_at",
             "label": "Đẩy sang MISA lúc",
             "fieldtype": "Datetime",
             "allow_on_submit": 1,
             "read_only": 1,
-            "insert_after": "custom_misa_ref_id",
+            "insert_after": "custom_misa_org_inv",
         },
         {
             "fieldname": "custom_misa_last_checked",

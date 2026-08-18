@@ -131,6 +131,7 @@ def _si_rows(company, from_date, to_date, linked: bool, search, limit, offset=0)
                si.custom_misa_inv_date AS inv_date, si.custom_misa_status AS misa_status,
                si.custom_misa_transaction_id AS transaction_id, si.custom_misa_link AS link,
                si.custom_misa_ref_id AS ref_id, si.custom_misa_pushed_at AS pushed_at,
+               si.custom_misa_relation AS relation, si.custom_misa_org_inv AS org_inv,
                si.custom_misa_note AS note
         FROM `tabSales Invoice` si
         WHERE si.docstatus = 1 AND si.company = %(company)s
