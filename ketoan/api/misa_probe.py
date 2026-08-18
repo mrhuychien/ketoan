@@ -335,3 +335,144 @@ def raw(path, payload=None, method="POST", form=1, chars=3000):
         print(f"\n… (còn {len(text) - int(chars)} ký tự)")
     print("─" * 78)
     print("Chép nguyên phần trên gửi lại. Nhớ che nếu có tên khách / MST.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# find_list_endpoint — dò đường dẫn nào trên /api/v2 trả được DANH SÁCH hóa đơn
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Quy ước đặt tên của MISA không nhất quán — đã xác minh 3 kiểu khác nhau:
+#   GET  code/v3sainvoice/afterpublishing/{id}   → TIỀN TỐ code/
+#   POST v3sainvoice/code                        → HẬU TỐ /code
+#   POST v3/sainvoicewithcode/list  (bề mặt web) → tên gộp
+# Nên không suy luận được đường danh sách, phải dò.
+LIST_PATHS = [
+    "code/v3sainvoice/paging",
+    "v3sainvoice/paging",
+    "code/v3sainvoice/list",
+    "v3sainvoice/list",
+    "sainvoicewithcode/list",
+    "code/sainvoicewithcode/list",
+    "v3sainvoicewithcode/paging",
+    "v3sainvoicewithcode/list",
+    "v3sainvoice/paging/code",
+    "v3sainvoice/getpaging",
+    "code/v3sainvoice/getpaging",
+    "v3sainvoice/search",
+]
+
+
+def _probe_once(path, payload, form=True, method="POST"):
+    """Gọi thô 1 lần, trả (http, so_ban_ghi, tong_khai, tom_tat)."""
+    import requests
+
+    from ketoan.api.misa_client import _base_url, _taxcode, get_token
+
+    s = get_settings()
+    url = f"{_base_url(s)}/api/v2/{path.lstrip('/')}"
+    headers = {"Authorization": get_token(), "TaxCode": _taxcode(s)}
+    kwargs = {"headers": headers, "timeout": 60}
+    if payload is not None:
+        if form:
+            kwargs["data"] = payload
+        else:
+            headers["Content-Type"] = "application/json"
+            kwargs["data"] = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    try:
+        res = requests.request(method, url, **kwargs)
+    except Exception as e:
+        return None, None, None, f"{type(e).__name__}"
+
+    if res.status_code != 200:
+        return res.status_code, None, None, (res.text or "")[:110].replace("\n", " ")
+    try:
+        body = res.json()
+    except Exception:
+        return 200, None, None, "phản hồi không phải JSON"
+    if not isinstance(body, dict):
+        n = len(body) if isinstance(body, list) else None
+        return 200, n, None, "trả thẳng mảng"
+
+    err = _pick(body, "error", "dataError")
+    if _pick(body, "success") is False or err:
+        return 200, None, None, ("LỖI: " + str(err)[:110].replace("\n", " "))
+
+    data = _pick(body, "data")
+    rows = None
+    if isinstance(data, list):
+        rows = len(data)
+    elif isinstance(data, str):
+        try:
+            parsed = json.loads(data) if data.strip() else []
+            rows = len(parsed) if isinstance(parsed, list) else 1
+        except Exception:
+            rows = None
+    total = _pick(body, "recordsFiltered") or _pick(body, "recordsTotal") or 0
+    extra = ",".join(k for k in body if k.lower() in ("servertime", "summary", "resulttoken"))
+    return 200, rows, total, extra
+
+
+def find_list_endpoint(from_date=None, to_date=None):
+    """Dò xem đường dẫn nào trả được danh sách hóa đơn. Chỉ đọc, không ghi.
+
+        bench --site <site> execute ketoan.api.misa_probe.find_list_endpoint
+
+    Vòng 1 quét đường dẫn với tham số tối thiểu. Vòng 2 chỉ chạy trên đường dẫn
+    nào sống, thử các biến thể ngày/phạm vi.
+    """
+    import time as _t
+
+    to_date = to_date or frappe.utils.nowdate()
+    from_date = from_date or frappe.utils.add_days(to_date, -30)
+    s = get_settings()
+
+    print("═" * 92)
+    print(f"VÒNG 1 — quét {len(LIST_PATHS)} đường dẫn với tham số tối thiểu (start/length)")
+    print("═" * 92)
+    print(f"{'đường dẫn':38s} {'HTTP':>5s} {'dòng':>6s} {'khai':>7s}  ghi chú")
+    print("─" * 92)
+
+    alive = []
+    for p in LIST_PATHS:
+        http, rows, total, note = _probe_once(p, {"start": "0", "length": "5"})
+        mark = "  ← CÓ DỮ LIỆU" if rows else ""
+        print(f"{p:38s} {str(http):>5s} {str(rows):>6s} {str(total):>7s}  {note}{mark}")
+        if http == 200 and rows is not None:
+            alive.append(p)
+        _t.sleep(0.2)
+
+    if not alive:
+        print("\n❌ Không đường dẫn nào trả về cấu trúc danh sách. Bề mặt API này không có")
+        print("   endpoint liệt kê hóa đơn → phải đi đường nhập file.")
+        return
+
+    print()
+    print("═" * 92)
+    print(f"VÒNG 2 — thử biến thể tham số trên {len(alive)} đường dẫn còn sống")
+    print("═" * 92)
+
+    variants = [
+        ("chỉ start/length", {"start": "0", "length": "5"}),
+        ("ngày KHÔNG nháy", {"start": "0", "length": "5",
+                             "fromDate": f"{from_date}T00:00:00.000Z", "toDate": f"{to_date}T23:59:59.000Z"}),
+        ("ngày CÓ nháy", {"start": "0", "length": "5",
+                          "fromDate": f'"{from_date}T00:00:00.000Z"', "toDate": f'"{to_date}T23:59:59.000Z"'}),
+        ("ngày trần yyyy-mm-dd", {"start": "0", "length": "5", "fromDate": from_date, "toDate": to_date}),
+        ("kèm đơn vị + mẫu HĐ", {"start": "0", "length": "5",
+                                 "lstOrganizationUnit": s.organization_unit_id or "",
+                                 "invTemplate": s.inv_template_no or "1"}),
+        ("gửi JSON thay vì form", {"start": 0, "length": 5}),
+    ]
+    for p in alive:
+        print(f"\n── {p}")
+        for label, payload in variants:
+            form = label != "gửi JSON thay vì form"
+            http, rows, total, note = _probe_once(p, payload, form=form)
+            mark = "   ← CÓ DỮ LIỆU" if rows else ""
+            print(f"   {label:24s} HTTP {str(http):>3s} · dòng {str(rows):>4s} · khai {str(total):>5s}  {note}{mark}")
+            _t.sleep(0.2)
+
+    print()
+    print("═" * 92)
+    print("Chép nguyên bảng trên gửi lại.")
+    print("═" * 92)
