@@ -684,6 +684,8 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
     errors = []
     start = 0
     reported = 0   # tổng số MISA tự khai
+    received = 0   # số dòng THẬT SỰ nhận được — khác với số ghi vào snapshot
+    skipped_draft = 0   # hóa đơn nháp, cố ý bỏ
     dropped = set()  # tham số đã gỡ vì MISA vỡ SQL
 
     for page in range(MAX_PAGES):
@@ -718,12 +720,17 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
         if not rows:
             break  # hết dữ liệu — KHÔNG dựa recordsTotal
 
+        received += len(rows)
         for row in rows:
             try:
                 res = _upsert_snapshot(row)
                 if res:
                     stat["fetched"] += 1
                     stat[res] += 1
+                else:
+                    # Hóa đơn nháp (`<Chưa cấp số>`) — CỐ Ý bỏ, không phải kéo
+                    # thiếu. Đo thật 18/08/2026: 500/500 dòng đầu đều là nháp.
+                    skipped_draft += 1
             except Exception:
                 frappe.log_error(frappe.get_traceback(), "misa_sync._upsert_snapshot")
                 errors.append(f"hóa đơn {_pick(row, 'InvNo')}: lỗi ghi snapshot")
@@ -744,17 +751,27 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
     # Đối chiếu số lượng: MISA khai bao nhiêu, ta ghi được bao nhiêu.
     # KHÔNG được im lặng khi thiếu — trang sẽ báo "không có hóa đơn ngoài sổ"
     # trong khi thực tế chưa kéo hết, tức là sai theo hướng nguy hiểm nhất.
-    if stat["fetched"] and not reported:
+    if received and not reported:
         errors.append(
             "Không đọc được tổng số MISA khai (recordsTotal) nên KHÔNG đối chiếu được đã kéo "
             "đủ chưa. Coi kết quả là chưa đầy đủ cho tới khi kiểm tay."
         )
-    if reported and stat["fetched"] < reported:
+    # So NHẬN ĐƯỢC với MISA KHAI, không so số ghi vào snapshot.
+    #
+    # Endpoint này trả cả hóa đơn nháp (`<Chưa cấp số>`) — đo thật 18/08/2026:
+    # 500/500 dòng đầu đều là nháp. Snapshot cố ý bỏ chúng, nên lấy số ghi được
+    # đem so với recordsTotal thì lượt đồng bộ nào cũng đỏ "KÉO THIẾU" trong khi
+    # thật ra kéo đủ. Báo động giả liên tục thì kế toán bỏ qua cả báo động thật.
+    if reported and received < reported:
         errors.append(
             f"KÉO THIẾU: MISA khai {reported} hóa đơn trong khoảng {from_date} → {to_date} "
-            f"nhưng chỉ ghi được {stat['fetched']}. Kết quả đối soát CHƯA ĐỦ TIN CẬY — "
+            f"nhưng chỉ nhận được {received}. Kết quả đối soát CHƯA ĐỦ TIN CẬY — "
             "đừng kết luận 'không có hóa đơn ngoài sổ' cho tới khi khớp số."
         )
+    if skipped_draft:
+        run.note = _(
+            "Bỏ qua {0} hóa đơn nháp (chưa cấp số) trong tổng {1} dòng nhận được."
+        ).format(skipped_draft, received)
 
     if dropped:
         errors.append("Đã gỡ tham số MISA không nhận: " + ", ".join(sorted(dropped)))

@@ -577,7 +577,7 @@ def find_status_enum(prop="EInvoiceStatus", from_date=None, to_date=None, hi=9):
     return found
 
 
-def cross_status(from_date=None, to_date=None, pages=5, prop="EInvoiceStatus"):
+def cross_status(from_date=None, to_date=None, pages=5, prop="EInvoiceStatus", spread=1):
     """Lập bảng chéo trạng thái ↔ dữ liệu THẬT, kèm số hóa đơn để tra tay.
 
         bench --site <site> execute ketoan.api.misa_probe.cross_status \
@@ -595,6 +595,7 @@ def cross_status(from_date=None, to_date=None, pages=5, prop="EInvoiceStatus"):
     Mở MISA, tra đúng những số hóa đơn đó, đọc trạng thái màn hình hiện. Đó là
     bằng chứng trực tiếp cho từng giá trị enum. Chỉ ĐỌC, không ghi gì.
     """
+    from ketoan.api.misa_client import invoice_path
     from ketoan.api.misa_sync import (
         MAX_PAGES, PAGE_SIZE, PAGING_BASE, PAGING_COLUMNS, _paging_call,
     )
@@ -603,6 +604,7 @@ def cross_status(from_date=None, to_date=None, pages=5, prop="EInvoiceStatus"):
     to_date = to_date or frappe.utils.nowdate()
     from_date = from_date or frappe.utils.add_days(to_date, -180)
     pages = min(int(pages or 5), MAX_PAGES)
+    path = invoice_path("v3sainvoice/paging", s)
 
     print("═" * 78)
     print(f"BẢNG CHÉO {prop} · {from_date} → {to_date} · tối đa {pages} trang")
@@ -612,16 +614,33 @@ def cross_status(from_date=None, to_date=None, pages=5, prop="EInvoiceStatus"):
     dropped = set()
     total_rows = 0
 
-    for page in range(pages):
-        payload = dict(PAGING_BASE)
-        payload.update({
-            "draw": str(page + 1),
+    def _payload(start):
+        p = dict(PAGING_BASE)
+        p.update({
+            "draw": "1",
             "fromDate": f"{from_date}T00:00:00.000Z",
             "toDate": f"{to_date}T23:59:59.000Z",
             "columns": PAGING_COLUMNS,
-            "start": str(page * PAGE_SIZE),
-            "length": str(PAGE_SIZE),
+            "start": str(start), "length": str(PAGE_SIZE),
         })
+        return p
+
+    # Lấy N trang ĐẦU thì chỉ thấy được một góc: đo thật 18/08/2026, 500 dòng
+    # đầu đều là hóa đơn nháp, khiến bảng chéo chỉ có đúng một dòng và tưởng như
+    # cả 7787 hóa đơn cùng một trạng thái. Rải đều các mốc trên toàn khoảng mới
+    # thấy đủ phổ trạng thái.
+    offsets = [p * PAGE_SIZE for p in range(pages)]
+    if int(spread or 0):
+        _h, _r, reported, _n = _probe_once(path, _payload(0))
+        reported = int(reported or 0)
+        if reported > pages * PAGE_SIZE:
+            step = max(1, (reported - PAGE_SIZE) // max(1, pages - 1)) if pages > 1 else 0
+            offsets = [min(i * step, max(0, reported - PAGE_SIZE)) for i in range(pages)]
+            print(f"MISA khai {reported} hóa đơn — lấy mẫu rải ở mốc: "
+                  + ", ".join(str(o) for o in offsets) + "\n")
+
+    for start in offsets:
+        payload = _payload(start)
         try:
             rows, _meta = _paging_call(s, payload, dropped)
         except MISAError as e:
@@ -635,7 +654,8 @@ def cross_status(from_date=None, to_date=None, pages=5, prop="EInvoiceStatus"):
             v = _pick(row, prop)
             key = str(v)
             b = buckets.setdefault(key, {
-                "n": 0, "co_ma": 0, "co_so": 0, "publish": {}, "sendtax": {}, "mau": [],
+                "n": 0, "co_ma": 0, "co_so": 0, "publish": {}, "sendtax": {},
+                "mau": [], "mau_so": [],
             })
             b["n"] += 1
 
@@ -648,8 +668,14 @@ def cross_status(from_date=None, to_date=None, pages=5, prop="EInvoiceStatus"):
 
             for f, k in (("PublishStatus", "publish"), ("SendToTaxStatus", "sendtax")):
                 b[k][str(_pick(row, f))] = b[k].get(str(_pick(row, f)), 0) + 1
-            if len(b["mau"]) < 3:
-                b["mau"].append(f"{_pick(row, 'InvSeries') or '?'} {no or '<chưa cấp số>'}")
+            # Ưu tiên mẫu ĐÃ CẤP SỐ: hóa đơn nháp thì tra trên MISA cũng không
+            # ra được gì để đọc trạng thái.
+            label = f"{_pick(row, 'InvSeries') or '?'} {no or '<chưa cấp số>'}"
+            if no and not no.startswith("<"):
+                if len(b["mau_so"]) < 3:
+                    b["mau_so"].append(label)
+            elif len(b["mau"]) < 3:
+                b["mau"].append(label)
 
     if not total_rows:
         print("Không kéo được dòng nào — kiểm tra lại khoảng ngày và kết nối.")
@@ -664,12 +690,23 @@ def cross_status(from_date=None, to_date=None, pages=5, prop="EInvoiceStatus"):
         stx = ",".join(f"{a}×{c}" for a, c in sorted(b["sendtax"].items()))
         print(f"{k:>10} │ {b['n']:>6} │ {b['co_ma']:>10} │ {b['co_so']:>10} │ {pub} / {stx}")
 
+    nhap = sum(v["n"] - v["co_so"] for v in buckets.values())
+    print(f"\nTrong đó {nhap}/{total_rows} là hóa đơn NHÁP (chưa cấp số) — "
+          "snapshot cố ý bỏ, không phải kéo thiếu.")
+
     print("\n" + "═" * 78)
     print("TRA TAY — mở MISA, tìm đúng những số dưới đây, đọc trạng thái màn hình:")
     for k in sorted(buckets, key=lambda x: -buckets[x]["n"]):
-        print(f"  {prop}={k:<4} → " + "  ·  ".join(buckets[k]["mau"]))
+        mau = buckets[k]["mau_so"] or buckets[k]["mau"]
+        print(f"  {prop}={k:<4} → " + "  ·  ".join(mau))
     print("═" * 78)
-    print("Ghi kết quả vào misa_api_contract.md §R.5 rồi mới được code.")
-    print("Suy luận sẵn có: nhóm nào 'có mã CQT' = 'số HĐ' thì chính là ĐÃ CẤP MÃ;")
-    print("nhóm nào chưa cấp số thì nằm ở nửa 'chưa phát hành'.")
-    return {k: {"n": v["n"], "co_ma": v["co_ma"], "mau": v["mau"]} for k, v in buckets.items()}
+    if len(buckets) < 2:
+        print("CHỈ RA MỘT GIÁ TRỊ — mẫu chưa đủ phổ. Tăng `pages`, hoặc bỏ `spread`")
+        print("để lấy liên tục, hoặc thu hẹp khoảng ngày vào tháng có hóa đơn đã")
+        print("phát hành. Đừng kết luận 'cả kho chỉ một trạng thái' từ đây.")
+    else:
+        print("Ghi kết quả vào misa_api_contract.md §R.5 rồi mới được code.")
+        print("Suy luận sẵn có: nhóm nào 'có mã CQT' = 'số HĐ' thì chính là ĐÃ CẤP MÃ;")
+        print("nhóm nào chưa cấp số thì nằm ở nửa 'chưa phát hành'.")
+    return {k: {"n": v["n"], "co_ma": v["co_ma"], "co_so": v["co_so"],
+                "mau": v["mau_so"] or v["mau"]} for k, v in buckets.items()}

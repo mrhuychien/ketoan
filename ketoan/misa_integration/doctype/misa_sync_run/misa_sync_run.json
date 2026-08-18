@@ -22,6 +22,7 @@
   "matched",
   "mismatched",
   "log_section",
+  "note",
   "error_log"
  ],
  "fields": [
@@ -138,6 +139,13 @@
    "label": "Nhật ký lỗi"
   },
   {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú",
+   "read_only": 1,
+   "description": "Thông tin bình thường của lượt chạy — không phải lỗi."
+  },
+  {
    "description": "Chỉ chứa mã lỗi và mô tả — KHÔNG chứa token/mật khẩu.",
    "fieldname": "error_log",
    "fieldtype": "Long Text",
@@ -153,15 +161,27 @@
  "owner": "Administrator",
  "permissions": [
   {
-   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1,
    "role": "System Manager"
   },
   {
-   "delete": 1, "export": 1, "read": 1, "report": 1,
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
    "role": "Accounts Manager"
   },
   {
-   "read": 1, "report": 1,
+   "read": 1,
+   "report": 1,
    "role": "Accounts User"
   }
  ],
