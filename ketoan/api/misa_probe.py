@@ -16,7 +16,7 @@ import json
 
 import frappe
 
-from ketoan.api.misa_client import MISAError, call, get_settings
+from ketoan.api.misa_client import MISAError, _pick, call, get_settings
 
 # Field mang thông tin định danh — che giá trị khi in.
 SENSITIVE = {
@@ -250,7 +250,8 @@ def diagnose_vat(from_date=None, to_date=None):
     for label, payload in variants:
         print(f"\n   ── {label}")
         try:
-            data = call(f"{prefix}v3sainvoice/paging", payload=payload, method="POST", form=True)
+            data, meta = call(f"{prefix}v3sainvoice/paging", payload=payload,
+                              method="POST", form=True, with_meta=True)
         except MISAError as e:
             print(f"      ✗ MISAError [{e.code}] {str(e.message)[:160]}")
             continue
@@ -258,7 +259,10 @@ def diagnose_vat(from_date=None, to_date=None):
             print(f"      ✗ {type(e).__name__}: {str(e)[:160]}")
             continue
         rows = data if isinstance(data, list) else []
-        print(f"      → {len(rows)} bản ghi")
+        total = _pick(meta, "recordsFiltered") or _pick(meta, "recordsTotal") or 0
+        print(f"      → trang này {len(rows)} bản ghi · MISA khai tổng cộng {total}")
+        if total and len(rows) < int(total or 0) and len(rows) < 5:
+            print("        (bình thường — đang giới hạn length=5 để dò)")
         if rows:
             winner = winner or label
             r0 = rows[0]

@@ -63,6 +63,16 @@ function shell(state, ov) {
       </div>
     </div>
 
+    ${ov.last_sync && ov.last_sync.status !== "Thành công" && ov.last_sync.error_log
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)">
+          <div class="kt-card-body">
+            <div style="font-weight:600;color:var(--kt-danger)">
+              <i class="fas fa-triangle-exclamation"></i> Lần đồng bộ gần nhất chưa sạch — số liệu bên dưới CHƯA đủ tin cậy
+            </div>
+            <div class="kt-sub" style="margin-top:6px;white-space:pre-wrap">${ov.last_sync.error_log}</div>
+          </div></div>`
+      : ""}
+
     ${!ov.has_snapshot
       ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
           <div class="kt-card-body kt-sub">

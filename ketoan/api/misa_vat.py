@@ -82,7 +82,8 @@ def get_overview(company=None, from_date=None, to_date=None):
     """, p, as_dict=True)[0]
 
     last = frappe.get_all(
-        "MISA Sync Run", fields=["name", "job_type", "status", "finished_at", "fetched", "matched", "mismatched"],
+        "MISA Sync Run",
+        fields=["name", "job_type", "status", "finished_at", "fetched", "matched", "mismatched", "error_log"],
         order_by="creation desc", limit=1,
     )
 

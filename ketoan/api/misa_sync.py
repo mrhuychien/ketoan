@@ -488,6 +488,7 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
     stat = {"fetched": 0, "created": 0, "updated": 0}
     errors = []
     start = 0
+    reported = 0  # tổng số MISA tự khai
 
     for page in range(MAX_PAGES):
         payload = dict(PAGING_BASE)
@@ -501,8 +502,14 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
             "length": str(PAGE_SIZE),
         })
         try:
-            data = call(invoice_path("v3sainvoice/paging", settings),
-                        payload=payload, method="POST", form=True)
+            data, meta = call(invoice_path("v3sainvoice/paging", settings),
+                              payload=payload, method="POST", form=True, with_meta=True)
+            # MISA tự khai tổng số ở request đếm riêng (§H). Giữ lại để đối chiếu:
+            # kéo thiếu mà không biết còn nguy hiểm hơn kéo được 0.
+            for key in ("recordsFiltered", "recordsTotal"):
+                n = _pick(meta, key)
+                if n:
+                    reported = max(reported, int(flt(n)))
         except MISAError as e:
             errors.append(f"trang {page + 1}: [{e.code}] {e.message}")
             break
@@ -534,6 +541,16 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
         errors.append(
             "MISA trả về 0 bản ghi. Nhiều khả năng endpoint danh sách trên bề mặt API cần thêm "
             "tham số (§M.6) — dùng lưới trên app3.meinvoice.vn để lấy request thật rồi bổ sung."
+        )
+
+    # Đối chiếu số lượng: MISA khai bao nhiêu, ta ghi được bao nhiêu.
+    # KHÔNG được im lặng khi thiếu — trang sẽ báo "không có hóa đơn ngoài sổ"
+    # trong khi thực tế chưa kéo hết, tức là sai theo hướng nguy hiểm nhất.
+    if reported and stat["fetched"] < reported:
+        errors.append(
+            f"KÉO THIẾU: MISA khai {reported} hóa đơn trong khoảng {from_date} → {to_date} "
+            f"nhưng chỉ ghi được {stat['fetched']}. Kết quả đối soát CHƯA ĐỦ TIN CẬY — "
+            "đừng kết luận 'không có hóa đơn ngoài sổ' cho tới khi khớp số."
         )
 
     for k, v in stat.items():

@@ -145,7 +145,7 @@ def clear_token():
 # Gọi API
 # ═══════════════════════════════════════════════════════════════════════════
 
-def call(path: str, payload=None, params=None, method: str = "POST", form: bool = False):
+def call(path: str, payload=None, params=None, method: str = "POST", form: bool = False, with_meta: bool = False):
     """Gọi 1 endpoint MISA, trả về phần Data đã bóc wrapper.
 
     path   : phần sau /api/v2/, ví dụ "v3sainvoice/code".
@@ -197,7 +197,7 @@ def call(path: str, payload=None, params=None, method: str = "POST", form: bool 
         if res.status_code != 200:
             raise MISAError(f"http_{res.status_code}", f"MISA từ chối {path} ({res.status_code})")
 
-        return _unwrap(res, path)
+        return _unwrap(res, path, with_meta=with_meta)
 
     raise last_err or MISAError("unknown", f"Không gọi được {path}")
 
@@ -222,8 +222,11 @@ def _pick(d, *names):
     return None
 
 
-def _unwrap(res, path: str):
-    """Kiểm cờ success rồi trả về Data đã parse. Trả nguyên body nếu không có wrapper."""
+def _unwrap(res, path: str, with_meta: bool = False):
+    """Kiểm cờ success rồi trả về Data đã parse. Trả nguyên body nếu không có wrapper.
+
+    with_meta=True → trả (data, wrapper) để đọc recordsTotal/recordsFiltered.
+    """
     try:
         body = res.json()
     except Exception:
@@ -241,8 +244,9 @@ def _unwrap(res, path: str):
         raise MISAError(code or "error", _text(msg), raw=body)
 
     if "data" in {str(k).lower() for k in body}:
-        return parse_nested_data(_pick(body, "data"))
-    return body
+        data = parse_nested_data(_pick(body, "data"))
+        return (data, body) if with_meta else data
+    return (body, body) if with_meta else body
 
 
 def parse_nested_data(data):
