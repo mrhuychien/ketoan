@@ -1,0 +1,205 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-08-18 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "chain",
+  "customer",
+  "company",
+  "column_break_head",
+  "advice_no",
+  "payment_date",
+  "file_name",
+  "status",
+  "total_section",
+  "total_payment",
+  "total_discount",
+  "total_fee",
+  "total_other",
+  "column_break_total",
+  "declared_total_payment",
+  "declared_total_discount",
+  "reconciled",
+  "note",
+  "lines_section",
+  "lines"
+ ],
+ "fields": [
+  {
+   "default": "MT-BK-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Chuỗi số",
+   "options": "MT-BK-.YYYY.-",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "description": "Mỗi chuỗi một định dạng file khác nhau — chuỗi quyết định parser nào được dùng.",
+   "fieldname": "chain",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Chuỗi siêu thị",
+   "options": "\nWinCommerce\nCentral Retail\nLOTTE\nEmart\nSaigon Co.op",
+   "reqd": 1
+  },
+  {
+   "description": "Ánh xạ mã nhà cung cấp của chuỗi → Customer do kế toán chốt, hệ thống KHÔNG tự đoán.",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Khách hàng",
+   "options": "Customer",
+   "search_index": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Công ty",
+   "options": "Company"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Số chứng từ thanh toán do chuỗi cấp (Clearing Doc., Số chứng từ, Chứng từ thanh toán...).",
+   "fieldname": "advice_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Số bảng kê / chứng từ chuỗi",
+   "search_index": 1
+  },
+  {
+   "description": "Ngày thanh toán của bảng kê này. Một FILE có thể chứa nhiều kỳ → mỗi kỳ một bản ghi riêng.",
+   "fieldname": "payment_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Ngày thanh toán",
+   "search_index": 1
+  },
+  {
+   "fieldname": "file_name",
+   "fieldtype": "Data",
+   "label": "Tên file nguồn",
+   "read_only": 1
+  },
+  {
+   "default": "Nháp",
+   "description": "Chỉ GHI NHẬN + đánh dấu. Hệ thống KHÔNG tự tạo Payment Entry / Journal Entry — con người quyết định hạch toán.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Trạng thái",
+   "options": "Nháp\nĐã đối chiếu\nĐã ghi nhận",
+   "reqd": 1
+  },
+  {
+   "fieldname": "total_section",
+   "fieldtype": "Section Break",
+   "label": "Tổng hợp & đối chiếu"
+  },
+  {
+   "description": "Tự cộng từ các dòng 'Thanh toán'. Không sửa tay.",
+   "fieldname": "total_payment",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Tổng thanh toán",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_discount",
+   "fieldtype": "Currency",
+   "label": "Tổng chiết khấu",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_fee",
+   "fieldtype": "Currency",
+   "label": "Tổng phí",
+   "read_only": 1
+  },
+  {
+   "description": "Cộng từ dòng 'Ghi giảm' và 'Khác'.",
+   "fieldname": "total_other",
+   "fieldtype": "Currency",
+   "label": "Tổng ghi giảm / khác",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_total",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "SỐ KIỂM TRA do chính chuỗi in trong file (Overall Result / SUM / Tổng cộng / Tổng Tiền Thanh Toán). Nhập từ file, không tự tính.",
+   "fieldname": "declared_total_payment",
+   "fieldtype": "Currency",
+   "label": "Tổng theo file"
+  },
+  {
+   "fieldname": "declared_total_discount",
+   "fieldtype": "Currency",
+   "label": "Tổng chiết khấu theo file"
+  },
+  {
+   "default": "0",
+   "description": "Kế toán tự tick sau khi đã soi lệch. Hệ thống KHÔNG tự tick.",
+   "fieldname": "reconciled",
+   "fieldtype": "Check",
+   "label": "Đã đối chiếu khớp"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú của kế toán"
+  },
+  {
+   "fieldname": "lines_section",
+   "fieldtype": "Section Break",
+   "label": "Chi tiết dòng"
+  },
+  {
+   "fieldname": "lines",
+   "fieldtype": "Table",
+   "label": "Dòng bảng kê",
+   "options": "MT Payment Advice Line"
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Payment Advice",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1,
+   "role": "System Manager"
+  },
+  {
+   "create": 1, "delete": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1,
+   "role": "Ke Toan Truong"
+  },
+  {
+   "create": 1, "delete": 1, "export": 1, "print": 1, "read": 1, "report": 1, "write": 1,
+   "role": "Accounts Manager"
+  },
+  {
+   "create": 1, "print": 1, "read": 1, "report": 1, "write": 1,
+   "role": "Ke Toan MT"
+  },
+  {
+   "read": 1, "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "title_field": "advice_no",
+ "track_changes": 1
+}

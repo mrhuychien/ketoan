@@ -1,0 +1,177 @@
+{
+ "actions": [],
+ "creation": "2026-08-18 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "row_kind",
+  "inv_series",
+  "inv_no",
+  "inv_no_norm",
+  "inv_date",
+  "column_break_inv",
+  "store_code",
+  "store_name",
+  "doc_no",
+  "description",
+  "amount_section",
+  "amount_before_vat",
+  "vat_amount",
+  "total_amount",
+  "column_break_amount",
+  "payment_date",
+  "match_section",
+  "sales_invoice",
+  "match_method",
+  "column_break_match",
+  "match_confidence",
+  "source_row"
+ ],
+ "fields": [
+  {
+   "description": "Phân loại theo CỘT LOẠI CHỨNG TỪ của từng chuỗi, KHÔNG theo dấu số tiền (mỗi chuỗi một quy ước dấu khác nhau).",
+   "fieldname": "row_kind",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Loại dòng",
+   "options": "\nThanh toán\nChiết khấu\nPhí\nGhi giảm\nKhác",
+   "reqd": 1
+  },
+  {
+   "description": "Ký hiệu hóa đơn đọc từ file. Emart KHÔNG cấp ký hiệu → để trống, tuyệt đối không đoán.",
+   "fieldname": "inv_series",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Ký hiệu",
+   "search_index": 1
+  },
+  {
+   "fieldname": "inv_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Số hóa đơn",
+   "search_index": 1
+  },
+  {
+   "description": "Số hóa đơn đã bỏ số 0 ở đầu — dùng để join, không sửa tay.",
+   "fieldname": "inv_no_norm",
+   "fieldtype": "Data",
+   "label": "Số hóa đơn (chuẩn hóa)",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "inv_date",
+   "fieldtype": "Date",
+   "label": "Ngày hóa đơn"
+  },
+  {
+   "fieldname": "column_break_inv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Mã siêu thị thành viên. File nào không có thì để trống, không suy ra từ mã nhà cung cấp.",
+   "fieldname": "store_code",
+   "fieldtype": "Data",
+   "label": "Mã siêu thị"
+  },
+  {
+   "fieldname": "store_name",
+   "fieldtype": "Data",
+   "label": "Tên siêu thị"
+  },
+  {
+   "description": "Số chứng từ bên chuỗi (Clearing Doc., Số chứng từ, SỐ HÓA ĐƠN LH...).",
+   "fieldname": "doc_no",
+   "fieldtype": "Data",
+   "label": "Số chứng từ chuỗi"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Diễn giải"
+  },
+  {
+   "fieldname": "amount_section",
+   "fieldtype": "Section Break",
+   "label": "Số tiền"
+  },
+  {
+   "description": "Chỉ điền khi FILE có cột riêng (LOTTE). File chỉ có một cột tiền thì để trống — cấm tự chia 1.1/1.08 để suy ra.",
+   "fieldname": "amount_before_vat",
+   "fieldtype": "Currency",
+   "label": "Tiền trước thuế"
+  },
+  {
+   "description": "Chỉ điền khi FILE có cột riêng. Tự suy ra là bịa số tiền.",
+   "fieldname": "vat_amount",
+   "fieldtype": "Currency",
+   "label": "Tiền thuế GTGT"
+  },
+  {
+   "description": "Giữ nguyên DẤU đọc được từ file — dấu là chốt đối chiếu với dòng tổng của chuỗi.",
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Số tiền"
+  },
+  {
+   "fieldname": "column_break_amount",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Ngày thanh toán của CHÍNH DÒNG NÀY — một file có thể chứa nhiều kỳ thanh toán (LOTTE, Co.op).",
+   "fieldname": "payment_date",
+   "fieldtype": "Date",
+   "label": "Ngày thanh toán"
+  },
+  {
+   "fieldname": "match_section",
+   "fieldtype": "Section Break",
+   "label": "Đối soát hóa đơn"
+  },
+  {
+   "description": "CHỈ dòng 'Thanh toán' mới được nối Sales Invoice. Dòng chiết khấu/phí có thể mang ký hiệu hóa đơn của mình mà KHÔNG phải thanh toán hóa đơn đó.",
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Hóa đơn ERPNext",
+   "options": "Sales Invoice",
+   "search_index": 1
+  },
+  {
+   "fieldname": "match_method",
+   "fieldtype": "Data",
+   "label": "Cách khớp"
+  },
+  {
+   "fieldname": "column_break_match",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Emart không có ký hiệu (khớp bằng số + ngày + tiền) → LUÔN là 'Cần review'.",
+   "fieldname": "match_confidence",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Độ tin cậy",
+   "options": "\nChắc chắn\nCần review\nKhông khớp"
+  },
+  {
+   "description": "Số dòng trong file gốc (1-indexed như người dùng nhìn trong Excel) — để truy ngược khi nghi ngờ.",
+   "fieldname": "source_row",
+   "fieldtype": "Int",
+   "label": "Dòng trong file"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Payment Advice Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

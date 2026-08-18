@@ -1,0 +1,824 @@
+[
+ {
+  "chain": "wincommerce",
+  "verified": true,
+  "sheet": "Table 5 + Table 7 + Table 8 (BA sheet dữ liệu, không phải một). Table 1-4 = khối thông tin, Table 6 = chân trang chuyển số, Table 9 = chứng từ thanh toán. Tổng 9 sheet — KHÔNG phải 7 như gợi ý.",
+  "header_row": 1,
+  "columns": {
+   "doc_no": "Số chứng từ",
+   "invoice_raw": "Số hóa đơn",
+   "inv_date": "Ngày hóa đơn",
+   "recon_no": "Số đối soát",
+   "discount": "Chiết khấu",
+   "total_amount": "Số tiền",
+   "payment_date": "Table 2 khối text 'Ngày thanh toán' + Table 9 cột 'Ngày'",
+   "payment_doc": "Table 9 cột 'Chứng từ thanh toán' (= 2000141337, trùng 'Số đối soát' mọi dòng)",
+   "amount_before_vat": "KHÔNG CÓ trong file",
+   "vat_amount": "KHÔNG CÓ trong file",
+   "store_code": "KHÔNG CÓ trong file",
+   "store_name": "KHÔNG CÓ trong file"
+  },
+  "row_types": [
+   {
+    "kind": "thanh_toan",
+    "label": "Dòng hóa đơn được thanh toán",
+    "count": 36,
+    "sign": "dương",
+    "rule": "Sau dòng header, có 'Số hóa đơn' dạng <ký hiệu>#<số> VÀ 'Số tiền' ép được sang số. Phân bố: Table 5 = 11 dòng (r2,4,...,22), Table 7 = 21 dòng (r2,4,...,42), Table 8 = 4 dòng (r2,4,6,8)."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng phân cách '**********'",
+    "count": 36,
+    "sign": "không có tiền",
+    "rule": "Ô cột 'Ngày hóa đơn' là chuỗi TOÀN dấu sao. Đúng 1 dòng sao sau MỖI dòng dữ liệu (11+21+4). Chỉ là đường kẻ của bản in PDF."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng tiêu đề cột của bảng dữ liệu",
+    "count": 3,
+    "sign": "không có tiền",
+    "rule": "Table 5 r1, Table 7 r1, Table 8 r1 — chứa đủ 'Số hóa đơn' và 'Số tiền'."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Khối thông tin bên mua/bên bán/thanh toán/lời chào",
+    "count": 5,
+    "sign": "không có tiền",
+    "rule": "Table 1 r1, Table 2 r1, Table 2 r2, Table 3 r1, Table 4 r1 — mỗi ô là một khối text nhiều dòng ngăn bởi \\n. Table 2 r2 chứa 'Ngày thanh toán\\n25.06.2026'."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Chân trang 'Số dư mang sang trang sau' (SỐ KIỂM TRA, không phải tiền mới)",
+    "count": 1,
+    "sign": "dương nhưng KHÔNG được cộng",
+    "rule": "Table 6 r1, ô text chứa 'Số dư mang sang trang sau ... 0 ... 70.880.508'. Bằng ĐÚNG tổng Table 5. Cộng vào là nhân đôi tiền trang 1."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng trống",
+    "count": 1,
+    "sign": "không có tiền",
+    "rule": "Table 6 r2 — mọi ô None."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Mảnh tiêu đề chân trang lặp lại",
+    "count": 1,
+    "sign": "không có tiền",
+    "rule": "Table 7 r44: chỉ có 'Chiết khấu' (cột E) và 'Số tiền' (cột G), không có số chứng từ, không có tiền. Là header của trang in kế tiếp bị cắt rơi lại."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng 'Tổng cộng' (SỐ KIỂM TRA)",
+    "count": 1,
+    "sign": "dương nhưng KHÔNG được cộng",
+    "rule": "Table 8 r10: cột A = 'Tổng cộng', cột 'Chiết khấu' = 0, cột 'Số tiền' = 245.795.904."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Bảng chứng từ thanh toán (Table 9)",
+    "count": 2,
+    "sign": "dương nhưng KHÔNG được cộng",
+    "rule": "r1 header 'Chứng từ thanh toán | Ngày | Đơn vị tiền tệ | Số tiền'; r2 = 2000141337 | 2026-06-25 | VND | '******245.795.904*'. Là tổng lần thanh toán, số dạng CHUỖI có sao bao quanh."
+   },
+   {
+    "kind": "chiet_khau",
+    "label": "Chiết khấu (cột riêng trên chính dòng hóa đơn)",
+    "count": 0,
+    "sign": "dương, ghi giảm",
+    "rule": "Cột 'Chiết khấu' TỒN TẠI trên mọi dòng dữ liệu nhưng trong file này = 0 ở cả 36/36 dòng. Parser đã có nhánh tách thành dòng riêng khi khác 0, nhưng nhánh đó CHƯA được xác minh bằng dữ liệu thật."
+   }
+  ],
+  "totals": {
+   "tong_dong_vat_ly_trong_file": 86,
+   "tong_dong_parser_tra_ve": 85,
+   "chenh_lech_dong": "1 — dòng trống Table 6 r2 bị bỏ, không emit. Cố ý.",
+   "thanh_toan_Table5": 70880508,
+   "thanh_toan_Table7": 134593596,
+   "thanh_toan_Table8": 40321800,
+   "thanh_toan_TONG": 245795904,
+   "so_dong_thanh_toan": 36,
+   "chiet_khau_TONG": 0,
+   "kiem_tra_1_carry_forward_Table6": 70880508,
+   "kiem_tra_1_khop": "ĐÚNG — bằng chính xác tổng Table 5, xác nhận Table 6 là chân trang chứ không phải tiêu đề mục Chiết khấu",
+   "kiem_tra_2_Tong_cong_Table8_r10": 245795904,
+   "kiem_tra_2_khop": "ĐÚNG — bằng T5+T7+T8",
+   "kiem_tra_3_Chung_tu_thanh_toan_Table9": 245795904,
+   "kiem_tra_3_khop": "ĐÚNG — chuỗi '******245.795.904*' sau khi bóc sao và bỏ dấu chấm nghìn",
+   "doc_no_duy_nhat": "36/36 — không có Số chứng từ trùng",
+   "inv_no_duy_nhat": "36/36 — không có số hóa đơn trùng",
+   "ky_hieu_hoa_don": "chỉ một giá trị '1C26THG' trên cả 36 dòng",
+   "ngay_hoa_don_phan_bo": [
+    "2026-02-27",
+    "2026-03-22",
+    "2026-04-04",
+    "2026-04-07"
+   ],
+   "ngay_thanh_toan": "2026-06-25 (duy nhất, hai nguồn Table 2 và Table 9 khớp nhau)",
+   "ket_luan": "KHỚP TUYỆT ĐỐI ở cả 3 điểm kiểm tra độc lập, lệch 0 đồng."
+  },
+  "payment_dates": [
+   "2026-06-25"
+  ],
+  "invoice_parse": "Cột 'Số hóa đơn' có dạng '<ký hiệu>#<số>'. Tách tại ký tự '#' ĐẦU TIÊN: trái = inv_series, phải = inv_no. Ví dụ thật trong file: '1C26THG#1730' -> ('1C26THG','1730'); '1C26THG#2355' -> ('1C26THG','2355'); '1C26THG#2723' -> ('1C26THG','2723'). Không có '#' thì TRẢ inv_series='' và đưa cả chuỗi vào inv_no — tuyệt đối không đoán ký hiệu (đoán là gán nhầm hóa đơn). Lưu ý dùng '#' chứ không dùng regex 'ký tự không phải chữ số' chung với Central Retail ('|'). Ở TẦNG KHỚP (không phải tầng đọc) phải áp §E của hợp đồng: bỏ chữ số dạng hóa đơn ở đầu ký hiệu, tức '1C26THG' và 'C26THG' là MỘT. File này chỉ chứa '1C26THG' nên bài học đó chưa lộ ra ở đây.",
+  "date_parse": "Cột 'Ngày hóa đơn' đã là datetime.datetime thật của Excel (data_type='d') ở cả 36/36 dòng — dùng .date().isoformat(). KHÔNG có dòng nào ngày là chuỗi. Ngày thanh toán có HAI nguồn: (1) Table 2 r2, khối text nhiều dòng, nhãn 'Ngày thanh toán' nằm ở dòng trên và giá trị '25.06.2026' ở dòng NGAY DƯỚI (định dạng dd.mm.yyyy, dấu chấm) — phải split('\\n') rồi lấy dòng kế; (2) Table 9 r2 cột 'Ngày' là datetime thật 2026-06-25. Hai nguồn khớp nhau. Parser ưu tiên nguồn (2) vì là kiểu ngày thật, không phụ thuộc parse chuỗi.",
+  "amount_parse": "Cột 'Số tiền' và 'Chiết khấu' trên các dòng dữ liệu là số nguyên Excel thật (int), không phải chuỗi — dùng trực tiếp. Toàn bộ DƯƠNG, không có số âm nào trong file. File KHÔNG tách VAT: chỉ một cột tiền duy nhất (đã gồm thuế) => amount_before_vat=None và vat_amount=None, tuyệt đối không tự chia 1.1/1.08 để suy ra. Riêng ô tổng ở Table 9 r2 là CHUỖI '******245.795.904*': phải strip('*') rồi bỏ dấu '.' (phân cách nghìn kiểu VN) và đổi ',' thành '.' (thập phân) trước khi ép float. Chuỗi trong Table 6 cũng vậy: '70.880.508'.",
+  "pitfalls": [
+   "BẪY LỚN NHẤT — GỢI Ý BAN ĐẦU SAI: file có 9 sheet chứ không phải 7, và Table 6 KHÔNG phải tiêu đề mục 'Chiết khấu'. Table 6 là CHÂN TRANG của bản in: 'Chiết khấu   Số tiền / Số dư mang sang trang sau   0   70.880.508'. Hai chữ 'Chiết khấu' ở đó là nhãn CỘT, không phải nhãn MỤC. Bằng chứng số học: 70.880.508 = đúng tổng Table 5. Suy ra Table 7 (và Table 8) là PHẦN TIẾP THEO của cùng bảng thanh toán, KHÔNG phải danh sách chiết khấu. Nếu tin gợi ý mà gán Table 7 = chiet_khau thì 134.593.596đ bị ghi nhận sai loại, và 40.321.800đ của Table 8 bị bỏ quên hoàn toàn.",
+   "BỎ SÓT SHEET = BỎ SÓT TIỀN: chỉ đọc Table 5 là mất 174.915.396đ (71% số tiền). Đây là file PDF convert sang Excel, MỖI TRANG IN thành một sheet, nên bảng dữ liệu bị cắt rời. Phải quét MỌI sheet và dò header, không được hardcode tên sheet.",
+   "LỆCH CỘT GIỮA CÁC SHEET: Table 7 có THÊM một cột A rỗng (merged A1:A42) nên mọi cột dịch phải 1 ô so với Table 5 và Table 8 (Số tiền ở index 6 thay vì 5). Hardcode chỉ số cột là đọc lệch cột tiền của 21/36 dòng. Bắt buộc dò dòng header theo NHÃN rồi map cột.",
+   "HAI SỐ KIỂM TRA DỄ BỊ CỘNG NHẦM THÀNH TIỀN: 'Số dư mang sang trang sau 70.880.508' (Table 6) và 'Tổng cộng 245.795.904' (Table 8 r10). Cộng cả hai vào là ra 561.472.316đ thay vì 245.795.904đ. Phải nhận diện và loại, rồi DÙNG chúng làm chốt đối chiếu.",
+   "DÒNG SAO KHÔNG PHẢI LÚC NÀO CŨNG 10 SAO: dòng phân cách trong bảng là '**********' (10 sao) nhưng Table 4 r1 chứa '*****************************************' (41 sao) và Table 9 r2 chứa '******245.795.904*'. So sánh cứng chuỗi 10 sao là mong manh; kiểm tra 'tập ký tự == {*}' thì Table 9 lại KHÔNG dính (vì có chữ số) — đúng như mong muốn.",
+   "SỐ TIỀN TỔNG NẰM TRONG CHUỖI, KHÔNG PHẢI SỐ: Table 9 r2 cột 'Số tiền' là chuỗi '******245.795.904*'. Ép float thẳng là ValueError. Và dấu '.' ở đây là phân cách NGHÌN kiểu VN, không phải thập phân — bỏ nhầm quy ước là sai 1000 lần.",
+   "MẢNH HEADER MỒ CÔI: Table 7 r44 chỉ có 'Chiết khấu' (cột E) và 'Số tiền' (cột G), không số chứng từ, không tiền. Nếu chỉ lọc 'dòng nào có chữ Chiết khấu thì là mục chiết khấu' sẽ tạo ra một dòng chiết khấu ma.",
+   "KHÔNG CÓ VAT, KHÔNG CÓ CỬA HÀNG: file chỉ có MỘT cột tiền, không tách trước/sau thuế; và không có mã/tên siêu thị thành viên nào. amount_before_vat, vat_amount, store_code, store_name buộc phải để None/'' — tự suy ra là bịa số.",
+   "'Số đối soát' (2000141337) GIỐNG HỆT NHAU ở cả 36 dòng và TRÙNG với 'Chứng từ thanh toán' ở Table 9. Nó là mã lần thanh toán, KHÔNG phải khóa dòng. Dùng nó làm khóa khớp hóa đơn là gộp nhầm 36 dòng làm một.",
+   "CỘT 'Chiết khấu' TỒN TẠI TRÊN MỌI DÒNG nhưng bằng 0 hết. Đừng kết luận 'WinCommerce không có chiết khấu' — chỉ là kỳ thanh toán này không có. Cấu trúc cột riêng đúng như §C hợp đồng đã ghi.",
+   "SỐ DÒNG TRONG HỢP ĐỒNG (§A: '23 + 44') THIẾU: thực tế 23 + 44 + 10 (Table 8) + 2 (Table 9) + 5 (Table 1-4, 6) = 86 dòng vật lý. Cần sửa lại hợp đồng.",
+   "Ngày thanh toán ở Table 2 nằm TRONG một ô text nhiều dòng, nhãn và giá trị ở hai dòng \\n khác nhau, định dạng dd.mm.yyyy. Không có cột riêng để đọc."
+  ],
+  "unverified": [
+   "Nhánh chiet_khau CHƯA chạy được lần nào: cột 'Chiết khấu' bằng 0 ở cả 36/36 dòng của file này. Chưa biết chiết khấu khác 0 hiển thị thế nào (dương hay âm, có kèm dòng mô tả riêng không). Cần thêm một file WinCommerce có chiết khấu thật.",
+   "Chưa biết WinCommerce có dòng PHÍ / GHI GIẢM riêng hay không — file này không có dòng nào ngoài hóa đơn hàng hóa.",
+   "Chưa xác minh file WinCommerce nhiều kỳ thanh toán: file này chỉ có MỘT ngày thanh toán (25.06.2026). §H hợp đồng cảnh báo LOTTE có nhiều Payment Date — chưa biết WinCommerce có bao giờ gộp nhiều kỳ vào một file không.",
+   "Chưa xác minh số sheet biến thiên: file này 9 sheet. Số sheet phụ thuộc số TRANG IN, nên file nhiều hóa đơn hơn sẽ có nhiều sheet hơn (Table 10, 11...). Parser dò header nên tự thích nghi, nhưng chưa được thử trên file có số sheet khác.",
+   "Chưa xác minh ký hiệu không nhất quán trong CHÍNH file WinCommerce: ở đây chỉ có '1C26THG'. §E hợp đồng ghi nhận Central Retail và LOTTE có lẫn 'C26THG'/'1C26THG'. Chưa biết WinCommerce có lẫn không.",
+   "Chưa xác minh số tiền âm: toàn bộ 36 dòng đều dương. _num() có xử lý dấu ngoặc (1.234) và dấu trừ nhưng chưa có dữ liệu thật để kiểm.",
+   "'Số đối soát' 2000141337 giống hệt 'Chứng từ thanh toán' ở Table 9 — nhiều khả năng là cùng một mã lần thanh toán, nhưng CHƯA có xác nhận từ kế toán WinCommerce (đúng như §I hợp đồng đã treo).",
+   "'Mã công nợ của quý công ty tại hệ thống chúng tôi: / 2007766 /' (Table 2) — chưa rõ ánh xạ sang Customer nào của ERPNext.",
+   "Không có mã/tên siêu thị thành viên trong file => không thể đối chiếu theo cửa hàng. Chưa biết WinCommerce có bao giờ xuất bản kê chi tiết theo siêu thị không.",
+   "Chưa xác minh việc file có thể có ô công thức: đã đọc bằng data_only=True nên nếu file do máy tạo mà chưa cache giá trị thì sẽ ra None. File này là convert từ PDF nên toàn giá trị tĩnh, không rủi ro — nhưng file kỳ khác thì chưa biết."
+  ]
+ },
+ {
+  "chain": "central_retail",
+  "verified": true,
+  "sheet": "Sheet1 (workbook chỉ có 1 sheet, visible, không có dòng/cột ẩn, không merged cell, không autofilter, không công thức)",
+  "header_row": 1,
+  "columns": {
+   "inv_series": "Reference (phần trước dấu |)",
+   "inv_no": "Reference (phần sau dấu |)",
+   "inv_date": "Doc. Date",
+   "store_name": "Assignment (CHỈ đúng với dòng Doc.Type=K1; với D1/KS cột này chứa mã tài khoản kiểu '3003172.9999.' chứ không phải siêu thị)",
+   "store_code": "KHÔNG CÓ trong file — không được đoán",
+   "doc_no": "Clearing Doc. (số chứng từ bù trừ của Central Retail, 1000031683 / 1000032558)",
+   "amount_before_vat": "KHÔNG CÓ — file chỉ có một cột tiền duy nhất",
+   "vat_amount": "KHÔNG CÓ — cấm tự suy ra 10%",
+   "total_amount": "Amount",
+   "payment_date": "Clearing Date (KHÔNG phải 'Pmnt Date')",
+   "description": "Text",
+   "row_type_col": "Doc.Type",
+   "account": "Account (3003172 / 3006634 — hai tài khoản nhà cung cấp trong cùng 1 file)",
+   "terms_of_pmnt": "Terms of Pmnt (A040/A030 = điều khoản theo tài khoản; '#' = dòng phí/chiết khấu; 'Result' = dòng tổng)",
+   "entry_date": "Entry Date (chưa dùng)",
+   "due_date": "Pmnt Date (ngày ĐẾN HẠN từng hóa đơn — không phải ngày trả)"
+  },
+  "row_types": [
+   {
+    "kind": "thanh_toan",
+    "label": "Hàng hóa (hóa đơn bán ra)",
+    "rule": "Doc.Type = 'K1' VÀ ký hiệu trong Reference KHÔNG bắt đầu bằng 'K26TRT'",
+    "sign": "ÂM trong file",
+    "count": 184
+   },
+   {
+    "kind": "ghi_giam",
+    "label": "Trả hàng (TRA HANG)",
+    "rule": "Doc.Type = 'K1' NHƯNG Reference có ký hiệu 'K26TRT' (vd K26TRT|21246), Text = 'TRA HANG - 110'",
+    "sign": "DƯƠNG trong file — K1 mà dương, phá vỡ giả định 'K1 luôn âm'",
+    "count": 2
+   },
+   {
+    "kind": "phi",
+    "label": "Phí dịch vụ / phí dịch vụ EBS / phí hỗ trợ",
+    "rule": "Doc.Type = 'D1', Reference ký hiệu 'K26TEB' (chứng từ do Central Retail phát hành, KHÔNG phải hóa đơn của mình)",
+    "sign": "DƯƠNG",
+    "count": 6
+   },
+   {
+    "kind": "chiet_khau",
+    "label": "Chiết khấu (EBS chiet khau / CK tháng)",
+    "rule": "Doc.Type = 'KS'",
+    "sign": "DƯƠNG",
+    "count": 2
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng tổng theo Clearing Doc.",
+    "rule": "Terms of Pmnt = 'Result' (Doc.Type rỗng). Có 2 dòng — MỘT DÒNG CHO MỖI Clearing Doc., không phải chỉ 1 dòng r3 như hồ sơ cũ ghi",
+    "sign": "ÂM",
+    "count": 2
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng tổng toàn file",
+    "rule": "Account = 'Overall Result' (mọi cột khác rỗng, chỉ có Amount)",
+    "sign": "ÂM",
+    "count": 1
+   }
+  ],
+  "totals": {
+   "tong_so_dong_file": 198,
+   "dong_header": 1,
+   "dong_du_lieu": 197,
+   "kiem_tra_cong_so_dong": "184 + 2 + 6 + 2 + 2 + 1 = 197 ✓ (khớp tuyệt đối, không sót dòng nào)",
+   "thanh_toan_hang_hoa_raw": -721996632,
+   "tra_hang_raw": 5119605,
+   "phi_raw": 134708790,
+   "chiet_khau_raw": 27240347,
+   "tong_chi_tiet_194_dong_raw": -554927890,
+   "so_kiem_tra_trong_file_Overall_Result": -554927890,
+   "so_kiem_tra_Result_1000031683": -460442354,
+   "so_kiem_tra_Result_1000032558": -94485536,
+   "tong_2_dong_Result": -554927890,
+   "chenh_lech_chi_tiet_vs_Overall_Result": 0,
+   "chenh_lech_theo_tung_clearing_doc": "1000031683: 0 ; 1000032558: 0",
+   "khop": true,
+   "so_tien_thuc_nhan_dien_giai": "721.996.632 (hàng) - 134.708.790 (phí) - 27.240.347 (chiết khấu) - 5.119.605 (trả hàng) = 554.927.890 VND",
+   "so_hoa_don_ban_ra_duoc_thanh_toan": 184,
+   "so_sieu_thi_xuat_hien": 59,
+   "ngay_thanh_toan_duy_nhat": "2026-08-05 (khớp tên file 05.08)"
+  },
+  "invoice_parse": "Reference = '<KÝ HIỆU>|<SỐ>', tách bằng partition('|'). Ký hiệu chuẩn hóa bằng cách BỎ CHỮ SỐ DẠNG HÓA ĐƠN Ở ĐẦU: re.sub(r'^\\d+','',series). Ví dụ thật trong chính file này: 'C26THG|4675' -> (C26THG, 4675); '1C26THG|4674' -> (1C26THG, 4674) chuẩn hóa còn C26THG — CÙNG một dải hóa đơn (xác nhận §E hợp đồng, 4 dòng K1 mang tiền tố '1': r44 DONG NAI|4674, r47 DONG NAI|4517, r136 DONG NAI|4981, r178 DA NANG|5144 — tiền tố '1' KHÔNG tương quan với siêu thị nào, hoàn toàn ngẫu nhiên). Ký hiệu của BÊN CHUỖI, không phải hóa đơn của mình: 'K26TEB|74986' (hóa đơn phí Central Retail phát hành), 'K26TRT|21246' (phiếu trả hàng). Có 1 dòng Reference KHÔNG có dấu '|': 'CK T07.2026' (r97, Doc.Type=KS) -> inv_series=None, inv_no=None. Không có Reference nào trùng lặp trong file (0 duplicate).",
+  "amount_parse": "Cột 'Amount' đã là số float trong openpyxl, mọi giá trị đều là SỐ NGUYÊN VND (kiểm tra: không có giá trị nào lẻ phần thập phân). Không có dấu phẩy ngăn cách, không có dạng ngoặc đơn âm, không có công thức trong file. Parser vẫn giữ nhánh xử lý chuỗi (bỏ ',', bỏ khoảng trắng, '(1.234)' -> âm) để phòng file kỳ sau xuất khác. Dấu gốc được giữ nguyên ở khóa raw_amount để đối chiếu dòng tổng; total_amount là trị tuyệt đối để so với grand_total của Sales Invoice.",
+  "date_parse": "Mọi ô ngày (Doc. Date, Entry Date, Pmnt Date, Clearing Date) đều đã là datetime.datetime thật trong openpyxl -> chỉ cần .date().isoformat(). Không gặp serial number, không gặp text ngày. Parser vẫn có fallback strptime cho '%d.%m.%Y', '%d/%m/%Y', '%Y-%m-%d', '%Y%m%d'.",
+  "payment_dates": [
+   "2026-08-05"
+  ],
+  "pitfalls": [
+   "BẪY TIỀN NẶNG NHẤT — 'Pmnt Date' KHÔNG phải ngày thanh toán. Cột này có 24 giá trị khác nhau (06/07 đến 01/09/2026), trong đó có 2 ngày NẰM SAU ngày trả thực tế (25/08/2026 và 01/09/2026). Đó là ngày ĐẾN HẠN của từng hóa đơn. Ngày trả thật là 'Clearing Date' = 2026-08-05 duy nhất cho cả file, khớp tên file '05.08'. Lấy nhầm cột là ghi sai kỳ thanh toán và tạo bút toán ở tháng chưa tới.",
+   "BẪY — Doc.Type='K1' KHÔNG đồng nghĩa 'hàng hóa, số âm'. Có 2 dòng K1 mang số DƯƠNG (r94, r95): Reference 'K26TRT|21246' / 'K26TRT|21900', Text 'TRA HANG - 110' / 'TRA HANG - 114' = HÀNG TRẢ LẠI, phải ghi giảm. Phân loại chỉ bằng Doc.Type sẽ cộng 5.119.605 vào tiền hàng (sai 2 lần con số này = 10.239.210). Phải kiểm thêm ký hiệu K26TRT. Đồng thời vẫn cấm phân loại bằng dấu theo §B hợp đồng.",
+   "BẪY — Doc.Type='KS' (chiết khấu) HOÀN TOÀN THIẾU trong hợp đồng hiện tại (§C chỉ ghi K1 và D1). Có 2 dòng KS, tổng 27.240.347 VND. Nếu code chỉ nhận K1/D1 thì 27 triệu này rơi vào nhánh 'không nhận diện' và tổng sẽ lệch.",
+   "BẪY — dòng KS r96 có Reference '1C26THG|5656', tức MANG KÝ HIỆU HÓA ĐƠN BÁN RA CỦA MÌNH nhưng KHÔNG phải thanh toán hóa đơn đó, mà là chiết khấu 1.916.203. Nếu khớp Reference -> Sales Invoice một cách mù quáng sẽ đánh dấu hóa đơn 5656 là ĐÃ THANH TOÁN trong khi thực tế chưa. Phải chặn: chỉ dòng row_kind='thanh_toan' mới được khớp sang Sales Invoice.",
+   "BẪY — file có HAI dòng 'Result', không phải một. Hồ sơ cũ ghi 'dòng Terms of Pmnt = Result (r3)' như thể chỉ có 1. Thực tế mỗi Clearing Doc. có 1 dòng Result riêng: r3 (1000031683 = -460.442.354) và r129 (1000032558 = -94.485.536). Bỏ theo vị trí dòng cứng r3 sẽ cộng nhầm -94.485.536 vào chi tiết.",
+   "BẪY — file chứa HAI tài khoản nhà cung cấp (Account 3003172 với 126 dòng và 3006634 với 70 dòng), tương ứng hai Clearing Doc. và hai điều khoản thanh toán khác nhau (A040 vs A030). Đây là hai lần bù trừ riêng biệt trong cùng một file. Không được coi cả file là một chứng từ thanh toán duy nhất.",
+   "BẪY — 'Terms of Pmnt' vừa là điều khoản thanh toán (A040/A030/'#') vừa là cờ đánh dấu dòng tổng ('Result'). Một cột hai vai trò. Nếu map cột này thành field điều khoản rồi lọc dòng tổng ở chỗ khác thì dễ sót.",
+   "BẪY — cột 'Assignment' KHÔNG đồng nhất kiểu dữ liệu. Với dòng K1 là TÊN siêu thị (chuỗi, 59 giá trị: 'VINH', 'go! PHU MY', 'GARDEN MALL'...). Với dòng D1/KS là mã tài khoản: '3003172.9999.', '3006634.9999.', '3003172..9999' (chú ý HAI dấu chấm — không nhất quán ngay trong file), và r96 là số nguyên int 3003172 chứ không phải chuỗi. str() thẳng ra '3003172' còn openpyxl trả int -> so sánh chuỗi sẽ trượt.",
+   "BẪY — Text cùng nội dung nhưng khác dấu tiếng Việt: 'Hàng hóa quầy 0410.3006634' (63 dòng) và 'Hang hoa quay 0410.3006634' (3 dòng, không dấu). Không được phân loại dòng bằng cách so khớp Text.",
+   "BẪY — Text phí có HAI khoảng trắng liền: 'Phí dịch vụ  EBS Tháng 07.2026 Quầy 0410'. Phải chuẩn hóa khoảng trắng trước khi so sánh.",
+   "BẪY — file KHÔNG có cột VAT, KHÔNG có tiền trước thuế, KHÔNG có mã siêu thị. Chỉ có một cột 'Amount' duy nhất. Tuyệt đối không tự chia 1.1 hay nhân 10% để suy amount_before_vat/vat_amount — đó là bịa số tiền.",
+   "BẪY — chuỗi phí 'K26TEB' và trả hàng 'K26TRT' rất giống nhau (khác 1 ký tự), lại cùng tiền tố 'K26T'. So khớp bằng startswith('K26T') sẽ gộp nhầm phí với trả hàng.",
+   "BẪY — Reference có thể KHÔNG chứa dấu '|' ('CK T07.2026'). ref.split('|')[1] sẽ nổ IndexError; phải dùng partition và kiểm tra."
+  ],
+  "unverified": [
+   "Ý nghĩa nghiệp vụ của 'Terms of Pmnt' A040 vs A030 — chỉ quan sát được A040 gắn với Account 3003172, A030 gắn với Account 3006634, và '#' gắn với mọi dòng phí/chiết khấu. Chưa biết đó là số ngày công nợ hay điều gì khác.",
+   "Ý nghĩa của 'Account' 3003172 vs 3006634 — cả hai đều là 'quầy 0410' theo cột Text. Chưa biết đây là hai mã nhà cung cấp, hai pháp nhân, hay hai nhóm hàng. Chưa có ánh xạ sang Customer của ERPNext.",
+   "Ý nghĩa hậu tố '.9999' trong Assignment của dòng phí ('3003172.9999.') và biến thể '3003172..9999' của dòng chiết khấu.",
+   "Ký hiệu 'K26TEB' và 'K26TRT' là chứng từ do Central Retail phát hành. Chưa xác minh chúng có tương ứng với Purchase Invoice / Credit Note nào bên mình không, và có phải nhập liệu tay không.",
+   "Số '110' và '114' trong Text 'TRA HANG - 110' / 'TRA HANG - 114' là gì (số phiếu trả? mã lý do?).",
+   "Ánh xạ 59 tên siêu thị trong cột Assignment sang mã kho / Cost Center / Territory của ERPNext — file KHÔNG cung cấp mã, chỉ có tên viết hoa không dấu, và có cả tiền tố 'go!' cho định dạng GO!.",
+   "Có kỳ nào Doc.Type xuất hiện giá trị khác K1/D1/KS không (parser đã có nhánh 'doctype_la' để đánh dấu thay vì đoán, nhưng chưa gặp mẫu thật).",
+   "Có kỳ nào một file chứa nhiều 'Clearing Date' khác nhau không (file này chỉ có 1 ngày duy nhất; LOTTE đã có tiền lệ nhiều ngày thanh toán theo §H hợp đồng, nên không được giả định Central Retail luôn 1 ngày).",
+   "Chưa xác minh 4 file chuỗi còn lại (WinCommerce, LOTTE, Emart, Co.op) — nhiệm vụ này chỉ soi central_retail."
+  ]
+ },
+ {
+  "chain": "lotte",
+  "verified": true,
+  "sheet": "Payment deduct detail(1) — file chỉ có ĐÚNG 1 sheet, 135 dòng x 15 cột, MỌI ô đều là text (xlrd ctype=1, kể cả tiền và ngày). Định dạng BIFF .xls thật (CDFV2), phải dùng xlrd 2.x; openpyxl KHÔNG đọc được.",
+  "header_row": 1,
+  "columns": {
+   "inv_series": "Tax No",
+   "inv_no": "Invoice No",
+   "inv_date": "Invoice Date",
+   "write_date": "Write Date",
+   "store_code": "Store CD",
+   "store_name": "Store Name",
+   "vendor_code": "Vendor CD",
+   "vendor_name": "Vendor Name",
+   "doc_no": "Deduct Name (CHỈ khi giá trị không thuộc 3 danh mục '*- Auto' — lúc đó nó là số chứng từ, vd '260626-01006-1-0265')",
+   "amount_before_vat": "Pay Amt",
+   "vat_amount": "Vat Amt",
+   "total_amount": "Total Amt",
+   "payment_date": "Payment Date",
+   "description": "Deduct Cause",
+   "row_kind_source": "Deduct Name + Deduct Cause (KHÔNG dùng dấu tiền)",
+   "stt": "NO"
+  },
+  "date_parse": "Chuỗi 8 ký tự YYYYMMDD -> ISO. '20260523' -> '2026-05-23'. KHÔNG phải serial ngày Excel: ô là TEXT nên tuyệt đối không gọi xlrd.xldate_as_tuple (sẽ ném lỗi hoặc ra ngày 1970). Áp dụng cho cả 3 cột ngày: Write Date, Invoice Date, Payment Date. Ô rỗng '' -> None (dòng khấu trừ không có Write/Invoice Date; dòng SUB SUM/SUM không có Payment Date). Đã kiểm: 100% giá trị ngày khác rỗng đều khớp regex \\d{8}; không có dòng nào write_date < inv_date. Khoảng inv_date thật: 2026-04-21..2026-06-13; write_date: 2026-05-18..2026-06-15.",
+  "amount_parse": "Chuỗi có dấu phẩy ngăn nghìn, dấu trừ ĐỨNG TRƯỚC, không có phần thập phân. Dạng thật quan sát được (thay mọi chữ số bằng 9): '9' (tức '0'), '99,999', '999,999', '9,999,999', '99,999,999', '999,999,999', '-9,999', '-99,999', '-999,999', '-9,999,999'. Quy tắc: bỏ NBSP/space, bắt cả dạng '(1,234)' và '1,234-' để phòng bản xuất khác, bỏ dấu phẩy, ép qua regex \\d+(\\.\\d+)? rồi Decimal — KHÔNG dùng float vì cộng 116 dòng phải khớp ĐÚNG TỪNG ĐỒNG với dòng SUM của LOTTE. Ô rỗng -> None. Bất biến đã kiểm trên 100% dòng: Pay Amt + Vat Amt == Total Amt (đúng cả với dòng SUB SUM). Thuế suất suy ra từ 45/45 dòng hóa đơn đều là 8%.",
+  "invoice_parse": "Ký hiệu và số nằm ở HAI cột riêng, không phải một chuỗi: inv_series = Tax No, inv_no = Invoice No. Ví dụ thật: Tax No='1C26THG' + Invoice No='3996' (dòng 12), Tax No='C26THG' + Invoice No='4742' (dòng 28). Cùng một file dùng lẫn '1C26THG' (35 dòng) và 'C26THG' (10 dòng) cho cùng dải số hóa đơn ⇒ khi khớp phải chuẩn hóa bằng re.sub(r'^\\d+','',series.upper()) để '1C26THG' == 'C26THG' (đúng bài học §E của contract), nhưng vẫn lưu bản gốc để đối soát. Đã kiểm: KHÔNG có dòng nào chỉ có Tax No mà thiếu Invoice No hoặc ngược lại; KHÔNG có dòng nào vừa có Invoice No vừa có Deduct Name; 45/45 dòng có Invoice No đều có đủ Write Date + Invoice Date; 45 số hóa đơn đều DUY NHẤT (không trùng kể cả khi bỏ ký hiệu).",
+  "payment_dates": [
+   "2026-07-10 (thô: 20260710) — 97 dòng chi tiết",
+   "2026-07-30 (thô: 20260730) — 19 dòng chi tiết, TOÀN BỘ là hóa đơn hàng hóa, không có một khoản trừ nào"
+  ],
+  "row_types": [
+   {
+    "kind": "thanh_toan",
+    "label": "Hóa đơn hàng hóa",
+    "count": 45,
+    "sign": "DƯƠNG (Pay 256.420.000 / Vat 20.513.600 / Total 276.933.600)",
+    "rule": "Tax No và Invoice No đều KHÁC RỖNG. Đây là điều kiện duy nhất đáng tin — không dùng 'Deduct Name rỗng' (xem bẫy NET OFF)."
+   },
+   {
+    "kind": "chiet_khau",
+    "label": "Chiết khấu cơ bản (Basic discount - Auto)",
+    "count": 21,
+    "sign": "ÂM (Total -31.460.649)",
+    "rule": "Deduct Name == 'Basic discount - Auto'. Deduct Cause = 'CHIET KHAU CO BAN 202606_007466'."
+   },
+   {
+    "kind": "phi",
+    "label": "Phí bán hàng (Sale services fee - Auto)",
+    "count": 21,
+    "sign": "ÂM (Total -8.489.365)",
+    "rule": "Deduct Name == 'Sale services fee - Auto'. Deduct Cause = 'PHI BAN HANG 202606_007466'."
+   },
+   {
+    "kind": "phi",
+    "label": "Phí dịch vụ khác (Other services fee - Auto)",
+    "count": 21,
+    "sign": "ÂM (Total -6.454.447)",
+    "rule": "Deduct Name == 'Other services fee - Auto'. Deduct Cause = 'PHI DICH VU KHAC 202606_007466'."
+   },
+   {
+    "kind": "ghi_giam",
+    "label": "Hàng trả lại (Hang tra lai)",
+    "count": 2,
+    "sign": "ÂM (Total -809.335 cho cả 2 dòng: -213.715 và -595.620)",
+    "rule": "Deduct Cause == 'Hang tra lai'. BẪY: Deduct Name ở 2 dòng này KHÔNG phải danh mục mà là SỐ CHỨNG TỪ trả hàng ('260626-01006-1-0265', '260707-01005-1-0099') ⇒ phải map vào doc_no, và whitelist Deduct Name theo 3 giá trị '- Auto' sẽ bỏ sót 2 dòng này."
+   },
+   {
+    "kind": "ghi_giam",
+    "label": "NET OFF REGULAR 09.07.2026 (cấn trừ)",
+    "count": 6,
+    "sign": "CẢ HAI DẤU — 5 dòng dương (1.459.985 x2, 963.097, 879.575, 767.097) và 1 dòng ÂM (-5.529.739, dòng 129 store 01001). Tổng Total = 0 ở cột Vat.",
+    "rule": "Deduct Name RỖNG + Invoice No RỖNG + Deduct Cause bắt đầu 'NET OFF REGULAR'. Đây là loại dòng KHÔNG có trong contract hiện tại."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "SUB SUM (tổng theo từng siêu thị)",
+    "count": 17,
+    "sign": "hỗn hợp — chỉ là số cộng, không phải tiền phát sinh",
+    "rule": "Deduct Cause == 'SUB SUM'. Store CD/Store Name/Payment Date đều RỖNG. Dùng làm số kiểm tra, không ghi nhận."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "SUM (tổng toàn file, dòng cuối cùng r135)",
+    "count": 1,
+    "sign": "212.703.522 / 17.016.282 / 229.719.804",
+    "rule": "Deduct Cause == 'SUM'. Contract hiện chỉ nêu 'SUB SUM' ⇒ THIẾU dòng này; lọc bằng == 'SUB SUM' sẽ nhân đôi toàn bộ số tiền của file."
+   }
+  ],
+  "totals": {
+   "tong_dong_file": "135 (1 dòng header + 134 dòng dữ liệu)",
+   "phan_loai_du_134": "45 thanh_toan + 21 chiet_khau + 42 phi + 8 ghi_giam + 17 SUB SUM + 1 SUM = 134 ✓",
+   "dong_chi_tiet_ghi_nhan": 116,
+   "thanh_toan": "pay 256.420.000 | vat 20.513.600 | total 276.933.600 (45 dòng)",
+   "chiet_khau": "pay -29.130.231 | vat -2.330.418 | total -31.460.649 (21 dòng)",
+   "phi": "pay -13.836.863 | vat -1.106.949 | total -14.943.812 (42 dòng)",
+   "ghi_giam": "pay -749.384 | vat -59.951 | total -809.335 (8 dòng)",
+   "tong_cong_chi_tiet": "pay 212.703.522 | vat 17.016.282 | total 229.719.804",
+   "so_kiem_tra_trong_file_SUM_r135": "pay 212.703.522 | vat 17.016.282 | total 229.719.804",
+   "khop_SUM": "KHỚP TUYỆT ĐỐI cả 3 cột, sai lệch 0 đồng",
+   "khop_SUB_SUM": "17/17 nhóm SUB SUM khớp đúng từng đồng cả 3 cột với tổng các dòng chi tiết đứng ngay trước nó (đã in đối chiếu từng dòng)",
+   "tong_cac_SUB_SUM": "229.719.804 == dòng SUM ⇒ SUM = tổng các SUB SUM, không tính trùng",
+   "theo_payment_date": {
+    "2026-07-10": "116 dòng? không — 97 dòng chi tiết | net total 93.915.204 (thanh_toan +141.129.000 / chiet_khau -31.460.649 / phi -14.943.812 / ghi_giam -809.335)",
+    "2026-07-30": "19 dòng, toàn bộ thanh_toan | total 135.804.600, KHÔNG có khoản trừ nào",
+    "tong_2_ngay": "93.915.204 + 135.804.600 = 229.719.804 ✓ khớp dòng SUM"
+   },
+   "kiem_tra_noi_tai": "Pay Amt + Vat Amt == Total Amt đúng ở 134/134 dòng (parser raise nếu lệch)",
+   "thue_suat": "45/45 dòng hóa đơn có vat/pay == 0.08 (8%)"
+  },
+  "pitfalls": [
+   "BẪY LỚN NHẤT — 'Deduct Name rỗng = hàng hóa' trong contract là SAI. Có 6 dòng 'NET OFF REGULAR 09.07.2026' cũng có Deduct Name rỗng nhưng KHÔNG có hóa đơn. Điều kiện đúng phải là: Tax No và Invoice No đều khác rỗng. Deduct Name rỗng gồm 69 dòng = 45 hóa đơn + 17 SUB SUM + 1 SUM + 6 NET OFF.",
+   "BẪY DẤU — 'LOTTE: hàng hóa DƯƠNG, khấu trừ ÂM' KHÔNG phải quy tắc phân loại được. Dòng NET OFF r2/r7/r51/r66/r92 DƯƠNG (tối đa 1.459.985) nhưng r129 store 01001 ÂM -5.529.739. Phân loại bằng dấu là ghi nhận ngược chiều tiền ~5,5 triệu.",
+   "BẪY SỐ KIỂM TRA — file có HAI mức tổng: 17 dòng 'SUB SUM' (mỗi siêu thị) VÀ 1 dòng 'SUM' cuối file (r135). Contract chỉ nêu SUB SUM. Nếu chỉ lọc Deduct Cause == 'SUB SUM' thì dòng SUM 229.719.804 lọt vào dữ liệu và tổng file bị NHÂN ĐÔI.",
+   "BẪY SUB SUM KHÔNG THEO NGÀY — 11/17 nhóm SUB SUM TRỘN cả 2 payment date (hóa đơn 20260730 + khấu trừ 20260710 trong cùng một SUB SUM, vd store 01017 = 41.111.928). Tuyệt đối KHÔNG dùng SUB SUM làm số tiền của một lần thanh toán. Tiền thực trả phải nhóm lại theo cột Payment Date của từng dòng.",
+   "BẪY Deduct Name kiêm hai vai — với 2 dòng 'Hang tra lai', cột Deduct Name chứa SỐ CHỨNG TỪ ('260626-01006-1-0265') chứ không phải tên danh mục. Whitelist Deduct Name theo 3 giá trị '- Auto' của contract sẽ bỏ sót/hiểu sai 2 dòng ghi giảm -809.335. Phân loại phải: 3 giá trị '- Auto' là danh mục; giá trị khác = số chứng từ, đọc loại từ Deduct Cause.",
+   "BẪY store không có hóa đơn — store 01019 và 01018 chỉ có NET OFF + 3 khoản trừ, SUB SUM Total = 0 đúng bằng 0 (1.459.985 = 296.946+173.219+989.820). Nghĩa là khấu trừ được cấn trừ hết bằng NET OFF, không phát sinh tiền mặt. Nếu ghi nhận NET OFF thành 'thanh toán hàng hóa' sẽ khai khống doanh thu thu tiền 1.459.985/store.",
+   "BẪY ĐỊNH DẠNG FILE — .xls BIFF thật (CDFV2), openpyxl ném lỗi. Bắt buộc xlrd 2.x. Cột 'NO', 'Store CD' ('01019'), 'Invoice No' ('3996'), tiền, ngày — TẤT CẢ đều là ô TEXT (ctype=1). Ép float/int sẽ mất số 0 đầu của Store CD ('01019' -> 1019) và làm hỏng khớp mã siêu thị.",
+   "BẪY ngày — Payment/Write/Invoice Date là chuỗi '20260523', KHÔNG phải serial Excel. Gọi xlrd.xldate_as_tuple là sai ngày.",
+   "BẪY ký hiệu — cùng file có cả '1C26THG' (35 dòng) và 'C26THG' (10 dòng) cho cùng dải số hóa đơn, kể cả trong cùng một cửa hàng. Phải bỏ chữ số đầu khi khớp, nếu không 10 hóa đơn sẽ không tìm được Sales Invoice.",
+   "BẪY cột SUB SUM — dòng SUB SUM có Store CD RỖNG (chỉ còn Vendor Name), nên không nhóm được theo Store CD của chính dòng đó; phải nhóm theo khối các dòng chi tiết đứng TRƯỚC dòng SUB SUM.",
+   "Tiền phải parse bằng Decimal. Với float, tổng 116 dòng vẫn có nguy cơ lệch hàng đơn vị khi đối chiếu với 229.719.804 — mà lệch 1 đồng cũng là báo động giả cho kế toán."
+  ],
+  "unverified": [
+   "Ý nghĩa kế toán của 'NET OFF REGULAR 09.07.2026': suy đoán là bút toán cấn trừ công nợ kỳ trước (dòng dương bù đúng bằng tổng khấu trừ ở 2 store không có hóa đơn), nhưng CHƯA hỏi kế toán MT xác nhận. Đặc biệt dòng ÂM -5.529.739 (store 01001) chưa rõ là gì. Đây là 6 dòng KHÔNG có hóa đơn ⇒ không thể tự khớp Sales Invoice, bắt buộc con người quyết định.",
+   "Số chứng từ hàng trả lại '260626-01006-1-0265' / '260707-01005-1-0099': chưa biết cấu trúc (nghi là YYMMDD-storeCD-?-seq) và chưa biết ánh xạ sang chứng từ nào bên ERPNext (Sales Return / Credit Note). Chưa xác minh có tồn tại trong hệ thống hay không.",
+   "Ánh xạ Store CD (01001..01019) -> Customer / địa điểm giao hàng của ERPNext. File chỉ có mã + tên tiếng Anh không dấu ('Nha Trang Gold Coast', 'Nam Sai Gon'). Store 01007 và 01014 không xuất hiện — chưa rõ là không có phát sinh hay đã đóng.",
+   "Vendor CD '007466' = CONG TY CO PHAN HOANG GIANG — chưa xác minh đây là mã cố định của LOTTE cấp cho công ty, hay thay đổi theo hợp đồng.",
+   "Chỉ có MỘT file LOTTE để kiểm. Chưa biết bản xuất kỳ khác có thêm loại Deduct Name mới, có ô số thay vì text, có dấu trừ hậu tố, hay nhiều hơn 2 payment date hay không. Parser đã phòng các dạng đó bằng cách RAISE chứ không đoán, nhưng chưa có file thật để chứng minh.",
+   "Chưa xác minh dòng SUM cuối file luôn nằm ở dòng cuối cùng và Deduct Cause luôn đúng chữ 'SUM' (bản xuất tiếng Việt có thể ghi khác). Parser hiện match chuỗi chính xác.",
+   "Chưa xác minh quan hệ giữa Write Date và Invoice Date về nghiệp vụ (Write Date luôn >= Invoice Date trong file này, chênh 1-31 ngày) — nghi là ngày LOTTE ghi nhận vào hệ thống.",
+   "Chưa kiểm 45 số hóa đơn này có thật sự tồn tại trong Sales Invoice của ERPNext hay không (môi trường này không có bench/DB)."
+  ]
+ },
+ {
+  "chain": "emart",
+  "verified": true,
+  "sheet": "Sheet1 (workbook chỉ có ĐÚNG 1 sheet, visibility=0; nrows=71, ncols=11)",
+  "header_row": 9,
+  "columns": {
+   "doc_no": "Document Number (cột index 2)",
+   "row_kind_source": "Document Type (cột index 3)",
+   "inv_no": "Invoice no (cột index 4)",
+   "posting_date_KHONG_DUNG": "Posting Date (cột index 5) — ngày Emart ghi sổ, KHÔNG phải ngày hóa đơn",
+   "inv_date": "Document Date (cột index 6)",
+   "net_due_date_KHONG_PHAI_payment_date": "Net due date (cột index 7)",
+   "currency": "Document currency (cột index 8) — toàn bộ 48 dòng data = VND",
+   "total_amount": "Amount in doc. curr. (cột index 9)",
+   "description": "Text (cột index 10)",
+   "payment_date": "KHÔNG có trong bảng — lấy từ khối header: ô 'PAYMENT DATE:' (r5c2) → giá trị r5c4 = '15/09/2025'",
+   "vendor_code": "ô 'VENDOR CODE:' (r6c2) → r6c4 = '100968' (mã NCC Hoàng Giang tại Emart, KHÔNG phải mã siêu thị)",
+   "vendor_name": "ô 'VENDOR NAME:' (r7c2) → r7c4 = 'CÔNG TY CỔ PHẦN HOÀNG GIANG'",
+   "amount_before_vat": "KHÔNG CÓ trong file",
+   "vat_amount": "KHÔNG CÓ trong file",
+   "store_code": "KHÔNG CÓ trong file",
+   "store_name": "KHÔNG CÓ trong file",
+   "inv_series": "KHÔNG CÓ trong file (Emart không cấp ký hiệu)"
+  },
+  "row_types": [
+   {
+    "kind": "chiet_khau",
+    "label": "Document Type = I0 (Text = 'Chiết khấu -08/2025')",
+    "count": 3,
+    "sign": "DƯƠNG trong file (+5.266.245) = khoản Emart TRỪ LẠI",
+    "rule": "Document Type == 'I0'. Dòng 10-12."
+   },
+   {
+    "kind": "phi",
+    "label": "Document Type = I1 (Text = 'Phí hỗ trợ -08/2025' và 'Chi phí tạo mã sản phẩm mới 2025-AUG-378')",
+    "count": 19,
+    "sign": "DƯƠNG trong file (+27.388.670) = khoản Emart TRỪ LẠI",
+    "rule": "Document Type == 'I1'. Dòng 14-32. 18 dòng phí hỗ trợ (Invoice no 8239) + 1 dòng chi phí tạo mã (Invoice no 7574, 10.800.000)."
+   },
+   {
+    "kind": "thanh_toan",
+    "label": "Document Type = RE (Text = 'Phải trả tiền mua hàng' / 'NHAN 4.8')",
+    "count": 26,
+    "sign": "ÂM trong file (-191.554.740) = tiền Emart phải trả cho mình",
+    "rule": "Document Type == 'RE'. Dòng 34-59. 26 số hóa đơn KHÁC NHAU, không trùng."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng cộng nhóm: 'chiết khấu' (r13), 'phí hỗ trợ' (r33), 'phải trả tiền mua hàng' (r60)",
+    "count": 3,
+    "sign": "theo nhóm",
+    "rule": "Document Type RỖNG, nhãn nằm ở cột Document Number, có số tiền ở cột Amount. Dùng làm SỐ KIỂM TRA, không nạp."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng tổng cuối 'TOTAL' = -158.899.825",
+    "count": 1,
+    "sign": "âm",
+    "rule": "Document Number == 'TOTAL', Document Type rỗng. Số kiểm tra cuối cùng."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng trống hoàn toàn (r1, r2, r4, r8, r62, r70)",
+    "count": 6,
+    "sign": "-",
+    "rule": "mọi ô rỗng"
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Khối header nhà cung cấp: 'PAYMENT DETAILS' (r3), PAYMENT DATE (r5), VENDOR CODE + 'Page: 1/1' (r6), VENDOR NAME (r7)",
+    "count": 4,
+    "sign": "-",
+    "rule": "nằm TRƯỚC dòng tiêu đề (r9). Chứa payment_date và vendor — phải đọc, không nạp thành dòng tiền."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng tiêu đề cột (r9)",
+    "count": 1,
+    "sign": "-",
+    "rule": "chứa đồng thời 'Document Number' + 'Document Type' + 'Amount in doc. curr.'"
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Ghi chú liên hệ Emart (r63-r69) + dòng footer 'This report is automatically sent from Emart Vietnam system' (r71)",
+    "count": 8,
+    "sign": "-",
+    "rule": "Document Type rỗng, không có số tiền. Chứa ký tự \\xa0 (non-breaking space)."
+   }
+  ],
+  "totals": {
+   "parser_doc_thanh_toan_RE": -191554740,
+   "parser_doc_chiet_khau_I0": 5266245,
+   "parser_doc_phi_I1": 27388670,
+   "parser_NET_cong_tat_ca_48_dong": -158899825,
+   "file_check_dong_cong_chiet_khau_r13": 5266245,
+   "file_check_dong_cong_phi_ho_tro_r33": 27388670,
+   "file_check_dong_cong_phai_tra_tien_mua_hang_r60": -191554740,
+   "file_check_TOTAL_r61": -158899825,
+   "lech_chiet_khau": 0,
+   "lech_phi": 0,
+   "lech_hang_hoa": 0,
+   "lech_NET": 0,
+   "khop": "KHỚP TUYỆT ĐỐI cả 4 số kiểm tra, lệch = 0.00 đồng",
+   "kiem_tra_cong_don": "-191.554.740 + 27.388.670 + 5.266.245 = -158.899.825 = đúng dòng TOTAL. Tiền thực Emart chuyển = 158.899.825 VND.",
+   "so_dong_data": 48,
+   "census_71_dong": "6 trống + 4 header NCC + 1 tiêu đề + 3 I0 + 19 I1 + 26 RE + 3 dòng cộng nhóm + 1 TOTAL + 8 ghi chú = 71 = nrows. KHỚP."
+  },
+  "payment_dates": [
+   "2025-09-15"
+  ],
+  "date_parse": "Mọi ô ngày đều là TEXT (ctype=1), KHÔNG phải Excel serial — 48/48 dòng data có Document Date ctype=1, nên không đụng tới datemode (datemode=0). CÓ HAI DẤU PHÂN CÁCH TRONG CÙNG MỘT FILE: header 'PAYMENT DATE: 15/09/2025' dùng dấu GẠCH CHÉO, còn các cột ngày trong bảng dùng dấu GẠCH NGANG ('31-08-2025'). Regex phải nhận cả hai: ^(\\d{1,2})[-/](\\d{1,2})[-/](\\d{4})$. Thứ tự luôn dd trước mm sau. Chuẩn hóa về ISO yyyy-mm-dd. inv_date lấy từ 'Document Date' (ngày hóa đơn NCC), KHÔNG lấy 'Posting Date' (ngày Emart ghi sổ) — hai ngày này khác nhau ở hầu hết dòng RE (vd hóa đơn 4406: Document Date 25-08-2025 vs Posting Date 31-08-2025). Dải inv_date: 2025-06-25 → 2025-08-31, 0 dòng lỗi ngày.",
+  "amount_parse": "Cột 'Amount in doc. curr.' 100% là ctype=2 (number thuần), KHÔNG có dấu phân cách nghìn dạng text, KHÔNG có ngoặc đơn âm, KHÔNG có phần thập phân (kiểm tra: 0/48 giá trị có phần lẻ). Đọc trực tiếp float(cell.value). GIỮ NGUYÊN DẤU của file — tuyệt đối không abs(): dấu chính là chốt đối chiếu với dòng TOTAL (RE âm, I0/I1 dương, cộng tất cả = TOTAL). Vẫn giữ nhánh dự phòng parse text kiểu VN ('1.234.567' → '.' là phân cách nghìn, ',' là thập phân, '(x)' là âm) phòng khi Emart đổi cách xuất. Toàn bộ 48 dòng data đều Document currency = 'VND', không có ngoại tệ.",
+  "invoice_parse": "Emart KHÔNG CẤP KÝ HIỆU HÓA ĐƠN — cột 'Invoice no' chỉ chứa CHỮ SỐ THUẦN, không có dấu phân cách nào (khác WinCommerce '1C26THG#1730', Central Retail 'C26THG|4675'). Ví dụ thật: '4406', '4403', '3816', '3182', '8239', '7574'. => inv_series = None BẮT BUỘC, tuyệt đối không đoán ký hiệu (đoán = gán nhầm hóa đơn). inv_no giữ nguyên dạng CHUỖI, không int() (mất số 0 đầu nếu Emart đổi định dạng). Ba dòng chiết khấu I0 (r10-12) có Invoice no HOÀN TOÀN RỖNG → inv_no = None, chỉ có Document Number 1200297339. 26 dòng RE có 26 số hóa đơn phân biệt (3182, 3816, 3820, 3841, 3933, 3934, 4000, 4034, 4035, 4036, 4121, 4122, 4160, 4163, 4164, 4259, 4268, 4328, 4330, 4334, 4335, 4403, 4404, 4406, 4409, 4413). 19 dòng phí I1 chỉ có 2 số: 8239 (18 dòng) và 7574 (1 dòng) — nằm NGOÀI dải số hóa đơn hàng hóa (max 4413), nhiều khả năng là series hóa đơn phí riêng của Hoàng Giang. Theo hợp đồng §F: khớp Emart bằng SỐ + NGÀY + TIỀN và luôn đánh dấu \"cần review\".",
+  "pitfalls": [
+   "BẪY TIỀN LỚN NHẤT — file có 4 dòng tổng chứ không phải 2. Hợp đồng §D và gợi ý ban đầu chỉ nói bỏ 'chiết khấu'/'phí hỗ trợ'. File thật còn có dòng cộng 'phải trả tiền mua hàng' (r60, -191.554.740) và dòng 'TOTAL' (r61, -158.899.825). Bỏ sót r60 là cộng dư -191.554.740 (nhân đôi toàn bộ hàng hóa). Cần bổ sung vào hợp đồng.",
+   "BẪY CHÍ MẠNG — nhãn dòng cộng 'phải trả tiền mua hàng' (r60) TRÙNG NGUYÊN VĂN với nội dung cột Text của 25/26 dòng hàng hóa thật ('Phải trả tiền mua hàng'). Lọc dòng rác bằng cách quét chuỗi trên toàn dòng sẽ XÓA SẠCH 26 dòng hàng hóa. Phải lọc theo cột Document Type, và nhãn tổng nằm ở cột Document Number (khác cột với Text).",
+   "Phân loại BẮT BUỘC theo Document Type (RE/I0/I1), KHÔNG theo dấu. Emart để hàng hóa ÂM, chiết khấu/phí DƯƠNG — ngược hẳn LOTTE. Lấy dấu làm căn cứ là ghi ngược chiều tiền (hợp đồng §B).",
+   "payment_date KHÔNG nằm trong bảng, chỉ có ở khối header (r5). BẪY: cột 'Net due date' của 26 dòng RE tình cờ trùng đúng ngày thanh toán 15-09-2025, nhưng 22 dòng I0/I1 lại là 31-08-2025. Ai thấy vậy mà lấy 'Net due date' làm ngày thanh toán sẽ gán sai kỳ cho toàn bộ chiết khấu và phí.",
+   "Ngày trong CÙNG một file dùng HAI dấu phân cách: header '15/09/2025' (gạch chéo), bảng '31-08-2025' (gạch ngang). Regex chỉ nhận '-' sẽ trả None cho payment_date của MỌI dòng.",
+   "Ba dòng chiết khấu I0 có Invoice no RỖNG. Code bắt buộc phải có invoice number sẽ vứt mất 5.266.245 đồng, hoặc tệ hơn là raise và bỏ cả file.",
+   "Document Number KHÔNG duy nhất: 7 mã bị lặp ĐÚNG 3 lần mỗi mã (1200297339, 1200297322, 1200297324, 1200297328, 1200297329, 1200297335, 1200297337) với số tiền khác nhau. Dedupe theo doc_no là mất 14/48 dòng tiền.",
+   "Số tiền cũng bị lặp trong cùng doc_no khác nhau (836.879, 549.640, 509.329, 1.673.763, 1.099.278, 1.018.655 mỗi số xuất hiện nhiều lần). Dedupe theo (invoice, amount) hay (doc_no, amount) đều mất tiền.",
+   "Bảng LỆCH 2 CỘT TRỐNG sang phải: cột 0 và 1 rỗng hoàn toàn ở cả 71 dòng, dữ liệu bắt đầu từ index 2. Đã xác minh bằng quét toàn bộ. Đọc theo index cứng 0/1 là ra rỗng hết.",
+   "Dòng footer r71 nằm ĐÚNG cột 'Document currency' (index 8). Ai nhận diện dòng data bằng 'ô Document currency có giá trị' sẽ nhặt luôn dòng chữ 'This report is automatically sent from Emart Vietnam system'.",
+   "File là .xls BIFF thật (Composite Document File V2, Excel, code page 1252), openpyxl KHÔNG đọc được. xlrd 2.0.2 đọc được vì là .xls. misa_import._rows() hiện chưa đọc .xls — vẫn là chốt chặn triển khai như hợp đồng §A đã ghi.",
+   "Phần ghi chú r64-r69 chứa ký tự \\xa0 (non-breaking space), không phải space thường — strip() thường không sạch. Không ảnh hưởng dòng tiền nhưng ảnh hưởng nếu ai đó so khớp chuỗi.",
+   "File KHÔNG có cột tách trước VAT / tiền VAT, chỉ MỘT cột tiền tổng. amount_before_vat và vat_amount buộc phải để None. Tự chia 1.1 hay 1.08 là bịa số.",
+   "File KHÔNG tách theo siêu thị thành viên. VENDOR CODE 100968 / VENDOR NAME 'CÔNG TY CỔ PHẦN HOÀNG GIANG' là mã của CHÍNH NHÀ CUNG CẤP trong hệ thống Emart, KHÔNG phải mã cửa hàng. Nhồi 100968 vào store_code là sai nghĩa.",
+   "Dòng r6 có 'Page: 1/1' ở cột 10 — file này chỉ 1 trang. Chưa biết file nhiều trang trông thế nào (xem mục chưa xác minh).",
+   "Trong 19 dòng phí I1 có 1 dòng khác bản chất: 'Chi phí tạo mã sản phẩm mới 2025-AUG-378' 10.800.000đ, Invoice no 7574 — không phải phí hỗ trợ định kỳ. Gộp chung vào 'phí' vẫn đúng tổng nhưng khi hạch toán con người cần thấy nó tách ra (đã giữ nguyên ở description)."
+  ],
+  "unverified": [
+   "Ý nghĩa chính xác của I0 vs I1 do Emart định nghĩa — mới suy từ cột Text ('Chiết khấu' vs 'Phí hỗ trợ'). Chưa có tài liệu Emart xác nhận. Nếu Emart phát sinh mã Document Type khác (I2, KR, DZ...) parser hiện raise/bỏ qua âm thầm — đã cho vào nhánh bỏ qua nhưng chưa gặp mẫu thật.",
+   "Invoice no 8239 và 7574 của các dòng phí nằm ngoài dải hóa đơn hàng hóa (3182-4413). Chưa xác minh đây là series hóa đơn khác của Hoàng Giang hay là chứng từ nội bộ Emart. Không được khớp mù sang Sales Invoice.",
+   "Ba dòng chiết khấu I0 không có Invoice no — chưa biết khớp về hóa đơn nào, hay là khoản trừ không gắn hóa đơn. Cần kế toán MT xác nhận trước khi ghi nhận.",
+   "Ánh xạ VENDOR CODE 100968 → Customer nào trong ERPNext (hợp đồng §I vẫn để trống mục này cho mọi chuỗi).",
+   "Chưa xác minh trường hợp file Emart NHIỀU TRANG (file này 'Page: 1/1') — chưa biết Emart có lặp lại khối header/dòng tiêu đề giữa file hay không. Nếu có, hàm _find_header hiện chỉ lấy dòng tiêu đề ĐẦU TIÊN và mọi dòng tiêu đề sau sẽ rơi vào nhánh bỏ qua (an toàn về tiền), nhưng chưa có mẫu để khẳng định.",
+   "Chưa xác minh file Emart có nhiều PAYMENT DATE trong một file hay không (bẫy §H của LOTTE). File này chỉ 1 ngày (15/09/2025) và ngày đó nằm ở header nên nếu Emart gộp nhiều kỳ, parser hiện sẽ gán SAI cùng một ngày cho tất cả. Cần thêm file mẫu.",
+   "Cột 'Posting Date' hiện bị bỏ vì bộ khóa chuẩn không có chỗ chứa. Nếu đối soát cần ngày Emart ghi sổ thì phải bổ sung khóa mới vào hợp đồng.",
+   "Chưa xác minh Emart có xuất file .xlsx trong trường hợp nào không — mới thấy 1 mẫu .xls."
+  ]
+ },
+ {
+  "chain": "coop",
+  "verified": true,
+  "sheet": "8 SHEET DỮ LIỆU, không phải 1: Sheet1, Sheet2, Sheet4, Sheet5, Sheet6, Sheet7, Sheet8, Sheet9 (+ Sheet3 RỖNG 1 dòng). Thứ tự vật lý trong workbook là Sheet1, Sheet3, Sheet2, Sheet4..Sheet9 — tên sheet KHÔNG theo thời gian. MỖI SHEET = MỘT LẦN THANH TOÁN RIÊNG (Số chứng từ + Ngày thanh toán + 3 số kiểm tra riêng). Phải duyệt wb.worksheets và bỏ sheet có max_row &lt; 20; tuyệt đối không hardcode 'Sheet1'.",
+  "header_row": 18,
+  "columns": {
+   "__ghi_chu__": "Header 2 TẦNG: r18 = nhóm (merge ngang), r19 = cột con. Dữ liệu bắt đầu r20. Khuôn giống hệt nhau ở cả 8 sheet (đã kiểm r18/r19 từng sheet).",
+   "stt": "A (r18='STT') — STT reset và CÓ TRÙNG (vd Sheet1 r88/r89 cùng =69). KHÔNG dùng làm khóa.",
+   "doc_no": "B (r18='SỐ HÓA ĐƠN LH') — chứng từ bên Co.op, vd '197-SIPI-122025-1090629'. CHỈ điền ở dòng đầu mỗi nhóm (ô merge) → thuộc tính CẤP NHÓM, phải forward-fill.",
+   "inv_no_raw": "C (r18='HÓA ĐƠN NCC' merge C18:F18 / r19='HÓA ĐƠN') — vd \"'P0007272\"",
+   "inv_date": "D (r19='NGÀY') — datetime thật, không phải chuỗi",
+   "description": "E (r19='DIỄN GIẢI') — chứa KÝ HIỆU hóa đơn, vd '1C25THG|BANHDAUXANHHUONGV'",
+   "total_amount": "F (r19='TRỊ GIÁ') — tiền THEO TỪNG DÒNG, giữ nguyên dấu",
+   "discount_rate": "G (r18='CHIẾT KHẤU' merge G18:H18 / r19='TỈ LỆ') — hằng '17.75%-VAT 8' ở cả 569/569 dòng",
+   "discount_amount": "H (r19='THÀNH TIỀN') — chiết khấu THEO TỪNG DÒNG, cùng dấu với TRỊ GIÁ",
+   "group_payment_amount": "I (r18='THANH TOÁN' merge I18:K18 / r19='TIỀN', ô dữ liệu merge I:K) — TỔNG CẢ NHÓM, chỉ điền ở dòng đầu nhóm",
+   "store_name": "L (r18='COOP', ô dữ liệu merge L:M) — tên siêu thị thành viên, CẤP NHÓM, forward-fill",
+   "J_K_M": "trống hoàn toàn ở vùng dữ liệu (chỉ là phần merge của I và L)",
+   "meta_batch": "I5 = 'Tên batch : ...'",
+   "meta_payment_doc_no": "I6 = 'Số chứng từ : 26303039'",
+   "meta_payment_date": "I7 = 'Ngày thanh toán : 20/01/2026'",
+   "meta_supplier_code": "A10 = 'Mã cung cấp: 012556'",
+   "meta_supplier": "A11 = 'Nhà cung cấp: 233-Cty CP Hoang Giang'",
+   "check_total_amount": "J13='Tổng Tiền' → giá trị ở M13",
+   "check_total_discount": "J14='Tổng Giá Trị Chiết Khấu' → M14",
+   "check_total_payment": "J15='Tổng Tiền Thanh Toán' → M15",
+   "footer_total_row": "dòng có C bắt đầu 'Tổng: ' (vd C120='Tổng: 2,712,443,706'), G=tổng chiết khấu, I=tổng thanh toán — LẶP LẠI 3 số kiểm tra ở r13-r15",
+   "KHONG_CO": "File KHÔNG có cột tiền chưa VAT và KHÔNG có cột thuế GTGT → amount_before_vat = vat_amount = None. Đừng bịa."
+  },
+  "row_types": [
+   {
+    "kind": "bo_qua",
+    "label": "Tiêu đề + header 2 tầng (r1–r19 mỗi sheet)",
+    "count": 152,
+    "sign": "n/a",
+    "rule": "r1–r17 là tiêu đề/meta/số kiểm tra; r18–r19 là header 2 tầng. 19 dòng × 8 sheet = 152. Kiểm bằng cell(18,1)=='STT' và cell(19,5)=='DIỄN GIẢI'."
+   },
+   {
+    "kind": "thanh_toan",
+    "label": "Dòng hóa đơn bán hàng (ký hiệu 1C..)",
+    "count": 443,
+    "sign": "dương (443/443 dòng đều > 0)",
+    "rule": "DIỄN GIẢI khớp regex (?<![0-9A-Z])(\\d?[CK]\\d{2}T[A-Z]{2,3})(?![A-Z]) và chữ trong 3 ký tự đầu ký hiệu là 'C'. Ký hiệu chủ yếu 1C25THG (207) và 1C26THG (236). PHÂN LOẠI THEO KÝ HIỆU, KHÔNG theo dấu (ràng buộc §B)."
+   },
+   {
+    "kind": "ghi_giam",
+    "label": "Hóa đơn trả hàng / điều chỉnh giảm (ký hiệu 1K..)",
+    "count": 109,
+    "sign": "âm (109/109 dòng đều < 0)",
+    "rule": "Ký hiệu bắt được và chữ trong 3 ký tự đầu là 'K'. 88 ký hiệu K khác nhau (1K25TDS, 1K26TAN, 1K26TBD...). Có trường hợp thiếu số mẫu ở đầu: 'K26TEK-80' (Sheet4 r38) — regex cho phép \\d? nên vẫn bắt được."
+   },
+   {
+    "kind": "ghi_giam",
+    "label": "Trả hàng/điều chỉnh KHÔNG có ký hiệu trong DIỄN GIẢI — CẦN NGƯỜI REVIEW",
+    "count": 17,
+    "sign": "âm (17/17 dòng đều < 0)",
+    "rule": "DIỄN GIẢI chỉ ghi số phiếu RTV hoặc ghi chú, vd 'RTV 2174174 HD115 - RTV2174174', 'RTV2179667-188|TPCN', 'DCHINH DO NCC THAY BANG HD 3542 (05/05/2026)', '1K26THLTPCN - RTV2170648'. Vẫn là ghi giảm nhưng KHÔNG suy ra được ký hiệu → gắn needs_review=True, để người quyết định. Riêng '1K26THLTPCN' gần như chắc là ký hiệu 1K26THL viết dính chữ TPCN nhưng KHÔNG có bằng chứng trong file → không đoán."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng 'Tổng: ...' đóng vùng dữ liệu (1 dòng/sheet)",
+    "count": 8,
+    "sign": "n/a",
+    "rule": "Cột C bắt đầu bằng chuỗi 'Tổng'. Đây là DÒNG SỐ KIỂM TRA thứ hai (C=tổng trị giá dạng text có dấu phẩy, G=tổng chiết khấu, I=tổng thanh toán), trùng khớp 100% với M13/M14/M15. Dùng để dừng vòng lặp, KHÔNG được cộng vào dữ liệu."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Chân trang sau dòng Tổng ('Ngày ….. tháng …..', 'Người lập bảng', dòng rỗng, dòng \\xa0) + Sheet3 rỗng",
+    "count": 89,
+    "sign": "n/a",
+    "rule": "88 dòng chân trang (11 dòng × 8 sheet) + 1 dòng của Sheet3 rỗng. Mọi dòng sau dòng 'Tổng' đều bỏ."
+   },
+   {
+    "kind": "chiet_khau",
+    "label": "CHIẾT KHẤU LÀ CỘT, KHÔNG PHẢI DÒNG",
+    "count": 569,
+    "sign": "cùng dấu với TRỊ GIÁ cùng dòng (dương ở dòng bán, âm ở dòng trả)",
+    "rule": "KHÔNG cộng con số 569 này vào tổng số dòng (152+443+109+17+8+89 = 818 = đúng tổng dòng workbook). Chiết khấu nằm ở cột H trên CẢ 569 dòng dữ liệu, tỉ lệ G='17.75%-VAT 8' ở 569/569 dòng. Co.op KHÔNG phát sinh dòng chiết khấu riêng và file KHÔNG có dòng phí."
+   }
+  ],
+  "totals": {
+   "__ket_luan__": "KHỚP TUYỆT ĐỐI — 24/24 số kiểm tra (3 số × 8 sheet) đều lệch 0 đồng.",
+   "toan_file": {
+    "tong_tri_gia": 7538089592,
+    "tong_chiet_khau": 1338010941,
+    "tong_tien_thanh_toan": 6200078656
+   },
+   "theo_loai_dong": {
+    "thanh_toan_1C": {
+     "n": 443,
+     "tri_gia": 8451787806,
+     "chiet_khau": 1500192379
+    },
+    "ghi_giam_1K": {
+     "n": 109,
+     "tri_gia": -775160674,
+     "chiet_khau": -137591023
+    },
+    "ghi_giam_khong_ky_hieu": {
+     "n": 17,
+     "tri_gia": -138537540,
+     "chiet_khau": -24590415
+    }
+   },
+   "doi_chieu_tung_sheet": [
+    {
+     "sheet": "Sheet1",
+     "so_chung_tu": "26303039",
+     "ngay_thanh_toan": "2026-01-20",
+     "n_dong": 100,
+     "n_nhom": 56,
+     "tri_gia_doc": 2712443706,
+     "check_M13": 2712443706,
+     "chiet_khau_doc": 481458758,
+     "check_M14": 481458758,
+     "thanh_toan_doc": 2230984947,
+     "check_M15": 2230984947,
+     "khop": true
+    },
+    {
+     "sheet": "Sheet2",
+     "so_chung_tu": "26303420",
+     "ngay_thanh_toan": "2026-02-23",
+     "n_dong": 39,
+     "n_nhom": 26,
+     "tri_gia_doc": 1000851688,
+     "check_M13": 1000851688,
+     "chiet_khau_doc": 177651174,
+     "check_M14": 177651174,
+     "thanh_toan_doc": 823200514,
+     "check_M15": 823200514,
+     "khop": true
+    },
+    {
+     "sheet": "Sheet4",
+     "so_chung_tu": "26304108",
+     "ngay_thanh_toan": "2026-03-24",
+     "n_dong": 40,
+     "n_nhom": 29,
+     "tri_gia_doc": 556821486,
+     "check_M13": 556821486,
+     "chiet_khau_doc": 98835818,
+     "check_M14": 98835818,
+     "thanh_toan_doc": 457985668,
+     "check_M15": 457985668,
+     "khop": true
+    },
+    {
+     "sheet": "Sheet5",
+     "so_chung_tu": "26304598",
+     "ngay_thanh_toan": "2026-04-23",
+     "n_dong": 91,
+     "n_nhom": 73,
+     "tri_gia_doc": 711756873,
+     "check_M13": 711756873,
+     "chiet_khau_doc": 126336849,
+     "check_M14": 126336849,
+     "thanh_toan_doc": 585420026,
+     "check_M15": 585420026,
+     "khop": true
+    },
+    {
+     "sheet": "Sheet6",
+     "so_chung_tu": "26305083",
+     "ngay_thanh_toan": "2026-05-25",
+     "n_dong": 169,
+     "n_nhom": 119,
+     "tri_gia_doc": 504290072,
+     "check_M13": 504290072,
+     "chiet_khau_doc": 89511514,
+     "check_M14": 89511514,
+     "thanh_toan_doc": 414778561,
+     "check_M15": 414778561,
+     "khop": true
+    },
+    {
+     "sheet": "Sheet7",
+     "so_chung_tu": "26305591",
+     "ngay_thanh_toan": "2026-06-22",
+     "n_dong": 33,
+     "n_nhom": 28,
+     "tri_gia_doc": 708869934,
+     "check_M13": 708869934,
+     "chiet_khau_doc": 125824414,
+     "check_M14": 125824414,
+     "thanh_toan_doc": 583045520,
+     "check_M15": 583045520,
+     "khop": true
+    },
+    {
+     "sheet": "Sheet8",
+     "so_chung_tu": "26305852",
+     "ngay_thanh_toan": "2026-07-07",
+     "n_dong": 40,
+     "n_nhom": 19,
+     "tri_gia_doc": 635506398,
+     "check_M13": 635506398,
+     "chiet_khau_doc": 112802387,
+     "check_M14": 112802387,
+     "thanh_toan_doc": 522704012,
+     "check_M15": 522704012,
+     "khop": true
+    },
+    {
+     "sheet": "Sheet9",
+     "so_chung_tu": "26306169",
+     "ngay_thanh_toan": "2026-07-22",
+     "n_dong": 57,
+     "n_nhom": 24,
+     "tri_gia_doc": 707549435,
+     "check_M13": 707549435,
+     "chiet_khau_doc": 125590027,
+     "check_M14": 125590027,
+     "thanh_toan_doc": 581959408,
+     "check_M15": 581959408,
+     "khop": true
+    }
+   ],
+   "lech_lam_tron_da_truy_ra_nguyen_nhan": {
+    "hien_tuong": "ΣTRỊ GIÁ − ΣCHIẾT KHẤU ≠ ΣTHANH TOÁN ở 4/8 sheet: Sheet1 +1đ, Sheet5 −2đ, Sheet6 −3đ, Sheet8 −1đ (Sheet2/4/7/9 lệch 0).",
+    "nguyen_nhan": "Đã soi tới cấp NHÓM: 17/374 nhóm có (Σ trị giá nhóm − Σ chiết khấu nhóm) lệch đúng ±1đ so với ô TIỀN của nhóm. Co.op làm tròn chiết khấu ở CẤP DÒNG rồi làm tròn số tiền thanh toán ở CẤP NHÓM một cách độc lập → hai phép làm tròn chênh nhau 1đ. Cộng dồn ra ±1..3đ mỗi sheet.",
+    "he_qua": "Số kiểm tra M15/dòng Tổng vẫn khớp TUYỆT ĐỐI với Σ cột TIỀN (0đ lệch) → cột TIỀN là số Co.op thực trả, phải coi là NGUỒN SỰ THẬT. TUYỆT ĐỐI KHÔNG tự tính lại thanh toán = trị giá − chiết khấu, và không tự tính lại chiết khấu = trị giá × 17.75% (68/569 dòng lệch ±1đ so với round()).",
+    "sai_so_cho_phep_khi_doi_chieu": "±1đ mỗi nhóm, ±3đ mỗi sheet"
+   }
+  },
+  "payment_dates": [
+   "2026-01-20 (Sheet1, số chứng từ 26303039, batch 'Quick Payment: ID=230833284')",
+   "2026-02-23 (Sheet2, số chứng từ 26303420, batch '100-hongphuc-23022026-hoanggiang')",
+   "2026-03-24 (Sheet4, số chứng từ 26304108, batch '100-HONGPHUC-24032026-HOANGGIQNG')",
+   "2026-04-23 (Sheet5, số chứng từ 26304598, batch '100-HONGPHUC-23042026-HOANGGIANG')",
+   "2026-05-25 (Sheet6, số chứng từ 26305083, batch '100-hongphuc-25052026-hoanggiang')",
+   "2026-06-22 (Sheet7, số chứng từ 26305591, batch 'Quick Payment: ID=239779307')",
+   "2026-07-07 (Sheet8, số chứng từ 26305852, batch 'Quick Payment: ID=240368412')",
+   "2026-07-22 (Sheet9, số chứng từ 26306169, batch 'Quick Payment: ID=241704308')"
+  ],
+  "date_parse": "NGÀY (cột D) đã là datetime.datetime thật của openpyxl trên cả 569/569 dòng — chỉ cần .date(), KHÔNG parse chuỗi. Ngày thanh toán KHÔNG có trong bảng, phải lấy từ meta ô I7 mỗi sheet bằng regex r'Ngày thanh toán\\s*:\\s*(\\d{2})/(\\d{2})/(\\d{4})' → dd/mm/yyyy. Mỗi sheet MỘT ngày thanh toán khác nhau (8 ngày, 20/01/2026 → 22/07/2026), tuyệt đối không coi cả file là một lần thanh toán. Ngày hóa đơn trải rộng 02/2025 → 03/2026 và KHÔNG nằm trong cùng kỳ với ngày thanh toán (vd Sheet1 trả 20/01/2026 nhưng có hóa đơn 19/02/2025) → không được lọc hóa đơn theo tháng thanh toán.",
+  "amount_parse": "Tất cả tiền là int thuần của openpyxl (không có chuỗi, không dấu phẩy, không ngoặc đơn cho số âm) trên cả 569 dòng — chỉ cần đọc thẳng. Ba con số per-dòng: TRỊ GIÁ (F) và CHIẾT KHẤU/THÀNH TIỀN (H) là CẤP DÒNG, cộng bình thường. THANH TOÁN/TIỀN (I) là CẤP NHÓM, chỉ cộng ở dòng đầu nhóm. Dấu: dòng bán 1C luôn dương, dòng trả 1K luôn âm, chiết khấu cùng dấu với trị giá cùng dòng — nhưng PHẢI phân loại bằng ký hiệu, không bằng dấu. KHÔNG tự tính lại: chiết khấu ≠ round(trị giá×17.75%) ở 68/569 dòng (lệch ±1đ); thanh toán nhóm ≠ Σtrị giá−Σchiết khấu ở 17/374 nhóm (lệch ±1đ). Ba số kiểm tra ở M13/M14/M15 (nhãn ở J13/J14/J15) lặp lại y hệt trên dòng 'Tổng' (C=text 'Tổng: 2,712,443,706', G, I) — dùng M13/M14/M15 vì là số, còn C của dòng Tổng là chuỗi có dấu phẩy.",
+  "invoice_parse": "SỐ HÓA ĐƠN lấy từ cột C 'HÓA ĐƠN NCC', KÝ HIỆU lấy từ cột E 'DIỄN GIẢI' — hai cột khác nhau.\n\nSỐ: bỏ dấu nháy đơn (là KÝ TỰ THẬT trong ô text, 569/569 ô đều bắt đầu bằng ') → bỏ mọi ký tự đầu không phải chữ số → bỏ số 0 độn.\n  \"'P0007272\" → 7272 · \"'A00006828\" → 6828 · \"'A00000860\" → 860 · \"'a0006911\" → 6911 (chữ thường!) · \"'6936\" → 6936 · \"'40\" → 40 · \"'R79\" → 79 · \"'DCGZ0003176\" → 3176.\n  7/569 ô C rỗng (chỉ còn dấu nháy \"'\") → số hóa đơn nằm ở cột B của CHÍNH DÒNG ĐÓ: 438546, 4673, 'A006996' (Sheet1 r89/113/119), 34752, 34883, 'A000614' (Sheet2 r20/21/58), 1 dòng Sheet6 r20. Fallback sang B rồi áp cùng luật bóc.\n\nKÝ HIỆU: regex (?<![0-9A-Z])(\\d?[CK]\\d{2}T[A-Z]{2,3})(?![A-Z]) trên DIỄN GIẢI → bắt được 552/569 dòng, 91 ký hiệu khác nhau.\n  '1C25THG|BANHDAUXANHHUONGV' → 1C25THG · 'BBTT-1C25THG|BANH' → 1C25THG (có tiền tố BBTT-) · 'RTV2170798-1K26TDL-403|B DXANH' → 1K26TDL (tiền tố RTV) · 'K26TEK-80|BANH' → K26TEK (THIẾU số mẫu đầu → \\d? phải optional; theo §E khớp phải bỏ qua chữ số đầu, K26TEK ≡ 1K26TEK).\n  Dấu phân cách sau ký hiệu KHÔNG chỉ có '|': | (494) · - (50) · ¦ U+00A6 broken bar (4) · _ (2) · / (1) · khoảng trắng (1). Đừng split('|').\n\nCẢNH BÁO NẶNG — số trong DIỄN GIẢI KHÔNG phải số hóa đơn: 12/569 dòng có con số ngay sau ký hiệu nhưng đó là SỐ PHIẾU RTV.\n  Sheet1 r116: \"'A00000860\" + '1K25TEQ-2153190|BANH DXANH - RTV2153190' → số đúng là 860, KHÔNG phải 2153190.\n  Sheet4 r27: \"'327\" + '1K26TCP|2171247|BDX - RTV2171247' → 327, không phải 2171247.\n  Sheet5 r95: \"'209\" + '1K26THQ-207|VAT8|...' → C và E mâu thuẫn thật (209 vs 207), lấy C, gắn cờ review.\n  Sheet1 r68: \"'A0006842\" + '1C25THG-68742|TPCN' → 6842, không phải 68742.\n  ⇒ Luôn lấy số từ cột C. Lấy từ DIỄN GIẢI là gán nhầm hóa đơn.\n\n17/569 dòng KHÔNG có ký hiệu nào trong DIỄN GIẢI (đều là dòng trả hàng/điều chỉnh) → inv_series=None + needs_review=True, KHÔNG đoán.",
+  "pitfalls": [
+   "FILE CÓ 9 SHEET, KHÔNG PHẢI 1 — hợp đồng hiện ghi 'xlsx 1 sheet, 131 dòng' là SAI và sẽ bỏ sót 469/569 dòng (~64% dữ liệu, 4.83 tỷ đồng). 8 sheet có dữ liệu + Sheet3 rỗng làm mồi. Phải sửa docs/mt/mt_payment_advice_contract.md dòng 14 và dòng 50.",
+   "MỖI SHEET LÀ MỘT LẦN THANH TOÁN RIÊNG — riêng Số chứng từ, riêng Ngày thanh toán, riêng 3 số kiểm tra. Gộp cả file thành một Payment Advice là sai bản chất. Đây là biểu hiện của bẫy §H (nhiều ngày thanh toán/1 file), nhưng ở Co.op nó tách theo SHEET chứ không theo cột như LOTTE.",
+   "THỨ TỰ SHEET KHÔNG THEO TÊN: workbook xếp Sheet1, Sheet3(rỗng), Sheet2, Sheet4, Sheet5... Phải duyệt wb.worksheets và lọc max_row < 20, không hardcode tên sheet, không sort tên.",
+   "BẪY TIỀN NHÓM (đã đo thật): cột THANH TOÁN/TIỀN chỉ điền ở dòng đầu mỗi nhóm siêu thị và là tổng CẢ NHÓM (569 dòng nhưng chỉ 374 nhóm). Nếu forward-fill cột này xuống mọi dòng rồi cộng ⇒ 13.843.267.903đ thay vì 6.200.078.656đ — THỔI PHỒNG 2,23 LẦN.",
+   "Cột SỐ HÓA ĐƠN LH (B) và COOP (L) cũng là ô merge cấp nhóm, chỉ điền ở dòng đầu nhóm (đúng 374/569 ô có giá trị = đúng số nhóm). Phải forward-fill; nhưng ĐỪNG forward-fill cột TIỀN (I) rồi cộng — xem bẫy trên.",
+   "Ranh giới nhóm = ô cột I có giá trị. Đã đối chiếu với merged_cells.ranges của cột I: khớp 374/374 nhóm, không lệch một dòng nào. Cả 8 sheet đều có I ở dòng 20 nên không có nhóm mồ côi.",
+   "STT (cột A) BỊ TRÙNG và RESET — Sheet1 r88 và r89 cùng STT=69; Sheet2 STT chạy 1,2 rồi reset về 1. Không dùng STT làm khóa hay để đếm dòng.",
+   "DẤU NHÁY ĐƠN LÀ KÝ TỰ THẬT trong ô text (569/569 ô C bắt đầu bằng '), không phải escape của Excel. Phải lstrip(\"'\") thủ công.",
+   "SỐ TRONG DIỄN GIẢI LÀ SỐ PHIẾU RTV, KHÔNG PHẢI SỐ HÓA ĐƠN — 12/569 dòng. Lấy số từ DIỄN GIẢI là gán nhầm hóa đơn. Chỉ lấy từ cột HÓA ĐƠN NCC.",
+   "7/569 dòng cột HÓA ĐƠN NCC rỗng (chỉ còn dấu nháy) — số hóa đơn chuyển sang cột SỐ HÓA ĐƠN LH của chính dòng đó. Các dòng này đều thuộc nhóm 'LIÊN HIỆP HỢP TÁC XÃ THƯƠNG MẠI TP.HỒ CHÍ MINH' (văn phòng, không phải siêu thị thành viên).",
+   "DẤU PHÂN CÁCH TRONG DIỄN GIẢI KHÔNG CHỈ LÀ '|' — có cả ¦ (U+00A6 broken bar, 4 dòng), '_', '-', '/', khoảng trắng, và cả \\xa0 (non-breaking space) xen giữa (Sheet6 r140). split('|') sẽ hỏng.",
+   "KÝ HIỆU THIẾU SỐ MẪU ĐẦU: 'K26TEK-80' (Sheet4 r38) không có chữ số đầu, trong khi các dòng khác là '1K26...'. Đúng như §E của hợp đồng: khớp phải bỏ qua chữ số đầu.",
+   "KÝ HIỆU DÍNH LIỀN CHỮ KHÁC: '1K26THLTPCN - RTV2170648' (Sheet6 r164) — không tách được an toàn, regex có lookahead nên trả None và gắn needs_review thay vì đoán bừa.",
+   "17/569 dòng KHÔNG có ký hiệu nào (chỉ ghi số RTV hoặc 'DCHINH DO NCC THAY BANG HD 3542'). Không được suy ký hiệu — gắn needs_review, để người quyết định.",
+   "CHIẾT KHẤU LÀ CỘT, KHÔNG PHẢI DÒNG — Co.op không phát sinh dòng chiết khấu riêng, cũng không có dòng phí. Đừng đi tìm dòng chiết khấu như Emart/WinCommerce.",
+   "KHÔNG TỰ TÍNH LẠI TIỀN: chiết khấu ≠ round(TRỊ GIÁ × 17,75%) ở 68/569 dòng (lệch ±1đ); tiền thanh toán nhóm ≠ Σtrị giá − Σchiết khấu ở 17/374 nhóm (lệch ±1đ). Co.op làm tròn ở cấp dòng và cấp nhóm độc lập nhau. Phải đọc số Co.op ghi, không tái tính.",
+   "FILE KHÔNG CÓ CỘT TIỀN CHƯA VAT VÀ KHÔNG CÓ CỘT THUẾ GTGT. Ô tỉ lệ '17.75%-VAT 8' chỉ là nhãn text (569/569 dòng giống hệt), KHÔNG dùng để suy ngược tiền thuế. amount_before_vat và vat_amount phải để None.",
+   "Chữ hoa/thường lẫn lộn trong số hóa đơn: \"'a0006911\", \"'a0007482\" (Sheet1 r22/r23) — regex bóc chữ đầu phải bắt cả chữ thường, hoặc dùng ^[^0-9]+.",
+   "Ngày hóa đơn KHÔNG cùng kỳ với ngày thanh toán — Sheet1 trả 20/01/2026 nhưng chứa hóa đơn từ 19/02/2025. Không lọc hóa đơn theo tháng của lần thanh toán.",
+   "Chân trang có dòng chỉ chứa '\\xa0\\xa0\\xa0\\xa0\\xa0 ' ở cột A (cuối mỗi sheet) — dòng này KHÔNG rỗng theo openpyxl nhưng là rác. Dừng ở dòng 'Tổng' là an toàn nhất.",
+   "Số kiểm tra xuất hiện HAI LẦN mỗi sheet: M13/M14/M15 (số) và dòng 'Tổng' cuối bảng (C là TEXT có dấu phẩy 'Tổng: 2,712,443,706', G/I là số). Dùng M13/M14/M15; nếu dùng C của dòng Tổng phải strip 'Tổng:' và bỏ dấu phẩy."
+  ],
+  "unverified": [
+   "TRỊ GIÁ (cột F) đã bao gồm VAT hay chưa — file không có cột nào tách thuế. Nhãn '17.75%-VAT 8' chỉ nói chiết khấu 17,75% và thuế suất 8%, không nói F là giá trị nào. PHẢI hỏi kế toán MT trước khi khớp với Sales Invoice (khớp nhầm base sẽ lệch 8%).",
+   "Ý nghĩa chính xác của 'SỐ HÓA ĐƠN LH' (vd '197-SIPI-122025-1090629') — vẫn là mục §I của hợp đồng, chưa xác minh. Nhưng ĐÃ xác minh được: tiền tố số đầu (197, 199, 200...) là MÃ SIÊU THỊ THÀNH VIÊN — 120 tiền tố khác nhau, ánh xạ 1:1 sang tên ở cột COOP, KHÔNG có tiền tố nào ứng với 2 tên. Có thể dùng làm store_code, nhưng chưa được kế toán xác nhận.",
+   "Ánh xạ 120 mã/tên siêu thị Co.op → Customer của ERPNext. Tên ở cột COOP viết cả có dấu lẫn không dấu, cả en-dash '–' lẫn hyphen '-' cho cùng một đơn vị (vd 'CN LIEN HIEP HTX TM TP.HCM–CO.OPMART BA RIA' vs '...-CO.OPMART...'), và 'CTY TNHH MTV TMDV SÀI GÒN - HÀ TĨNH' xuất hiện ở 3 nhóm khác nhau trong cùng Sheet1. KHÔNG khớp Customer bằng chuỗi tên.",
+   "Dòng Sheet7 r21: DIỄN GIẢI 'DCHINH DO NCC THAY BANG HD 3542 (05/05/2026)' với HÓA ĐƠN NCC = \"'DCGZ0003176\". Luật bóc số cho ra 3176 nhưng diễn giải nhắc HD 3542 — chưa rõ chứng từ nào là chứng từ cần ghi giảm. Phải để người xử lý.",
+   "Ký hiệu thật của dòng Sheet6 r164 ('1K26THLTPCN') — gần như chắc là 1K26THL nhưng không có bằng chứng trong file.",
+   "Có phải MỌI file Co.op đều nhiều sheet không, hay chỉ file này gộp 8 kỳ. Mới có 1 file Co.op thật. Parser đã viết theo hướng 'n sheet' nên an toàn cả hai chiều, nhưng cần file Co.op thứ hai để chốt.",
+   "Vị trí header r18-r19 và vị trí meta I5/I6/I7, M13/M14/M15 có cố định ở mọi file Co.op không. Trong file này giống hệt ở cả 8 sheet nên parser vẫn assert cứng — nếu Co.op đổi khuôn, parser raise ValueError chứ không đọc sai âm thầm.",
+   "Quan hệ giữa 'Mã cung cấp: 012556' / 'Nhà cung cấp: 233-Cty CP Hoang Giang' với Supplier/Customer của ERPNext.",
+   "Chưa xác minh khả năng đọc file này qua ketoan.misa_import._rows() — đây là .xlsx nên openpyxl đọc được, nhưng _rows() hiện chỉ trả sheet đầu tiên (theo mô tả hợp đồng); với file 8 sheet thì phải sửa _rows() hoặc viết reader riêng cho kênh MT."
+  ]
+ }
+]
