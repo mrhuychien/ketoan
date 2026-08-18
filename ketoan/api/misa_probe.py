@@ -176,3 +176,102 @@ def show_si_layout(around="custom_misa_section", context=40):
         "Custom Field", "Sales Invoice-custom_misa_section", ["insert_after", "collapsible"], as_dict=True
     )
     print(f"\nCustom Field custom_misa_section: insert_after={cf and cf.insert_after!r} collapsible={cf and cf.collapsible}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Chẩn đoán rổ "Chỉ có trên MISA" — vì sao chưa có hóa đơn nào
+# ═══════════════════════════════════════════════════════════════════════════
+
+def diagnose_vat(from_date=None, to_date=None):
+    """Trả lời một lượt: đã đồng bộ chưa, kéo được bao nhiêu, endpoint có ăn không.
+
+        bench --site <site> execute ketoan.api.misa_probe.diagnose_vat
+
+    Thử 3 biến thể tham số của endpoint danh sách để biết biến thể nào ăn —
+    endpoint này là thứ DUY NHẤT chưa xác minh trong cả luồng (§M.6).
+    Chỉ ĐỌC, không ghi gì vào database.
+    """
+    from ketoan.api.misa_sync import PAGING_BASE, PAGING_COLUMNS
+
+    to_date = to_date or frappe.utils.nowdate()
+    from_date = from_date or frappe.utils.add_months(to_date, -1)
+    s = get_settings()
+
+    print("═" * 78)
+    print("1. DỮ LIỆU ĐANG CÓ TRONG DATABASE")
+    print("═" * 78)
+    total = frappe.db.count("MISA Invoice Snapshot")
+    print(f"   MISA Invoice Snapshot : {total} bản ghi")
+    if total:
+        rng = frappe.db.sql(
+            "SELECT MIN(inv_date) a, MAX(inv_date) b FROM `tabMISA Invoice Snapshot`", as_dict=True)[0]
+        unlinked = frappe.db.count("MISA Invoice Snapshot", {"sales_invoice": ("is", "not set")})
+        print(f"   khoảng ngày           : {rng.a} → {rng.b}")
+        print(f"   chưa nối Sales Invoice: {unlinked}")
+    print(f"   khoảng đang xem       : {from_date} → {to_date}")
+
+    print()
+    print("═" * 78)
+    print("2. CÁC LẦN ĐỒNG BỘ GẦN NHẤT")
+    print("═" * 78)
+    runs = frappe.get_all(
+        "MISA Sync Run",
+        fields=["name", "job_type", "status", "fetched", "created", "updated", "finished_at", "error_log"],
+        order_by="creation desc", limit=5)
+    if not runs:
+        print("   ⚠ CHƯA CHẠY ĐỒNG BỘ LẦN NÀO → rổ trống là đúng.")
+        print("     Bấm nút 'Đồng bộ MISA' trên trang, hoặc:")
+        print("     bench --site <site> execute ketoan.api.misa_sync.pull_invoices")
+    for r in runs:
+        print(f"   {r.name}  {r.job_type:15s} {r.status:22s} kéo={r.fetched} mới={r.created} sửa={r.updated}")
+        if r.error_log:
+            for line in r.error_log.splitlines()[:4]:
+                print(f"        ↳ {line[:150]}")
+
+    print()
+    print("═" * 78)
+    print("3. THỬ ENDPOINT DANH SÁCH — 3 BIẾN THỂ THAM SỐ")
+    print("═" * 78)
+    prefix = "code/" if s.use_code_route else ""
+    base = dict(PAGING_BASE)
+    base.update({
+        "draw": "1", "columns": PAGING_COLUMNS, "start": "0", "length": "5",
+        "fromDate": f'"{from_date}T00:00:00.000Z"', "toDate": f'"{to_date}T23:59:59.000Z"',
+    })
+
+    full_filter = ('[{"FilterValue":6,"FilterOperator":"=","FilterType":"comboboxenum",'
+                   '"FilterProperty":"PublishStatus","DisplayText":"Phát hành","enumname":"PublishStatus"}]')
+    variants = [
+        ("A · như code hiện tại (publishStatus=6, filter rỗng)", dict(base)),
+        ("B · filter đầy đủ giống lưới thật", dict(base, **{"filter": full_filter})),
+        ("C · lấy TẤT CẢ trạng thái (publishStatus=-1)", dict(base, **{"publishStatus": "-1"})),
+    ]
+    winner = None
+    for label, payload in variants:
+        print(f"\n   ── {label}")
+        try:
+            data = call(f"{prefix}v3sainvoice/paging", payload=payload, method="POST", form=True)
+        except MISAError as e:
+            print(f"      ✗ MISAError [{e.code}] {str(e.message)[:160]}")
+            continue
+        except Exception as e:
+            print(f"      ✗ {type(e).__name__}: {str(e)[:160]}")
+            continue
+        rows = data if isinstance(data, list) else []
+        print(f"      → {len(rows)} bản ghi")
+        if rows:
+            winner = winner or label
+            r0 = rows[0]
+            for k in ("InvSeries", "InvNo", "InvDate", "TotalAmount", "TotalAmountWithoutVAT", "TotalVATAmount"):
+                print(f"         {k:24s} {r0.get(k)}")
+
+    print()
+    print("═" * 78)
+    if winner:
+        print(f"✅ Biến thể ĂN: {winner}")
+        print("   Gửi lại dòng này cho em để chốt bộ tham số.")
+    else:
+        print("❌ Cả 3 biến thể đều trả 0 bản ghi.")
+        print("   Endpoint danh sách trên bề mặt API không dùng được → cần đường khác.")
+        print("   Gửi em nguyên output này.")
+    print("═" * 78)
