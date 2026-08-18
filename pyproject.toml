@@ -7,7 +7,13 @@ description = "Portal Kế toán Tác nghiệp — Bàn làm việc Công nợ &
 requires-python = ">=3.10"
 readme = "README.md"
 dynamic = ["version"]
-dependencies = []
+# xlrd đọc .xls (BIFF). Hai trong năm chuỗi siêu thị (LOTTE, Emart) gửi bảng kê
+# thanh toán ở định dạng .xls, mà openpyxl chỉ đọc .xlsx — thiếu gói này là
+# nghiệp vụ nạp bảng kê dùng không được cho hai chuỗi đó.
+# Bản 2.x CHỈ đọc .xls, đúng phần việc cần; phần .xlsx vẫn do openpyxl lo.
+dependencies = [
+    "xlrd>=2.0.1",
+]
 
 [build-system]
 requires = ["flit_core >=3.4,<4"]
