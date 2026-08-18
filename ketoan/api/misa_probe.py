@@ -710,3 +710,171 @@ def cross_status(from_date=None, to_date=None, pages=5, prop="EInvoiceStatus", s
         print("nhóm nào chưa cấp số thì nằm ở nửa 'chưa phát hành'.")
     return {k: {"n": v["n"], "co_ma": v["co_ma"], "co_so": v["co_so"],
                 "mau": v["mau_so"] or v["mau"]} for k, v in buckets.items()}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Soi đúng vài hóa đơn ĐÃ BIẾT trạng thái — cách chốt enum chắc chắn nhất
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Field quyết định hai trục trạng thái (§R.1). In hết, không lọc bớt.
+STATUS_FIELDS = (
+    "InvSeries", "InvNo", "InvDate", "InvoiceCode", "TransactionID", "RefID",
+    "EInvoiceStatus", "PublishStatus", "SendToTaxStatus", "SendInvoiceStatus",
+    "InvoiceType", "ReferenceType", "EditVersion",
+)
+LIFECYCLE_FIELDS = (
+    "IsInvoiceDeleted", "DeletedDate", "DeletedReason",
+    "OrgRefID", "OrgInvNo", "OrgInvSeries", "OrgInvDate", "OrgInvoiceType",
+    "TypeChangeInvoice", "ChangeReason",
+    "ErrorInvoiceStatus", "ErrorAnnouncementID", "MessageCode",
+)
+
+
+def inspect_invoices(numbers, from_date=None, to_date=None, max_pages=90):
+    """Soi các hóa đơn CỤ THỂ mà người dùng đã đọc sẵn trạng thái trên MISA.
+
+        bench --site <site> execute ketoan.api.misa_probe.inspect_invoices \
+            --kwargs "{'numbers': '6689,6654,6679,5589,4486'}"
+
+    Đây là cách chốt bảng enum chắc nhất: đã biết trạng thái THẬT của từng hóa
+    đơn (đọc trên màn hình MISA), giờ chỉ cần xem API gắn con số nào cho đúng
+    những hóa đơn đó. Không suy đoán, không phụ thuộc tham số lọc (thứ mà bề
+    mặt API bỏ qua — §R.5).
+
+    Tìm ref_id trong snapshot trước (tức thì); không có mới quét endpoint danh
+    sách. Có ref_id rồi thì gọi `afterpublishing` để lấy nhóm field vòng đời.
+    Chỉ ĐỌC, không ghi gì.
+    """
+    from ketoan.api.misa_client import invoice_path
+    from ketoan.api.misa_sync import (
+        PAGE_SIZE, PAGING_BASE, PAGING_COLUMNS, _paging_call,
+    )
+    from ketoan.misa_integration.doctype.misa_invoice_snapshot.misa_invoice_snapshot import (
+        norm_inv_no,
+    )
+
+    if isinstance(numbers, str):
+        numbers = [x.strip() for x in numbers.replace(";", ",").split(",") if x.strip()]
+    wanted = {norm_inv_no(n): str(n) for n in (numbers or [])}
+    if not wanted:
+        print("Chưa truyền số hóa đơn nào.")
+        return {}
+
+    s = get_settings()
+    to_date = to_date or frappe.utils.nowdate()
+    from_date = from_date or frappe.utils.add_days(to_date, -365)
+
+    print("═" * 78)
+    print("SOI HÓA ĐƠN ĐÃ BIẾT TRẠNG THÁI · " + ", ".join(wanted.values()))
+    print("═" * 78)
+
+    found = {}
+
+    # ── Bước 1: snapshot sẵn có ────────────────────────────────────────────
+    for norm, raw in wanted.items():
+        rows = frappe.get_all(
+            "MISA Invoice Snapshot", filters={"inv_no_norm": norm},
+            fields=["name", "inv_series", "inv_no", "ref_id", "invoice_code",
+                    "einvoice_status", "publish_status", "send_tax_status",
+                    "send_invoice_status", "inv_date"],
+            limit=5)
+        if rows:
+            found[norm] = {"src": "snapshot", "rows": rows}
+            print(f"  {raw}: có sẵn trong snapshot ({len(rows)} bản ghi)")
+
+    # ── Bước 2: quét endpoint danh sách cho phần còn thiếu ─────────────────
+    missing = [n for n in wanted if n not in found]
+    if missing:
+        print(f"\n  Còn thiếu {len(missing)} số — quét endpoint danh sách…")
+        dropped, start = set(), 0
+        for page in range(int(max_pages)):
+            payload = dict(PAGING_BASE)
+            payload.update({
+                "draw": str(page + 1),
+                "fromDate": f"{from_date}T00:00:00.000Z",
+                "toDate": f"{to_date}T23:59:59.000Z",
+                "columns": PAGING_COLUMNS,
+                "start": str(start), "length": str(PAGE_SIZE),
+            })
+            try:
+                rows, _meta = _paging_call(s, payload, dropped)
+            except MISAError as e:
+                print(f"    trang {page + 1}: [{e.code}] {e.message}")
+                break
+            if not rows:
+                break
+            for row in rows:
+                nn = norm_inv_no(_pick(row, "InvNo"))
+                if nn in wanted and nn not in found:
+                    found[nn] = {"src": "paging", "raw": row}
+                    print(f"    tìm thấy {wanted[nn]} ở trang {page + 1}")
+            start += len(rows)
+            if all(n in found for n in wanted):
+                break
+
+    # ── Bước 3: afterpublishing cho nhóm field vòng đời ────────────────────
+    print("\n" + "═" * 78)
+    out = {}
+    for norm, raw in wanted.items():
+        print(f"\n── HÓA ĐƠN {raw} " + "─" * (60 - len(raw)))
+        hit = found.get(norm)
+        if not hit:
+            print("   KHÔNG tìm thấy trong khoảng ngày đang quét.")
+            continue
+
+        rec = {}
+        if hit["src"] == "paging":
+            row = hit["raw"]
+            for f in STATUS_FIELDS:
+                rec[f] = _mask(f, _pick(row, f))
+            ref_id = _pick(row, "RefID")
+        else:
+            r = hit["rows"][0]
+            if len(hit["rows"]) > 1:
+                print("   ⚠ nhiều ký hiệu cùng số này: "
+                      + ", ".join(f"{x.inv_series} {x.inv_no}" for x in hit["rows"]))
+            rec.update({
+                "InvSeries": r.inv_series, "InvNo": r.inv_no, "InvDate": str(r.inv_date),
+                "InvoiceCode": (r.invoice_code or "")[:12] + "…" if r.invoice_code else "",
+                "EInvoiceStatus": r.einvoice_status, "PublishStatus": r.publish_status,
+                "SendToTaxStatus": r.send_tax_status, "SendInvoiceStatus": r.send_invoice_status,
+            })
+            ref_id = r.ref_id
+
+        for k, v in rec.items():
+            print(f"   {k:<20} = {v}")
+
+        if not ref_id:
+            print("   (không có RefID → không gọi được afterpublishing)")
+            out[raw] = rec
+            continue
+
+        try:
+            data = call(invoice_path(f"v3sainvoice/afterpublishing/{ref_id}", s), method="GET")
+        except MISAError as e:
+            print(f"   afterpublishing: [{e.code}] {e.message}")
+            out[raw] = rec
+            continue
+        inv = data[0] if isinstance(data, list) and data else data
+        if not isinstance(inv, dict):
+            print("   afterpublishing: không trả về object")
+            out[raw] = rec
+            continue
+
+        print("   ── vòng đời (afterpublishing) ──")
+        for f in LIFECYCLE_FIELDS:
+            v = _pick(inv, f)
+            if v not in (None, "", 0, False):
+                print(f"   {f:<20} = {_mask(f, v)}")
+                rec[f] = _mask(f, v)
+        for f in ("EInvoiceStatus", "PublishStatus", "InvoiceType", "ReferenceType"):
+            v = _pick(inv, f)
+            if v is not None:
+                print(f"   {f:<20} = {v}   (afterpublishing)")
+                rec[f + "_ap"] = v
+        out[raw] = rec
+
+    print("\n" + "═" * 78)
+    print("Đối chiếu bảng trên với trạng thái đã đọc trên màn hình MISA,")
+    print("ghi vào misa_api_contract.md §R.5, RỒI mới được code.")
+    return out
