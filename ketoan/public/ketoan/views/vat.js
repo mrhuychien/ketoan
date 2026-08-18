@@ -333,12 +333,23 @@ function misaTable(tab, rows, res) {
 
 // Quan hệ thay thế/điều chỉnh là TRỤC RIÊNG, không phải một giá trị của trạng
 // thái phát hành: một hóa đơn thay thế vẫn phải đi hết vòng cấp mã của nó.
+// Bốn quan hệ, KHÔNG gộp. "Bị thay thế" là hết hiệu lực (đỏ), còn "Bị điều
+// chỉnh" thì hóa đơn gốc VẪN còn hiệu lực, chỉ cộng thêm phần chênh (vàng) —
+// tô hai cái này cùng màu là dẫn kế toán tới chỗ khai thiếu doanh thu.
+const RELATION_BADGE = {
+  "Hóa đơn thay thế": ["yellow", "fa-rotate-left", "bản thay thế", "Thay thế cho "],
+  "Hóa đơn điều chỉnh": ["yellow", "fa-sliders", "bản điều chỉnh", "Điều chỉnh cho "],
+  "Bị thay thế": ["red", "fa-ban", "bị thay thế", "Đã bị hóa đơn khác thay thế — hết hiệu lực. "],
+  "Bị điều chỉnh": ["yellow", "fa-pen", "bị điều chỉnh", "Có hóa đơn điều chỉnh — bản này VẪN còn hiệu lực. "],
+  "Chưa xác định": ["gray", "fa-question", "quan hệ ?", "MISA trả mã quan hệ chưa xác minh. "],
+};
+
 function relationBadge(r) {
-  if (!r.relation || r.relation === "Hóa đơn mới") return "";
-  const bi = r.relation === "Bị thay thế/điều chỉnh";
-  const title = (bi ? "Bị thay thế/điều chỉnh bởi " : "Thay thế/điều chỉnh cho ") + (r.org_inv || "hóa đơn khác");
-  return html` <span class="kt-badge kt-badge--${bi ? "red" : "yellow"}" title="${title}">
-    <i class="fas ${bi ? "fa-ban" : "fa-rotate-left"}"></i> ${bi ? "bị thay thế" : "bản thay thế"}</span>`;
+  const b = RELATION_BADGE[r.relation];
+  if (!b) return "";
+  const [tone, icon, label, prefix] = b;
+  return html` <span class="kt-badge kt-badge--${tone}" title="${prefix}${r.org_inv || ""}">
+    <i class="fas ${icon}"></i> ${label}</span>`;
 }
 
 function statusBadge(s) {

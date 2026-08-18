@@ -175,10 +175,17 @@ MISA_STATUS_OPTIONS = "\n".join(
      "Lệch tiền", "Đã hủy", "Đã thay thế")
 )
 
-# TRỤC 2 — quan hệ thay thế/điều chỉnh. Độc lập với trục 1: một hóa đơn thay thế
-# vẫn phải đi hết vòng cấp mã của nó. Gộp hai trục vào một field là mất thông tin.
+# TRỤC 2 — quan hệ thay thế/điều chỉnh, đọc từ `EInvoiceStatus` (§R.7).
+#
+# Độc lập với trục 1: 5 hóa đơn đối chiếu tay đều "Đã cấp mã" mà EInvoiceStatus
+# chạy 1/3/4/7/8. Gộp hai trục vào một field là mất thông tin.
+#
+# Tách "thay thế" khỏi "điều chỉnh" là BẮT BUỘC về thuế: hóa đơn thay thế xóa
+# hiệu lực bản gốc, hóa đơn điều chỉnh giữ bản gốc còn hiệu lực và chỉ cộng
+# thêm phần chênh.
 MISA_RELATION_OPTIONS = "\n".join(
-    ("", "Hóa đơn mới", "Hóa đơn thay thế/điều chỉnh", "Bị thay thế/điều chỉnh")
+    ("", "Hóa đơn mới", "Hóa đơn thay thế", "Hóa đơn điều chỉnh",
+     "Bị thay thế", "Bị điều chỉnh", "Chưa xác định")
 )
 
 MISA_CUSTOM_FIELDS = {

@@ -1118,6 +1118,58 @@ lệ* — cả ba đều là "chưa có mã". Tách được phải có enum (R.
    phải tổng. So với `grand_total` của Sales Invoice sẽ luôn ra "Lệch tiền".
    Chưa tách được loại thì chưa sửa được chỗ này.
 
+### R.7 ✅ BẢNG ENUM — ĐÃ XÁC MINH (18/08/2026)
+
+Nguồn: người dùng đọc trạng thái của 5 hóa đơn thật trên màn hình MISA, rồi
+`misa_probe.inspect_invoices` lấy giá trị API của đúng 5 hóa đơn đó.
+
+| InvNo | Màn hình MISA hiện | `EInvoiceStatus` | `PublishStatus` | `OrgRefID` |
+|---|---|---|---|---|
+| 00006689 | Hóa đơn mới · Đã cấp mã | **1** | 3 | — |
+| 00006654 | Hóa đơn thay thế · Đã cấp mã | **3** | 3 | ✓ → 00006392 |
+| 00005589 | Hóa đơn điều chỉnh · Đã cấp mã | **4** | 3 | ✓ → 00004882 |
+| 00006679 | Đã bị thay thế · Đã cấp mã | **7** | 3 | — |
+| 00004486 | Đã bị điều chỉnh · Đã cấp mã | **8** | 3 | — |
+
+**Phát hiện quyết định: `EInvoiceStatus` KHÔNG phải trạng thái phát hành — nó
+là TRỤC QUAN HỆ.** Cả 5 hóa đơn đều *Đã cấp mã* (`PublishStatus` giữ nguyên 3)
+trong khi `EInvoiceStatus` chạy 1/3/4/7/8 đúng theo quan hệ thay thế/điều chỉnh.
+
+⇒ **Bác bỏ** suy đoán ở §H.6 ("`EInvoiceStatus` cần xác nhận gấp… bị thay thế?
+bị điều chỉnh?"). Mẫu 30 dòng ở đó đọc từ lưới web đã lọc sẵn nên lệch.
+
+```
+EINVOICE_RELATION = {1: mới, 3: thay thế, 4: điều chỉnh,
+                     7: bị thay thế, 8: bị điều chỉnh}
+PublishStatus     = {0: chưa phát hành, 3: đã cấp mã}
+```
+
+`PublishStatus=0` lấy từ `cross_status`: 500/500 dòng nháp (`<Chưa cấp số>`).
+
+**Hai hệ quả bắt buộc về thuế**
+
+1. `7` (bị thay thế) ⇒ **hết hiệu lực** → `custom_misa_status='Đã thay thế'`.
+   `8` (bị điều chỉnh) ⇒ bản gốc **VẪN còn hiệu lực**, hóa đơn điều chỉnh chỉ
+   cộng thêm phần chênh. Gộp 7 với 8 là khai thiếu doanh thu của chính bản gốc.
+2. `4` (hóa đơn điều chỉnh) mang số **CHÊNH**, không phải tổng ⇒ **bỏ so tiền**
+   với `grand_total`, nếu không mọi hóa đơn điều chỉnh đều thành "Lệch tiền" giả.
+   Vẫn ghi chú rõ lý do bỏ so, không im lặng.
+
+**Org\* chỉ nằm trên bản MỚI.** 6679 và 4486 (hai bản *bị* tác động) trống
+sạch `OrgRefID`/`OrgInvNo`. Nên `EInvoiceStatus` là nguồn duy nhất phát hiện
+được hóa đơn hết hiệu lực khi ta chưa thấy bản thay thế của nó — suy ngược từ
+`OrgRefID` là không đủ.
+
+`TypeChangeInvoice` **None ở cả 5** → không dùng được để tách thay thế với điều
+chỉnh. Chính `EInvoiceStatus` mới là thứ tách được. `ChangeReason` chỉ có ở bản
+điều chỉnh (5589: "Hóa đơn không giao được hàng").
+
+**Còn chưa xác minh**: `EInvoiceStatus` 2/5/6 (mục *Hóa đơn đã bị hủy* của ô
+chọn nằm ở đâu chưa rõ — hiện đã có `IsInvoiceDeleted` lo việc này) và
+`PublishStatus` 1/2/4/5 (*đang phát hành*, *phát hành lỗi*, *chờ cấp mã*, *từ
+chối cấp mã*, *TĐ không hợp lệ*). Gặp giá trị lạ thì code **không đoán** — lùi
+về mốc mã CQT: có `InvoiceCode` là đã cấp mã, không có là `Chờ cấp mã`.
+
 ### R.6 Số đo khối lượng thật (18/08/2026)
 
 `recordsTotal` trên khoảng 2026-01-01 → 2026-08-18: **7787 hóa đơn** (~8 tháng)

@@ -75,10 +75,25 @@ def _match_one(snap, idx):
 
 def _status(snap, si_name, tolerance):
     """Trạng thái đối soát. Vòng đời đọc từ cờ THẬT của MISA (§M.3), không đoán."""
+    from ketoan.api.misa_sync import EINVOICE_RELATION, RELATION_DELTA, RELATION_SUPERSEDED
+
     if snap.get("is_deleted"):
         return "Đã hủy"
+
+    # Hóa đơn ĐÃ BỊ THAY THẾ thì hết hiệu lực — kể cả khi chưa nối được về
+    # ERPNext. Xếp nó vào rổ "Chỉ có trên MISA" là báo động giả: nó không phải
+    # hóa đơn ngoài sổ, nó là hóa đơn đã chết. Đọc từ EInvoiceStatus (§R.7).
+    relation = EINVOICE_RELATION.get(str(snap.get("einvoice_status") or "").strip())
+    if relation in RELATION_SUPERSEDED:
+        return "Đã thay thế"
+
     if not si_name:
         return "Chỉ có trên MISA"
+
+    # Hóa đơn điều chỉnh mang phần CHÊNH, không phải tổng — so với grand_total
+    # của hóa đơn gốc là chắc chắn ra "Lệch tiền" giả.
+    if relation in RELATION_DELTA:
+        return "Khớp"
 
     si = frappe.db.get_value(
         "Sales Invoice", si_name, ["net_total", "total_taxes_and_charges", "grand_total"], as_dict=True

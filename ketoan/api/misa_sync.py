@@ -27,6 +27,40 @@ LEGACY_LOOKUP = "vn_einvoice_lookup_code"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Bảng enum trạng thái — ĐÃ XÁC MINH trên hóa đơn thật (§R.7)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Hai trục nằm ở HAI field khác nhau, không phải hai cách đọc cùng một field.
+# Bằng chứng: 5 hóa đơn người dùng đọc sẵn trạng thái trên màn hình MISA đều
+# "Đã cấp mã" — `PublishStatus` giữ nguyên 3 ở cả 5 — trong khi
+# `EInvoiceStatus` chạy 1/3/4/7/8 đúng theo quan hệ thay thế/điều chỉnh.
+#
+# ⚠️ Điều này BÁC BỎ suy đoán cũ ở §H.6 rằng `EInvoiceStatus` là trạng thái
+# phát hành. Nó là trục QUAN HỆ.
+
+PUBLISH_DRAFT = "0"       # chưa phát hành — 500/500 dòng nháp đo được
+PUBLISH_PUBLISHED = "3"   # đã cấp mã — 5/5 hóa đơn đã đối chiếu tay
+
+EINVOICE_RELATION = {
+    "1": "Hóa đơn mới",
+    "3": "Hóa đơn thay thế",
+    "4": "Hóa đơn điều chỉnh",
+    "7": "Bị thay thế",
+    "8": "Bị điều chỉnh",
+}
+
+# HẾT hiệu lực. Chỉ có "Bị thay thế" — hóa đơn thay thế xóa hiệu lực bản gốc.
+#
+# "Bị điều chỉnh" CỐ Ý không nằm đây: hóa đơn điều chỉnh chỉ cộng thêm phần
+# chênh, bản gốc VẪN còn hiệu lực và vẫn phải kê khai. Gộp hai loại này lại là
+# khai thiếu doanh thu của chính bản gốc.
+RELATION_SUPERSEDED = {"Bị thay thế"}
+
+# Mang số CHÊNH chứ không phải tổng → đem so với grand_total là luôn "Lệch tiền".
+RELATION_DELTA = {"Hóa đơn điều chỉnh"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Khóa nối
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -350,38 +384,44 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
             _write(si.name, {"custom_misa_status": pending, "custom_misa_last_checked": now})
             continue
 
-        drift = check_amount_drift(si, inv, tolerance)
         inv_code = str(_pick(inv, "InvoiceCode") or "").strip()
         org_ref = str(_pick(inv, "OrgRefID") or "").strip()
+        pub_st = str(_pick(inv, "PublishStatus") or "").strip()
+        eiv_st = str(_pick(inv, "EInvoiceStatus") or "").strip()
+
+        # ─ TRỤC 2: quan hệ thay thế/điều chỉnh ────────────────────────────
+        # Đọc thẳng từ EInvoiceStatus. Ưu điểm lớn so với cách suy từ OrgRefID:
+        # bản BỊ thay thế không hề mang Org* (đã đo trên 6679 và 4486 — trống
+        # sạch), nên nếu chỉ suy ngược từ bản thay thế thì hóa đơn hết hiệu lực
+        # nào mà ta chưa thấy bản thay thế của nó sẽ vĩnh viễn không bị phát hiện.
+        relation = EINVOICE_RELATION.get(eiv_st) or "Chưa xác định"
+
+        # Hóa đơn điều chỉnh mang phần CHÊNH, không phải tổng — so tiền ở đây
+        # là chắc chắn ra "Lệch tiền" giả cho mọi hóa đơn điều chỉnh.
+        is_delta = relation in RELATION_DELTA
+        drift = [] if is_delta else check_amount_drift(si, inv, tolerance)
 
         # ─ TRỤC 1: giá trị pháp lý ────────────────────────────────────────
         #
-        # `OrgRefID` KHÔNG thuộc trục này. §M.3: "OrgRefID có giá trị → bản này
-        # THAY THẾ hóa đơn OrgRefID" — tức bản đang xét là bản MỚI, còn hiệu
-        # lực. Bản cũ dán nhãn "Đã thay thế" lên chính nó là ngược: hóa đơn
-        # sống bị coi như đã chết, còn hóa đơn chết thật (bản gốc) thì không ai
-        # đụng tới và vẫn hiện "Đã phát hành".
-        #
-        # Mã CQT là ranh giới pháp lý thật: có số hóa đơn mới chỉ là MISA đã
-        # đánh số, phải có mã cơ quan thuế cấp thì hóa đơn mới hợp lệ. Gọi
-        # "Đã phát hành" khi chưa có mã là khẳng định sai nghĩa vụ thuế.
+        # Đọc từ `PublishStatus`. Giá trị lạ (chưa xác minh: đang phát hành,
+        # phát hành lỗi, chờ cấp mã, từ chối cấp mã, TĐ không hợp lệ) thì KHÔNG
+        # được đoán — lùi về mốc chắc chắn là mã CQT: có mã nghĩa là cơ quan
+        # thuế đã cấp, chưa có mã thì chưa hợp lệ để giao khách.
         if _pick(inv, "IsInvoiceDeleted") is True:
             status = "Đã hủy"
-        elif needs_tax_code and not inv_code:
-            status = "Chờ cấp mã"
-        elif drift:
-            status = "Lệch tiền"
+        elif relation in RELATION_SUPERSEDED:
+            # Bản này đã BỊ hóa đơn khác thay thế ⇒ hết hiệu lực, bất kể nó
+            # từng được cấp mã hợp lệ.
+            status = "Đã thay thế"
+        elif pub_st == PUBLISH_DRAFT:
+            status = pending
+        elif pub_st == PUBLISH_PUBLISHED:
+            status = "Lệch tiền" if drift else "Đã phát hành"
+        elif inv_code or not needs_tax_code:
+            status = "Lệch tiền" if drift else "Đã phát hành"
         else:
-            status = "Đã phát hành"
+            status = "Chờ cấp mã"
 
-        # ─ TRỤC 2: quan hệ thay thế/điều chỉnh ────────────────────────────
-        #
-        # Chỉ chốt "có quan hệ" hay "không", chưa tách thay thế với điều chỉnh:
-        # phân biệt hai loại phải đọc `TypeChangeInvoice`, mà bảng giá trị của
-        # enum đó chưa xác minh (§M.3 mẫu thật trả None). Đoán ở đây là sai kỳ
-        # kê khai — hóa đơn thay thế xóa hiệu lực bản gốc, hóa đơn điều chỉnh
-        # thì bản gốc vẫn còn hiệu lực và chỉ cộng thêm phần chênh.
-        relation = "Hóa đơn thay thế/điều chỉnh" if org_ref else "Hóa đơn mới"
         org_inv = " ".join(x for x in (
             str(_pick(inv, "OrgInvSeries") or "").strip(),
             str(_pick(inv, "OrgInvNo") or "").strip(),
@@ -411,19 +451,32 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
             **_legacy_values(si.name, inv_no, inv_date, _pick(inv, "TransactionID")),
         }
         conflict = values.pop("__conflict__", None)
-        notes = list(drift)
+
+        # Tách VẤN ĐỀ với THÔNG TIN. Gộp chung thì hóa đơn điều chỉnh — vốn
+        # hoàn toàn bình thường — bị đếm vào ô "lệch" và sinh ToDo giả.
+        problems = list(drift)
         if conflict:
-            notes.append(conflict)
+            problems.append(conflict)
             status = "Lệch tiền" if status == "Đã phát hành" else status
-        if notes:
-            values["custom_misa_note"] = " · ".join(notes)
+
+        info = []
+        if is_delta:
+            # Nói rõ vì sao KHÔNG so tiền. Im lặng bỏ qua thì kế toán tưởng đã
+            # đối chiếu xong, trong khi phần chênh chưa ai kiểm.
+            info.append(_(
+                "Hóa đơn điều chỉnh cho {0} — số tiền là phần CHÊNH nên không so với hóa đơn gốc"
+            ).format(org_inv or _("hóa đơn khác")))
+
+        if problems or info:
+            values["custom_misa_note"] = " · ".join(problems + info)
+        if problems:
             values["custom_misa_status"] = status
 
         _write(si.name, values)
         stat["updated"] += 1
-        if notes:
+        if problems:
             stat["mismatched"] += 1
-            _todo(si.name, _("Hóa đơn {0} lệch với MISA: {1}").format(si.name, " · ".join(notes)))
+            _todo(si.name, _("Hóa đơn {0} lệch với MISA: {1}").format(si.name, " · ".join(problems)))
         else:
             stat["matched"] += 1
         if status in ("Đã hủy", "Đã thay thế"):
