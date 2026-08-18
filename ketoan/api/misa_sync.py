@@ -537,11 +537,48 @@ def _legacy_values(si_name, inv_no, inv_date, transaction_id):
 # Job theo lịch — chỉ chạy khi bật công tắc
 # ═══════════════════════════════════════════════════════════════════════════
 
+def in_sync_window(settings=None, at=None):
+    """Có đang trong khung giờ được phép đồng bộ tự động không.
+
+    Xuất và ký hóa đơn chỉ diễn ra trong giờ hành chính, nên ngoài khung đó gọi
+    MISA là tốn request mà không bao giờ có gì mới.
+
+    Đây là lớp kiểm THỨ HAI, sau cron ở hooks.py. Giữ cả hai vì chúng chặn hai
+    kiểu hỏng khác nhau: cron sai (sửa hooks phải deploy) và múi giờ khai sai.
+    Khung giờ để kế toán tự sửa trong MISA Settings, không phải sửa code.
+
+    Khung trống (chưa khai giờ) = KHÔNG chặn. Thà chạy dư còn hơn im lặng không
+    chạy gì cả rồi không ai biết vì sao số hóa đơn không về.
+    """
+    s = settings or get_settings()
+    frm, to = s.get("sync_from_time"), s.get("sync_to_time")
+    if not frm or not to:
+        return True
+
+    now = at or now_datetime()
+    if s.get("sync_workdays_only") and now.weekday() == 6:   # Chủ nhật
+        return False
+
+    def _mins(v):
+        # Frappe trả Time về dạng timedelta; chuỗi "HH:MM:SS" cũng phải nuốt được.
+        if hasattr(v, "total_seconds"):
+            return int(v.total_seconds()) // 60
+        parts = str(v).split(":")
+        return int(parts[0]) * 60 + int(parts[1] or 0)
+
+    cur = now.hour * 60 + now.minute
+    a, b = _mins(frm), _mins(to)
+    return a <= cur <= b if a <= b else (cur >= a or cur <= b)
+
+
 def scheduled_poll_pending():
     """cron — hỏi số hóa đơn. Dừng ngay ở dòng đầu nếu chưa bật đồng bộ tự động."""
     try:
-        if not get_settings().enable_auto_sync:
+        settings = get_settings()
+        if not settings.enable_auto_sync:
             return
+        if not in_sync_window(settings):
+            return   # ngoài giờ hành chính — không gọi MISA
         frappe.enqueue(
             "ketoan.api.misa_sync._poll_pending",
             queue="long", timeout=1800,

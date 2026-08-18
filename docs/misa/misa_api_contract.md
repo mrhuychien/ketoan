@@ -1181,3 +1181,59 @@ nguyên, nó so `recordsTotal` với số ghi được nên chạm trần là b�
 im lặng.
 
 Con số 1260 ở §P là của khoảng ngày HẸP hơn — không mâu thuẫn.
+
+---
+
+## S — Lịch chạy đồng bộ tự động
+
+### S.1 Khung giờ
+
+Xuất và ký hóa đơn chỉ diễn ra trong giờ hành chính **7:30 – 17:30**, nên job
+theo lịch chạy **30 phút/lần trong khung đó**, ngoài ra không chạy.
+
+```python
+scheduler_events = {"cron": {
+    "30 7 * * *":      [...],   # 7:30
+    "0,30 8-17 * * *": [...],   # 8:00, 8:30, … 17:00, 17:30
+}}
+```
+
+21 lần/ngày, cách đều 30 phút, không lần nào rơi ngoài khung. Viết gọn thành
+`0,30 7-17` thì dư một lượt 7:00 nên tách làm hai dòng cho khớp đúng yêu cầu.
+
+### S.2 Vì sao kiểm khung giờ HAI lần
+
+Cron ở `hooks.py` là lớp 1; `misa_sync.in_sync_window()` đọc MISA Settings là
+lớp 2. Giữ cả hai vì chúng chặn hai kiểu hỏng khác nhau:
+
+| Hỏng gì | Lớp nào chặn |
+|---|---|
+| Muốn đổi khung giờ | Settings — kế toán tự sửa, không cần deploy |
+| Múi giờ khai sai ở System Settings | không lớp nào — xem S.3 |
+| Ai đó gọi thẳng `scheduled_poll_pending` | lớp 2 |
+
+Khung giờ để **trống** ⇒ KHÔNG chặn. Thà chạy dư còn hơn im lặng không chạy rồi
+không ai biết vì sao số hóa đơn không về.
+
+### S.3 Bẫy múi giờ
+
+Cron của Frappe tính theo **múi giờ khai ở System Settings**, không phải giờ
+máy chủ. Khai lệch thì cả khung 7:30–17:30 chạy sai giờ mà **không có gì báo** —
+job vẫn đủ 21 lượt, chỉ là chạy lúc không ai xuất hóa đơn. Lớp 2 cũng dùng
+`now_datetime()` nên cùng cơ sở, không phát hiện chéo được.
+
+Kiểm bằng:
+
+```
+bench --site <site> execute ketoan.api.misa_probe.check_schedule
+```
+
+In ra múi giờ, giờ site đang thấy, khung giờ khai, và mốc cron nào rơi ngoài
+khung. "Giờ site đang thấy" lệch giờ Việt Nam ⇒ sửa Time Zone trong System
+Settings.
+
+### S.4 Ngoài giờ KHÔNG mất dữ liệu
+
+Hóa đơn ký lúc 17:45 không bị bỏ sót — lượt 7:30 sáng hôm sau quét lại, vì
+`poll_pending` nhìn lùi `lookback_days` (mặc định 60 ngày). Ngoài giờ chỉ là
+**chậm**, không phải **mất**.

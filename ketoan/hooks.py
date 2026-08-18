@@ -44,9 +44,25 @@ doc_events = {
 
 # Job hỏi số hóa đơn. Đăng ký sẵn nhưng BẤT HOẠT: hàm dừng ở dòng đầu khi
 # MISA Settings.enable_auto_sync = 0 (mặc định). Chỉ bật sau khi chạy tay đạt.
+#
+# Chạy 30 phút/lần trong GIỜ HÀNH CHÍNH, vì xuất và ký hóa đơn chỉ diễn ra
+# trong khung đó. Hai dòng cron ghép lại đúng 7:30 → 17:30:
+#     "30 7"      → 7:30
+#     "0,30 8-17" → 8:00, 8:30, … 17:00, 17:30
+# Dùng "0,30 7-17" cho gọn thì dư một lượt 7:00, nên tách làm hai cho khớp.
+#
+# Cron của Frappe tính theo MÚI GIỜ khai ở System Settings, không phải giờ máy
+# chủ. Khai sai múi giờ là cả khung giờ lệch mà không có gì báo — vì vậy
+# `scheduled_poll_pending` còn tự kiểm khung giờ lần nữa theo MISA Settings.
+#
+# Ngoài khung giờ KHÔNG mất dữ liệu: hóa đơn ký muộn sẽ được lượt sáng hôm sau
+# quét lại, vì `poll_pending` nhìn lùi `lookback_days` (mặc định 60 ngày).
 scheduler_events = {
     "cron": {
-        "*/30 * * * *": [
+        "30 7 * * *": [
+            "ketoan.api.misa_sync.scheduled_poll_pending",
+        ],
+        "0,30 8-17 * * *": [
             "ketoan.api.misa_sync.scheduled_poll_pending",
         ],
     },

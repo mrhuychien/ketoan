@@ -878,3 +878,58 @@ def inspect_invoices(numbers, from_date=None, to_date=None, max_pages=90):
     print("Đối chiếu bảng trên với trạng thái đã đọc trên màn hình MISA,")
     print("ghi vào misa_api_contract.md §R.5, RỒI mới được code.")
     return out
+
+
+def check_schedule():
+    """Kiểm khung giờ đồng bộ tự động — múi giờ, giờ hiện tại, các mốc sắp chạy.
+
+        bench --site <site> execute ketoan.api.misa_probe.check_schedule
+
+    Lý do cần: cron của Frappe tính theo múi giờ khai ở System Settings, KHÔNG
+    phải giờ máy chủ. Khai lệch thì cả khung 7:30–17:30 chạy sai giờ mà không
+    có gì báo — job vẫn "chạy đủ", chỉ là chạy lúc không ai xuất hóa đơn.
+    """
+    from ketoan.api.misa_sync import in_sync_window
+
+    s = get_settings()
+    tz = frappe.db.get_single_value("System Settings", "time_zone")
+    now = frappe.utils.now_datetime()
+
+    print("═" * 78)
+    print("KHUNG GIỜ ĐỒNG BỘ TỰ ĐỘNG")
+    print("═" * 78)
+    print(f"  múi giờ (System Settings) : {tz or '(chưa khai)'}")
+    print(f"  giờ site đang thấy        : {now:%Y-%m-%d %H:%M:%S} ({_weekday_vn(now)})")
+    print()
+    print(f"  bật đồng bộ tự động       : {bool(s.enable_auto_sync)}")
+    print(f"  khung giờ khai            : {s.get('sync_from_time') or '(trống)'} → {s.get('sync_to_time') or '(trống)'}")
+    print(f"  chỉ T2–T7                 : {bool(s.get('sync_workdays_only'))}")
+    print()
+    inside = in_sync_window(s, now)
+    print(f"  ⇒ NGAY BÂY GIỜ            : {'ĐANG trong khung, job sẽ chạy' if inside else 'NGOÀI khung, job dừng ngay'}")
+    if not s.enable_auto_sync:
+        print("     (nhưng enable_auto_sync đang TẮT nên vẫn không chạy)")
+
+    fires = [(7, 30)] + [(h, m) for h in range(8, 18) for m in (0, 30)]
+    print(f"\n  cron trong hooks.py nổ {len(fires)} lần/ngày:")
+    print("     " + ", ".join(f"{h:02d}:{m:02d}" for h, m in fires[:6]) + " … "
+          + ", ".join(f"{h:02d}:{m:02d}" for h, m in fires[-2:]))
+
+    lech = [f"{h:02d}:{m:02d}" for h, m in fires
+            if not in_sync_window(s, now.replace(hour=h, minute=m))]
+    if lech:
+        print(f"\n  ⚠ {len(lech)} mốc cron nằm NGOÀI khung giờ khai trong Settings: "
+              + ", ".join(lech))
+        print("     Cron vẫn nổ nhưng job dừng ngay — sửa khung giờ trong MISA Settings")
+        print("     hoặc sửa cron trong hooks.py cho khớp.")
+    else:
+        print("\n  ✅ Mọi mốc cron đều nằm trong khung giờ khai.")
+    print("═" * 78)
+    print("Nếu 'giờ site đang thấy' lệch giờ Việt Nam, sửa Time Zone trong")
+    print("System Settings — cron và khung giờ đều tính theo đó.")
+    return {"time_zone": tz, "now": str(now), "in_window": inside,
+            "enabled": bool(s.enable_auto_sync)}
+
+
+def _weekday_vn(d):
+    return ("Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ nhật")[d.weekday()]

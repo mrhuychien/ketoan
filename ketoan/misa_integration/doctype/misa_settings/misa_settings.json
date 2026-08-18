@@ -26,6 +26,9 @@
   "enable_push",
   "enable_auto_sync",
   "lookback_days",
+  "sync_from_time",
+  "sync_to_time",
+  "sync_workdays_only",
   "column_break_sync",
   "poll_interval_min",
   "amount_tolerance",
@@ -156,6 +159,26 @@
    "fieldname": "lookback_days",
    "fieldtype": "Int",
    "label": "Số ngày đối soát lùi"
+  },
+  {
+   "fieldname": "sync_from_time",
+   "fieldtype": "Time",
+   "label": "Đồng bộ tự động từ",
+   "default": "07:30:00",
+   "description": "Ngoài khung giờ này job theo lịch dừng ngay, không gọi MISA. Theo múi giờ khai ở System Settings."
+  },
+  {
+   "fieldname": "sync_to_time",
+   "fieldtype": "Time",
+   "label": "Đến",
+   "default": "17:30:00"
+  },
+  {
+   "fieldname": "sync_workdays_only",
+   "fieldtype": "Check",
+   "label": "Chỉ chạy Thứ 2 – Thứ 7",
+   "default": "0",
+   "description": "Bật nếu công ty không xuất hóa đơn ngày Chủ nhật."
   },
   {
    "fieldname": "column_break_sync",
