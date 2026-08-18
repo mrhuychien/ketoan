@@ -868,3 +868,39 @@ có đường dẫn riêng cho từng hóa đơn trên trang quản trị.
 ⇒ Link tra cứu công khai chính là đường dẫn chi tiết hóa đơn duy nhất dùng được,
 nên `custom_misa_link` lưu link này (`primary`). Nút "Mở trên trang quản trị"
 chỉ mở danh sách — giữ lại phòng khi MISA bổ sung link sâu sau này.
+
+---
+
+## O. Endpoint danh sách — nguyên nhân thật (18/08/2026)
+
+`diagnose_vat` trên site thật cho lỗi từ chính tầng SQL của MISA:
+
+```
+MySqlConnector.MySqlException: Unknown column 'InvoiceSummaryStatus' in 'where clause'
+```
+
+⇒ Endpoint **không hề chặn**. Request đi tới tận nơi rồi mới vỡ: MISA dựng câu SQL
+từ tham số client gửi lên, và `invoiceSummaryStatus` trỏ vào một cột **không tồn tại
+trong bảng hóa đơn CÓ MÃ**. Lưới trên `app3` gửi được tham số này vì nó chạy trên
+bảng khác.
+
+Đính chính §M.6: kết luận "trả mảng rỗng" là do lần dò đó nuốt lỗi. Endpoint dùng
+được, chỉ là bộ tham số chép từ lưới web **không dùng nguyên si được** cho route
+`code/`.
+
+### O.1 Cách xử — tự gỡ tham số thay vì chép cứng
+
+Không thể biết trước bảng hóa đơn có mã thiếu những cột nào, và MISA có thể đổi
+bất cứ lúc nào. Nên `_paging_call` đọc tên cột trong thông báo lỗi, gỡ đúng tham
+số tương ứng rồi gọi lại (tối đa 6 lần), và nhớ trong cả lượt phân trang để trang
+sau không gửi lại. Tham số đã gỡ được ghi vào `error_log` của `MISA Sync Run`.
+
+Lỗi KHÔNG phải `Unknown column` thì ném ra bình thường — không nuốt.
+
+`invoiceSummaryStatus` đã gỡ sẵn khỏi `PAGING_BASE` vì đã biết chắc.
+
+### O.2 Đính chính con số
+
+`kéo=2` trong nhật ký là của `poll_pending` (hỏi số hóa đơn cho SI đã đẩy), KHÔNG
+phải kéo danh sách. Snapshot vẫn 0 — endpoint danh sách chưa từng chạy thành công
+lần nào. Lo ngại "968 so với 3" ở lượt trước là đọc nhầm nhật ký.

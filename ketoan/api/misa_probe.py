@@ -191,7 +191,7 @@ def diagnose_vat(from_date=None, to_date=None):
     endpoint này là thứ DUY NHẤT chưa xác minh trong cả luồng (§M.6).
     Chỉ ĐỌC, không ghi gì vào database.
     """
-    from ketoan.api.misa_sync import PAGING_BASE, PAGING_COLUMNS
+    from ketoan.api.misa_sync import PAGING_BASE, PAGING_COLUMNS, _paging_call
 
     to_date = to_date or frappe.utils.nowdate()
     from_date = from_date or frappe.utils.add_months(to_date, -1)
@@ -250,15 +250,16 @@ def diagnose_vat(from_date=None, to_date=None):
     for label, payload in variants:
         print(f"\n   ── {label}")
         try:
-            data, meta = call(f"{prefix}v3sainvoice/paging", payload=payload,
-                              method="POST", form=True, with_meta=True)
+            dropped = set()
+            rows, meta = _paging_call(s, payload, dropped)
+            if dropped:
+                print(f"      (tự gỡ tham số MISA không nhận: {', '.join(sorted(dropped))})")
         except MISAError as e:
             print(f"      ✗ MISAError [{e.code}] {str(e.message)[:160]}")
             continue
         except Exception as e:
             print(f"      ✗ {type(e).__name__}: {str(e)[:160]}")
             continue
-        rows = data if isinstance(data, list) else []
         total = _pick(meta, "recordsFiltered") or _pick(meta, "recordsTotal") or 0
         print(f"      → trang này {len(rows)} bản ghi · MISA khai tổng cộng {total}")
         if total and len(rows) < int(total or 0) and len(rows) < 5:

@@ -8,6 +8,7 @@ Hợp đồng API: docs/misa/misa_api_contract.md §L.2 (token) và §M (chi ti�
 đơn sau phát hành). Mọi tên field dưới đây đều đã xác minh trên dữ liệu thật.
 """
 
+import re
 import time
 import uuid
 
@@ -374,13 +375,16 @@ PAGING_COLUMNS = ",".join([
     "ListNo", "ListDate", "SortOrder",
 ])
 
+# invoiceSummaryStatus đã bị GỠ: MISA dựng SQL từ tham số gửi lên, và tham số
+# đó trỏ vào cột `InvoiceSummaryStatus` không tồn tại trong bảng hóa đơn CÓ MÃ
+# → "Unknown column ... in 'where clause'". Lưới trên app3 gửi được vì nó chạy
+# trên bảng khác.
 PAGING_BASE = {
     "publishStatus": "6",
     "sendEmailStatus": "-1",
     "searchKey": "",
     "filterInvoiceStatus": "0",
     "sendToTaxStatus": "-1",
-    "invoiceSummaryStatus": "-2",
     "searchField": "AccountObjectCode,AccountObjectName",
     "keyValue": "",
     "filterCustomField": "false",
@@ -397,6 +401,37 @@ PAGING_BASE = {
 
 PAGE_SIZE = 100
 MAX_PAGES = 100
+
+
+# Cột MISA báo thiếu → tham số cần gỡ. Bảng hóa đơn có mã và không mã khác nhau
+# về cột, nên bộ tham số chép từ lưới web không phải lúc nào cũng dùng được.
+_UNKNOWN_COL = re.compile(r"Unknown column '([^']+)'", re.I)
+
+
+def _paging_call(settings, payload, dropped, max_drop=6):
+    """Gọi endpoint danh sách, tự gỡ tham số nào khiến MISA vỡ SQL rồi gọi lại.
+
+    Trả về (rows, meta). `dropped` là set dùng chung giữa các trang để đã gỡ rồi
+    thì trang sau không gửi lại.
+    """
+    payload = {k: v for k, v in payload.items() if k not in dropped}
+    for _ in range(max_drop):
+        try:
+            data, meta = call(invoice_path("v3sainvoice/paging", settings),
+                              payload=payload, method="POST", form=True, with_meta=True)
+            return (data if isinstance(data, list) else []), meta
+        except MISAError as e:
+            m = _UNKNOWN_COL.search(e.message or "")
+            if not m:
+                raise
+            col = m.group(1).lower()
+            victim = next((k for k in payload if k.lower() == col), None)
+            if not victim:
+                raise MISAError(e.code, f"{e.message} — không tìm được tham số ứng với cột {m.group(1)}")
+            dropped.add(victim)
+            payload.pop(victim)
+            frappe.logger().info(f"misa: gỡ tham số {victim} (MISA báo thiếu cột {m.group(1)})")
+    raise MISAError("too_many_drops", "Gỡ quá nhiều tham số mà MISA vẫn vỡ SQL")
 
 
 def _upsert_snapshot(row, source_api="statement"):
@@ -488,7 +523,8 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
     stat = {"fetched": 0, "created": 0, "updated": 0}
     errors = []
     start = 0
-    reported = 0  # tổng số MISA tự khai
+    reported = 0   # tổng số MISA tự khai
+    dropped = set()  # tham số đã gỡ vì MISA vỡ SQL
 
     for page in range(MAX_PAGES):
         payload = dict(PAGING_BASE)
@@ -502,10 +538,9 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
             "length": str(PAGE_SIZE),
         })
         try:
-            data, meta = call(invoice_path("v3sainvoice/paging", settings),
-                              payload=payload, method="POST", form=True, with_meta=True)
-            # MISA tự khai tổng số ở request đếm riêng (§H). Giữ lại để đối chiếu:
-            # kéo thiếu mà không biết còn nguy hiểm hơn kéo được 0.
+            rows, meta = _paging_call(settings, payload, dropped)
+            # MISA tự khai tổng số (§H). Giữ lại để đối chiếu: kéo thiếu mà
+            # không biết còn nguy hiểm hơn kéo được 0.
             for key in ("recordsFiltered", "recordsTotal"):
                 n = _pick(meta, key)
                 if n:
@@ -517,7 +552,6 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
             errors.append(f"trang {page + 1}: {type(e).__name__}")
             break
 
-        rows = data if isinstance(data, list) else []
         if not rows:
             break  # hết dữ liệu — KHÔNG dựa recordsTotal
 
@@ -552,6 +586,9 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
             f"nhưng chỉ ghi được {stat['fetched']}. Kết quả đối soát CHƯA ĐỦ TIN CẬY — "
             "đừng kết luận 'không có hóa đơn ngoài sổ' cho tới khi khớp số."
         )
+
+    if dropped:
+        errors.append("Đã gỡ tham số MISA không nhận: " + ", ".join(sorted(dropped)))
 
     for k, v in stat.items():
         setattr(run, k, v)
