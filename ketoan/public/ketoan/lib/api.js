@@ -131,6 +131,8 @@ export const api = {
   vatSync: (a) => callMethod(NS + "misa_vat.sync_now", withCompany(a)),
   vatRelink: (snapshot, sales_invoice, note) => callMethod(NS + "misa_reconcile.relink_snapshot", { snapshot, sales_invoice, note }),
   vatMarkOrigin: (snapshot, origin, note) => callMethod(NS + "misa_reconcile.mark_origin", { snapshot, origin, note }),
+  vatImportPreview: (content) => callMethod(NS + "misa_import.preview", { content }),
+  vatImportCommit: (content) => callMethod(NS + "misa_import.commit", { content }),
 
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),

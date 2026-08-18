@@ -59,6 +59,7 @@ function shell(state, ov) {
         <input type="date" class="kt-input kt-input--sm" id="vat-from" value="${state.from}">
         <span class="kt-sub">→</span>
         <input type="date" class="kt-input kt-input--sm" id="vat-to" value="${state.to}">
+        ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-import"><i class="fas fa-file-import"></i> Nhập file MISA</button>` : ""}
         ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-sync"><i class="fas fa-rotate"></i> Đồng bộ MISA</button>` : ""}
       </div>
     </div>
@@ -76,8 +77,10 @@ function shell(state, ov) {
     ${!ov.has_snapshot
       ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
           <div class="kt-card-body kt-sub">
-            <b>Chưa kéo dữ liệu MISA về.</b> Hai rổ "Chỉ có trên MISA" và "Lệch tiền" sẽ trống cho tới khi
-            đồng bộ lần đầu. ${ov.can_sync ? "Bấm <b>Đồng bộ MISA</b> ở trên." : "Nhờ kế toán trưởng chạy đồng bộ."}
+            <b>Chưa có dữ liệu MISA.</b> Hai rổ "Chỉ có trên MISA" và "Lệch tiền" sẽ trống cho tới khi nạp lần đầu.
+            ${ov.can_sync
+              ? "Bấm <b>Nhập file MISA</b> — xuất Excel danh sách hóa đơn từ MISA rồi tải lên. Cách này không phụ thuộc API."
+              : "Nhờ kế toán trưởng nạp dữ liệu."}
           </div></div>`
       : ""}
 
@@ -139,6 +142,9 @@ function bind(container, state, ov) {
     clearTimeout(timer);
     timer = setTimeout(() => loadTab(container, state), 350);
   });
+
+  const imp = container.querySelector("#vat-import");
+  if (imp) imp.addEventListener("click", () => pickFile(container, state));
 
   const sync = container.querySelector("#vat-sync");
   if (sync) sync.addEventListener("click", async () => {
@@ -304,5 +310,123 @@ function openLinkModal(container, state, snapshot) {
         });
       } catch (err) { setHTML(box, html`<div class="kt-sub">${err.message}</div>`); }
     }, 350);
+  });
+}
+
+
+// ── Nhập file Excel/CSV xuất từ MISA ───────────────────────────────────────
+// Luôn XEM TRƯỚC bản đồ cột rồi mới ghi: tên cột file MISA chưa được xác minh,
+// nạp nhầm cột là hỏng toàn bộ đối soát mà không ai biết.
+function pickFile(container, state) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".xlsx,.xls,.csv";
+  input.onchange = () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => showPreview(container, state, reader.result, file.name);
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+const FIELD_LABEL = {
+  inv_series: "Ký hiệu", inv_no: "Số hóa đơn", inv_date: "Ngày hóa đơn",
+  buyer_tax_code: "MST người mua", buyer_name: "Tên người mua",
+  amount_before_vat: "Tiền trước thuế", vat_amount: "Tiền thuế",
+  total_amount: "Tổng tiền", transaction_id: "Mã tra cứu",
+  invoice_code: "Mã CQT", einvoice_status: "Trạng thái",
+};
+
+async function showPreview(container, state, content, filename) {
+  const modal = openModal({
+    title: "Nhập hóa đơn MISA — " + filename,
+    icon: "fa-file-import",
+    maxWidth: 900,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+
+  let p;
+  try {
+    p = await api.vatImportPreview(content);
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+
+  const missing = p.missing || [];
+  setHTML(modal.body, html`
+    ${missing.length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)">Thiếu cột bắt buộc: ${missing.map((m) => FIELD_LABEL[m] || m).join(", ")}</b>
+          <div class="kt-sub">Không nạp được. Kiểm tra lại file xuất từ MISA có đủ cột ký hiệu và số hóa đơn chưa.</div>
+        </div></div>`
+      : ""}
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="font-weight:600;margin-bottom:6px">Hệ thống hiểu file như sau — kiểm giúp trước khi nạp</div>
+      <div class="kt-table-wrap"><table class="kt-table"><tbody>
+        ${Object.keys(FIELD_LABEL).map((f) => html`<tr>
+          <td style="width:180px">${FIELD_LABEL[f]}</td>
+          <td>${p.mapping[f]
+            ? html`<span class="kt-badge kt-badge--green">${p.mapping[f]}</span>`
+            : html`<span class="kt-sub">không tìm thấy cột</span>`}</td>
+        </tr>`)}
+      </tbody></table></div>
+    </div></div>
+
+    <div class="kt-stats kt-mb">
+      <div class="kt-stat"><div class="kt-stat-label">Dòng đọc được</div><div class="kt-stat-value">${p.total_rows}</div></div>
+      <div class="kt-stat"><div class="kt-stat-label">Trùng trong file</div>
+        <div class="kt-stat-value ${p.duplicates ? "warn" : ""}">${p.duplicates}</div></div>
+      <div class="kt-stat"><div class="kt-stat-label">Thiếu ngày</div>
+        <div class="kt-stat-value ${p.no_date ? "warn" : ""}">${p.no_date}</div></div>
+      <div class="kt-stat"><div class="kt-stat-label">Thiếu tiền</div>
+        <div class="kt-stat-value ${p.no_amount ? "warn" : ""}">${p.no_amount}</div></div>
+    </div>
+
+    ${p.sample && p.sample.length
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <div class="kt-sub" style="margin-bottom:6px">${p.sample.length} dòng đầu</div>
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Ký hiệu</th><th>Số HĐ</th><th>Ngày</th><th>Người mua</th>
+              <th class="num">Trước thuế</th><th class="num">Thuế</th><th class="num">Tổng</th></tr></thead>
+            <tbody>${p.sample.map((r) => html`<tr>
+              <td>${r.inv_series}</td><td>${r.inv_no}</td><td>${formatDate(r.inv_date)}</td>
+              <td class="kt-cell-wrap">${r.buyer_name || "—"}</td>
+              <td class="num">${formatVND(r.amount_before_vat)}</td>
+              <td class="num">${formatVND(r.vat_amount)}</td>
+              <td class="num">${formatVND(r.total_amount)}</td>
+            </tr>`)}</tbody>
+          </table></div>
+        </div></div>`
+      : ""}
+
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="kt-btn kt-btn--outline" id="vi-cancel">Hủy</button>
+      <button class="kt-btn" id="vi-go" ${missing.length || !p.total_rows ? "disabled" : ""}>
+        <i class="fas fa-download"></i> Nạp ${p.total_rows} hóa đơn
+      </button>
+    </div>
+  `);
+
+  modal.body.querySelector("#vi-cancel").addEventListener("click", () => modal.close());
+  const go = modal.body.querySelector("#vi-go");
+  if (go) go.addEventListener("click", async () => {
+    go.disabled = true;
+    go.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang nạp…';
+    try {
+      const r = await api.vatImportCommit(content);
+      const im = r.imported || {};
+      const mt = r.matched || {};
+      toast(`Nạp xong: ${im.created || 0} mới · ${im.updated || 0} cập nhật · khớp ${mt.matched || 0} · lệch ${mt.mismatched || 0}`, "success");
+      modal.close();
+      location.reload();
+    } catch (e) {
+      toast(e.message, "error");
+      go.disabled = false;
+      go.innerHTML = "Thử lại";
+    }
   });
 }
