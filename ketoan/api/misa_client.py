@@ -145,15 +145,22 @@ def clear_token():
 # Gọi API
 # ═══════════════════════════════════════════════════════════════════════════
 
-def call(path: str, payload=None, params=None, method: str = "POST", form: bool = False, with_meta: bool = False):
+def call(path: str, payload=None, params=None, method: str = "POST", form: bool = False,
+         with_meta: bool = False, retry: bool | None = None):
     """Gọi 1 endpoint MISA, trả về phần Data đã bóc wrapper.
 
     path   : phần sau /api/v2/, ví dụ "v3sainvoice/code".
     payload: dict/list — gửi JSON, hoặc dict — gửi form khi form=True.
     form   : True → Content-Type form-urlencoded (một số endpoint yêu cầu).
+    retry  : None = tự quyết (chỉ retry GET). True/False để ép.
 
-    Retry 2s/4s/8s cho lỗi mạng và 5xx. KHÔNG retry 4xx, trừ 401 → lấy lại
-    token đúng một lần rồi thử lại.
+    RETRY CHỈ AN TOÀN VỚI THAO TÁC ĐỌC. Gửi lại một POST đã tới MISA là phát
+    hành hóa đơn LẦN THỨ HAI — hóa đơn có giá trị pháp lý, không rút lại được.
+    Timeout khi đọc phản hồi KHÔNG có nghĩa là MISA chưa nhận.
+
+    Ngoại lệ duy nhất: lỗi KẾT NỐI (chưa gửi được byte nào) thì gửi lại an toàn.
+    401 luôn được lấy token mới và thử lại đúng một lần, vì request bị từ chối
+    trước khi xử lý.
     """
     import requests
 
@@ -161,6 +168,8 @@ def call(path: str, payload=None, params=None, method: str = "POST", form: bool 
     taxcode = _taxcode()
     retried_auth = False
     last_err = None
+    is_read = str(method).upper() == "GET"
+    allow_retry = is_read if retry is None else bool(retry)
 
     for attempt in range(len(RETRY_BACKOFF) + 1):
         headers = {"Authorization": get_token(force_refresh=retried_auth), "TaxCode": taxcode}
@@ -176,7 +185,12 @@ def call(path: str, payload=None, params=None, method: str = "POST", form: bool 
             res = requests.request(method.upper(), url, **kwargs)
         except Exception as e:
             last_err = MISAError("network", f"{type(e).__name__} khi gọi {path}")
-            if attempt < len(RETRY_BACKOFF):
+            # Lỗi KẾT NỐI = chưa gửi được gì đi, gửi lại an toàn kể cả với POST.
+            # Mọi lỗi khác (đặc biệt ReadTimeout) thì request CÓ THỂ đã tới nơi.
+            conn_only = isinstance(e, (requests.exceptions.ConnectTimeout,
+                                       requests.exceptions.ConnectionError)) \
+                and not isinstance(e, requests.exceptions.ReadTimeout)
+            if attempt < len(RETRY_BACKOFF) and (allow_retry or conn_only):
                 time.sleep(RETRY_BACKOFF[attempt])
                 continue
             raise last_err
@@ -189,7 +203,8 @@ def call(path: str, payload=None, params=None, method: str = "POST", form: bool 
 
         if 500 <= res.status_code < 600:
             last_err = MISAError(f"http_{res.status_code}", f"MISA lỗi máy chủ khi gọi {path}")
-            if attempt < len(RETRY_BACKOFF):
+            # 5xx trên POST: MISA có thể đã xử lý xong rồi mới lỗi khi trả lời.
+            if attempt < len(RETRY_BACKOFF) and allow_retry:
                 time.sleep(RETRY_BACKOFF[attempt])
                 continue
             raise last_err
@@ -233,7 +248,11 @@ def _unwrap(res, path: str, with_meta: bool = False):
         raise MISAError("bad_json", f"Phản hồi {path} không phải JSON")
 
     if not isinstance(body, dict):
-        return body  # một số endpoint trả thẳng mảng
+        # Giữ hợp đồng: hứa trả tuple thì mọi nhánh phải trả tuple. Thiếu chỗ này,
+        # caller `data, meta = call(..., with_meta=True)` sẽ unpack chính MẢNG
+        # DỮ LIỆU thành hai biến — mảng 2 phần tử lọt qua im lặng, số khác thì nổ
+        # ValueError che mất nguyên nhân thật.
+        return (body, {}) if with_meta else body
 
     ok = _pick(body, "success")
     if ok is False:
@@ -273,7 +292,10 @@ def parse_nested_data(data):
             f"Không parse được data của MISA (dài {len(text)} ký tự), 300 ký tự đầu:\n{text[:300]}",
             "misa_client.parse_nested_data",
         )
-        return []
+        # KHÔNG trả [] như trường hợp hết dữ liệu. Vòng phân trang coi mảng rỗng
+        # là "đã kéo hết" rồi dừng và báo Thành công — kéo thiếu hóa đơn mà không
+        # ai biết. Ném lỗi để job ghi vào error_log và hạ trạng thái.
+        raise MISAError("bad_data", f"Không đọc được dữ liệu MISA trả về (dài {len(text)} ký tự)")
 
 
 def _text(v) -> str:

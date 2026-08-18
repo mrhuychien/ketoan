@@ -44,28 +44,61 @@ PUSH_PATH = "v3sainvoice/code"
 # Thuế suất
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _row_vat_rate(row, fallback):
+def vat_lines(si):
+    """Các dòng trong bảng thuế THẬT SỰ là thuế GTGT.
+
+    Bảng `taxes` của ERPNext chứa cả phí vận chuyển, phụ thu... Gộp hết vào tiền
+    thuế thì hóa đơn gửi MISA khai sai thuế GTGT, và tệ hơn: chốt chặn so tiền
+    dùng chính con số đó cho cả hai vế nên vế "thuế" thành đẳng thức luôn đúng,
+    không bao giờ bắt được sai sót.
+
+    Nhận diện: tính trên Net Total / Previous Row (không phải "Actual" nhập tay).
+    """
+    out = []
+    for t in (si.get("taxes") or []):
+        ctype = (t.get("charge_type") or "").strip()
+        if ctype in ("On Net Total", "On Previous Row Amount", "On Previous Row Total"):
+            out.append(t)
+    return out
+
+
+def vat_accounts(si) -> set:
+    """Tập tài khoản thuế GTGT có trên chính hóa đơn này."""
+    return {(t.get("account_head") or "").strip() for t in vat_lines(si) if t.get("account_head")}
+
+
+def _row_vat_rate(row, fallback, accounts=None):
     """Thuế suất THẬT của một dòng hóa đơn.
 
     ERPNext lưu `item_tax_rate` dạng chuỗi JSON {"<tài khoản thuế>": <suất>}.
-    Không có thì dùng thuế suất bình quân của cả hóa đơn.
+    Mẫu thuế thường khai CẢ tài khoản đầu ra lẫn đầu vào dùng chung, nên
+    sum() toàn bộ dict cho ra thuế suất GẤP ĐÔI. Chỉ lấy tài khoản có mặt trên
+    bảng thuế của chính hóa đơn này.
     """
     raw = row.get("item_tax_rate")
     if raw:
         try:
             rates = json.loads(raw) if isinstance(raw, str) else dict(raw)
-            vals = [flt(v) for v in rates.values()]
+            if accounts:
+                vals = [flt(v) for k, v in rates.items() if (k or "").strip() in accounts]
+            else:
+                vals = []
+            if not vals and len(rates) == 1:
+                vals = [flt(v) for v in rates.values()]   # chỉ 1 khóa thì không thể nhầm
             if vals:
-                return flt(sum(vals))
+                return flt(max(vals))
         except Exception:
             pass
     return flt(fallback)
 
 
 def _fallback_rate(si):
-    """Thuế suất bình quân = tổng thuế / tổng trước thuế."""
+    """Thuế suất bình quân, tính từ RIÊNG các dòng thuế GTGT."""
     net = flt(si.net_total)
-    return flt(si.total_taxes_and_charges) / net * 100.0 if net else 0.0
+    if not net:
+        return 0.0
+    vat_total = sum(flt(t.get("tax_amount")) for t in vat_lines(si))
+    return vat_total / net * 100.0
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -156,9 +189,10 @@ def build_payload(si, settings):
     by_box = bool(si.get("custom_xuất_theo_hộp_"))
     fallback = _fallback_rate(si)
 
+    accounts = vat_accounts(si)
     lines, rates = [], set()
     for i, row in enumerate(si.items, start=1):
-        rate = _row_vat_rate(row, fallback)
+        rate = _row_vat_rate(row, fallback, accounts)
         rates.add(round(rate, 4))
         lines.append(_line(row, i, ref_id, by_box, rate))
 
@@ -176,9 +210,15 @@ def build_payload(si, settings):
     total_vat = flt(sum(l.get("VATAmount") or 0 for l in lines), 2)
 
     # Chốt chặn: payload dựng ra phải khớp chính hóa đơn ERPNext. Lệch thì DỪNG.
+    #
+    # So với RIÊNG tiền thuế GTGT, không phải total_taxes_and_charges (có thể lẫn
+    # phí vận chuyển). Và phải so CẢ VẾ TỔNG: thiếu nó thì hóa đơn có chiết khấu
+    # trên tổng sẽ được phát hành với số tiền cao hơn số phải thu trên sổ.
+    book_vat = sum(flt(t.get("tax_amount")) for t in vat_lines(si))
     for label, built, book in (
         ("trước thuế", total_net, flt(si.net_total)),
-        ("thuế GTGT", total_vat, flt(si.total_taxes_and_charges)),
+        ("thuế GTGT", total_vat, book_vat),
+        ("tổng tiền", flt(total_net + total_vat, 2), flt(si.grand_total)),
     ):
         if abs(abs(built) - abs(book)) > AMOUNT_GUARD:
             frappe.throw(
@@ -227,6 +267,30 @@ def build_payload(si, settings):
 # Đẩy
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _rejected_reason(result, ref_id):
+    """Đọc phản hồi của endpoint đẩy, trả lý do TỪ CHỐI hoặc None nếu MISA nhận.
+
+    MISA nhận MẢNG hóa đơn nên báo kết quả theo từng phần tử; cờ success ở tầng
+    ngoài đúng không có nghĩa hóa đơn được tạo. Trả None khi không tìm thấy dấu
+    hiệu từ chối — im lặng không phải bằng chứng lỗi, nhưng phần tử nào nói rõ
+    Success=false thì phải chặn.
+    """
+    items = result if isinstance(result, list) else ([result] if isinstance(result, dict) else [])
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        low = {str(k).lower(): v for k, v in it.items()}
+        rid = str(low.get("refid") or "").strip()
+        if rid and ref_id and rid.lower() != str(ref_id).lower():
+            continue
+        ok = low.get("success")
+        code = low.get("errorcode") or low.get("error_code")
+        msg = low.get("errormessage") or low.get("message") or low.get("error")
+        if ok is False or (code not in (None, "", 0, "0")):
+            return f"[{code or 'error'}] {msg or 'MISA không tạo được hóa đơn'}"
+    return None
+
+
 def _guard(si_name):
     """Ai ghi sổ được hóa đơn thì đẩy được hóa đơn đó. Không cấp quyền thừa."""
     if frappe.session.user == "Guest":
@@ -273,35 +337,69 @@ def push_invoice(sales_invoice):
         # Hóa đơn trả hàng phải đi đường điều chỉnh/thay thế (cần OrgRefID) —
         # quy trình khác hẳn, con người quyết định (rủi ro E2).
         frappe.throw(_("Hóa đơn trả hàng phải xử lý bằng hóa đơn điều chỉnh/thay thế trên MISA"))
-    if si.get("custom_misa_pushed_at") or si.get("vn_einvoice_lookup_code"):
-        return {"ok": False, "already": True, "message": _("Hóa đơn đã được xuất trước đó")}
 
     payload = build_payload(si, settings)
 
+    # KHÓA HÀNG ở tầng database (SELECT ... FOR UPDATE) trên chính bản ghi hóa
+    # đơn. Không có khóa thì auto-push (chạy ngầm, không khóa màn hình) và nút
+    # bấm tay có thể cùng vượt qua bước kiểm "đã đẩy chưa" rồi cùng POST — hai
+    # hóa đơn có giá trị pháp lý cho một chứng từ, không rút lại được.
+    #
+    # Request thứ hai nằm chờ ở đây tới khi request thứ nhất commit, rồi đọc
+    # được cờ đã đẩy và dừng. Khóa giữ trong lúc gọi HTTP (tối đa 60s) — đắt,
+    # nhưng rẻ hơn nhiều so với phát hành trùng.
+    frappe.db.get_value("Sales Invoice", si.name, "name", for_update=True)
+
     try:
-        # ⚠ Đẩy dùng HẬU TỐ `/code`, còn đọc dùng TIỀN TỐ `code/`. Hai quy ước
-        # khác nhau của MISA — chép nguyên từ luồng đang chạy, đừng "sửa cho
-        # nhất quán": POST v3sainvoice/code  vs  GET code/v3sainvoice/afterpublishing/…
-        call(PUSH_PATH, payload=[payload], method="POST")
-    except MISAError as e:
+        # Đọc LẠI cờ chặn trùng SAU KHI có khóa — giá trị đọc trước đó có thể đã cũ.
+        fresh = frappe.db.get_value(
+            "Sales Invoice", si.name,
+            ["custom_misa_pushed_at", "vn_einvoice_lookup_code", "custom_misa_inv_no"], as_dict=True) or {}
+        if fresh.get("custom_misa_pushed_at") or fresh.get("vn_einvoice_lookup_code") \
+                or fresh.get("custom_misa_inv_no"):
+            return {"ok": False, "already": True, "message": _("Hóa đơn đã được xuất trước đó")}
+
+        try:
+            # ⚠ Đẩy dùng HẬU TỐ `/code`, còn đọc dùng TIỀN TỐ `code/`. Hai quy ước
+            # khác nhau của MISA — chép nguyên từ luồng đang chạy, đừng "sửa cho
+            # nhất quán": POST v3sainvoice/code  vs  GET code/v3sainvoice/afterpublishing/…
+            result = call(PUSH_PATH, payload=[payload], method="POST")
+        except MISAError as e:
+            frappe.db.set_value(
+                "Sales Invoice", si.name,
+                {"custom_misa_status": "Phát hành lỗi", "custom_misa_note": f"[{e.code}] {e.message}"[:500]},
+                update_modified=False,
+            )
+            frappe.db.commit()
+            return {"ok": False, "message": _("MISA từ chối: {0}").format(e.message)}
+
+        # Endpoint nhận MẢNG hóa đơn nên MISA báo lỗi TỪNG PHẦN TỬ trong thân
+        # phản hồi, cờ success ở tầng ngoài vẫn true. Không soi vào đây thì hóa
+        # đơn MISA từ chối vẫn bị đánh dấu "đã đẩy" và không bao giờ đẩy lại được.
+        rejected = _rejected_reason(result, payload["RefID"])
+        if rejected:
+            frappe.db.set_value(
+                "Sales Invoice", si.name,
+                {"custom_misa_status": "Phát hành lỗi", "custom_misa_note": rejected[:500]},
+                update_modified=False,
+            )
+            frappe.db.commit()
+            return {"ok": False, "message": _("MISA từ chối: {0}").format(rejected)}
+
         frappe.db.set_value(
             "Sales Invoice", si.name,
-            {"custom_misa_status": "Phát hành lỗi", "custom_misa_note": f"[{e.code}] {e.message}"[:500]},
+            {
+                "custom_misa_pushed_at": now_datetime(),
+                "custom_misa_status": "Đã đẩy (nháp)",
+                "custom_misa_inv_series": payload["InvSeries"],
+                "custom_misa_note": None,
+            },
             update_modified=False,
         )
-        frappe.db.commit()
-        return {"ok": False, "message": _("MISA từ chối: {0}").format(e.message)}
-
-    frappe.db.set_value(
-        "Sales Invoice", si.name,
-        {
-            "custom_misa_pushed_at": now_datetime(),
-            "custom_misa_status": "Đã đẩy (nháp)",
-            "custom_misa_inv_series": payload["InvSeries"],
-        },
-        update_modified=False,
-    )
-    frappe.db.commit()
+        frappe.db.commit()   # nhả khóa hàng
+    except Exception:
+        frappe.db.rollback()  # nhả khóa hàng kể cả khi vỡ giữa chừng
+        raise
     return {
         "ok": True,
         "message": _("Đã đẩy hóa đơn sang MISA. Số hóa đơn sẽ tự điền về khi MISA cấp số."),

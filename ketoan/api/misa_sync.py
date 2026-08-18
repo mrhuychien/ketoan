@@ -42,6 +42,26 @@ def ensure_ref_id(doc, method=None):
     try:
         if not doc.meta.has_field("custom_misa_ref_id"):
             return  # chưa migrate — im lặng bỏ qua
+
+        # Hóa đơn sửa đổi (amend) được sao chép từ bản đã hủy, mang theo nguyên
+        # ref_id và cả số hóa đơn của bản cũ. Không dọn thì: ref_id đã có nên
+        # không sinh mới, pushed_at đã có nên push_invoice trả "đã xuất rồi", và
+        # bản sửa đổi VĨNH VIỄN không bao giờ được phát hành — trong khi màn hình
+        # vẫn hiện số hóa đơn của bản đã hủy.
+        #
+        # Không trông vào no_copy: frappe.model.copy_doc bỏ qua cờ đó khi amend.
+        if doc.get("amended_from"):
+            for f in ("custom_misa_inv_no", "custom_misa_inv_series", "custom_misa_inv_date",
+                      "custom_misa_transaction_id", "custom_misa_invoice_code", "custom_misa_link",
+                      "custom_misa_pushed_at", "custom_misa_last_checked", "custom_misa_note",
+                      "vn_einvoice_number", "vn_einvoice_date", "vn_einvoice_lookup_code"):
+                if doc.meta.has_field(f):
+                    doc.set(f, None)
+            doc.custom_misa_ref_id = str(uuid.uuid4())
+            if doc.meta.has_field("custom_misa_status"):
+                doc.custom_misa_status = "Chưa đẩy"
+            return
+
         if (doc.get("custom_misa_ref_id") or "").strip():
             return
         doc.custom_misa_ref_id = str(uuid.uuid4())
@@ -212,21 +232,43 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
     }).insert(ignore_permissions=True)
     frappe.db.commit()
 
+    since = frappe.utils.add_days(nowdate(), -lookback_days)
+    fields = [
+        "name", "custom_misa_ref_id", "net_total", "total_taxes_and_charges",
+        "grand_total", "is_return", "custom_misa_pushed_at", "custom_misa_inv_no",
+    ]
+
+    # Vòng 1 — hóa đơn CHƯA có số: hỏi xem MISA cấp số chưa.
     rows = frappe.get_all(
         "Sales Invoice",
         filters={
             "docstatus": 1,
             "custom_misa_ref_id": ("is", "set"),
             "custom_misa_inv_no": ("is", "not set"),
-            "posting_date": (">=", frappe.utils.add_days(nowdate(), -lookback_days)),
+            "posting_date": (">=", since),
         },
-        fields=[
-            "name", "custom_misa_ref_id", "net_total", "total_taxes_and_charges",
-            "grand_total", "is_return",
-        ],
-        order_by="posting_date desc",
-        limit=limit,
+        fields=fields, order_by="posting_date desc", limit=limit,
     )
+
+    # Vòng 2 — hóa đơn ĐÃ có số nhưng chưa ở trạng thái cuối.
+    #
+    # Thiếu vòng này thì hóa đơn bị HỦY hoặc bị THAY THẾ trên MISA sau khi đã cấp
+    # số sẽ không bao giờ bị phát hiện: bộ lọc vòng 1 loại chúng ra, nên nhánh
+    # "Đã hủy"/"Đã thay thế" thành code chết. Rủi ro thuế thật — sổ vẫn ghi hóa
+    # đơn hợp lệ trong khi bên MISA nó đã bị hủy.
+    watch = frappe.get_all(
+        "Sales Invoice",
+        filters={
+            "docstatus": 1,
+            "custom_misa_ref_id": ("is", "set"),
+            "custom_misa_inv_no": ("is", "set"),
+            "custom_misa_status": ("not in", ["Đã hủy", "Đã thay thế"]),
+            "posting_date": (">=", since),
+        },
+        fields=fields, order_by="custom_misa_last_checked asc", limit=limit,
+    )
+    seen_names = {r.name for r in rows}
+    rows = rows + [r for r in watch if r.name not in seen_names]
 
     stat = {"fetched": 0, "updated": 0, "matched": 0, "mismatched": 0}
     errors = []
@@ -248,15 +290,24 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
         stat["fetched"] += 1
         now = now_datetime()
 
+        # MISA không biết hóa đơn này. Chỉ được nói "đã đẩy (nháp)" khi ta THẬT
+        # SỰ đã đẩy — backfill_ref_id cấp ref_id cho cả hóa đơn chưa từng đẩy,
+        # ghi bừa "đã đẩy" là khẳng định sai về nghĩa vụ thuế.
+        pending = "Đã đẩy (nháp)" if si.get("custom_misa_pushed_at") else "Chưa đẩy"
+
         if not inv:
-            # MISA chưa biết hóa đơn này — đã đẩy dạng nháp, hoặc chưa từng đẩy.
-            _write(si.name, {"custom_misa_status": "Đã đẩy (nháp)", "custom_misa_last_checked": now})
+            if si.get("custom_misa_inv_no"):
+                # Hóa đơn đã có số mà lần này MISA không trả — có thể lỗi tạm.
+                # Chỉ ghi nhận đã kiểm, KHÔNG hạ trạng thái đang đúng.
+                _write(si.name, {"custom_misa_last_checked": now})
+            else:
+                _write(si.name, {"custom_misa_status": pending, "custom_misa_last_checked": now})
             continue
 
         inv_no = _pick(inv, "InvNo")
         if not inv_no or str(inv_no).startswith("<"):
             # MISA giữ chỗ '<Chưa cấp số>' khi hóa đơn còn nháp.
-            _write(si.name, {"custom_misa_status": "Đã đẩy (nháp)", "custom_misa_last_checked": now})
+            _write(si.name, {"custom_misa_status": pending, "custom_misa_last_checked": now})
             continue
 
         drift = check_amount_drift(si, inv, tolerance)
@@ -289,14 +340,20 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
             # số kế toán đã điền tay (rủi ro E4).
             **_legacy_values(si.name, inv_no, inv_date, _pick(inv, "TransactionID")),
         }
-        if drift:
-            values["custom_misa_note"] = " · ".join(drift)
+        conflict = values.pop("__conflict__", None)
+        notes = list(drift)
+        if conflict:
+            notes.append(conflict)
+            status = "Lệch tiền" if status == "Đã phát hành" else status
+        if notes:
+            values["custom_misa_note"] = " · ".join(notes)
+            values["custom_misa_status"] = status
 
         _write(si.name, values)
         stat["updated"] += 1
-        if drift:
+        if notes:
             stat["mismatched"] += 1
-            _todo(si.name, _("Hóa đơn {0} lệch tiền với MISA: {1}").format(si.name, " · ".join(drift)))
+            _todo(si.name, _("Hóa đơn {0} lệch với MISA: {1}").format(si.name, " · ".join(notes)))
         else:
             stat["matched"] += 1
         if status in ("Đã hủy", "Đã thay thế"):
@@ -327,8 +384,14 @@ def _legacy_values(si_name, inv_no, inv_date, transaction_id):
         [f for f in (LEGACY_NO, LEGACY_DATE, LEGACY_LOOKUP) if meta.has_field(f)] or ["name"],
         as_dict=True,
     ) or {}
-    if meta.has_field(LEGACY_NO) and not (current.get(LEGACY_NO) or "").strip():
-        out[LEGACY_NO] = str(inv_no)
+    if meta.has_field(LEGACY_NO):
+        have = (current.get(LEGACY_NO) or "").strip()
+        if not have:
+            out[LEGACY_NO] = str(inv_no)
+        elif have != str(inv_no):
+            # Không đè số kế toán đã điền tay, NHƯNG cũng không được im lặng:
+            # 6 màn hình đang đọc field này sẽ tiếp tục hiện số sai.
+            out["__conflict__"] = f"Số hóa đơn lệch: sổ ghi {have}, MISA cấp {inv_no}"
     if meta.has_field(LEGACY_DATE) and not current.get(LEGACY_DATE) and inv_date:
         out[LEGACY_DATE] = inv_date
     if meta.has_field(LEGACY_LOOKUP) and transaction_id:
@@ -399,7 +462,7 @@ PAGING_BASE = {
     "pagingType": "0",
 }
 
-PAGE_SIZE = 100
+PAGE_SIZE = 30   # đúng bằng trang của lưới MISA; server có thể trả ít hơn length
 MAX_PAGES = 100
 
 
@@ -477,13 +540,21 @@ def _upsert_snapshot(row, source_api="statement"):
     existing = frappe.db.get_value(
         "MISA Invoice Snapshot",
         {"inv_series": series, "inv_no_norm": values["inv_no_norm"]},
-        ["name", "transaction_id"], as_dict=True,
+        ["name", "transaction_id", "amount_before_vat", "vat_amount", "total_amount", "ref_id"],
+        as_dict=True,
     )
     txn = _pick(row, "TransactionID")
 
     if existing:
         if txn and not existing.transaction_id:
             values["transaction_id"] = txn
+        # Endpoint danh sách trả tách thuế = 0 (§H.2). Ghi đè 0 lên số đã nạp từ
+        # bảng kê là xóa dữ liệu và đẻ ra "Lệch tiền" giả. Chỉ ghi khi có giá trị.
+        for f in ("amount_before_vat", "vat_amount", "total_amount"):
+            if not values.get(f) and flt(existing.get(f)):
+                values.pop(f, None)
+        if not values.get("ref_id") and existing.get("ref_id"):
+            values.pop("ref_id", None)
         frappe.db.set_value("MISA Invoice Snapshot", existing.name, values, update_modified=False)
         return "updated"
 
@@ -566,9 +637,10 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
                 errors.append(f"hóa đơn {_pick(row, 'InvNo')}: lỗi ghi snapshot")
         frappe.db.commit()
 
-        if len(rows) < PAGE_SIZE:
-            break
-        start += PAGE_SIZE
+        # Tiến theo SỐ DÒNG THẬT NHẬN ĐƯỢC, không theo length yêu cầu: server trả
+        # ít hơn length là chuyện thường, cộng cứng PAGE_SIZE sẽ nhảy cóc bỏ sót.
+        # Và chỉ dừng khi trang trả 0 dòng (đã xử ở trên), không suy đoán từ số ít.
+        start += len(rows)
         time.sleep(PAGE_SLEEP)
 
     if not stat["fetched"] and not errors:

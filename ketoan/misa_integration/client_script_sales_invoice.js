@@ -33,7 +33,9 @@ const numberToWords = (() => {
             chuoi = " lẻ";
         }
 
-        if (donvi === 5 && chuc > 1) chuoi += " lăm";
+        // chuc >= 1 chứ không phải > 1: thiếu vế chuc === 1 thì 15 đọc thành
+        // "mười năm". Sai ở ô "số tiền bằng chữ" của hóa đơn là sai chứng từ.
+        if (donvi === 5 && chuc >= 1) chuoi += " lăm";
         else if (donvi > 1 || (donvi === 1 && chuc === 0)) chuoi += ` ${mangso[donvi]}`;
 
         return chuoi;
@@ -69,8 +71,12 @@ const numberToWords = (() => {
         return chuoi;
     };
 
-    return (so) => {
+    return function docso(so) {
+        so = Math.round(Number(so) || 0);
         if (so === 0) return mangso[0];
+        // Hóa đơn trả hàng mang số âm; vòng do/while dưới dừng ngay ở số âm và
+        // trả chuỗi rỗng, làm ô "bằng chữ" trống trên chứng từ.
+        if (so < 0) return "âm " + docso(-so);
         let chuoi = "", hauto = "";
         do {
             const ty = so % 1000000000;
@@ -119,7 +125,14 @@ const fetchItemMasterData = async (items) => {
 // hóa đơn chưa ghi sổ, là hóa đơn trả hàng, đã đẩy trước đó, hoặc tổng tiền
 // dựng ra lệch với sổ. Không cần kiểm lại ở client.
 // -----------------------------------------------------------------------------
+const _pushing = new Set();   // tên hóa đơn đang có request đẩy bay trên đường
+
 const pushToMisa = async (frm, { silent = false } = {}) => {
+    // Server còn khóa lần nữa; đây chỉ để tránh auto-push (không freeze màn hình)
+    // và nút bấm tay cùng gửi hai request tạo hai hóa đơn cho một chứng từ.
+    if (_pushing.has(frm.doc.name)) return;
+    _pushing.add(frm.doc.name);
+    document.querySelectorAll('[data-misa-push]').forEach(b => { b.disabled = true; });
     try {
         const r = await frappe.call({
             method: "ketoan.api.misa_push.push_invoice",
@@ -147,6 +160,9 @@ const pushToMisa = async (frm, { silent = false } = {}) => {
     } catch (e) {
         // frappe.call đã hiện lỗi server. Ở đây chỉ ghi console để dò về sau.
         console.error("push_invoice:", e);
+    } finally {
+        _pushing.delete(frm.doc.name);
+        document.querySelectorAll('[data-misa-push]').forEach(b => { b.disabled = false; });
     }
 };
 
@@ -218,7 +234,8 @@ frappe.ui.form.on("Sales Invoice", {
         // Nút đẩy tay — dùng khi đẩy tự động lỗi, hoặc khi kế toán muốn chủ động.
         if (frm.doc.docstatus === 1 && !frm.doc.is_return
             && !frm.doc.custom_misa_pushed_at && !frm.doc.vn_einvoice_lookup_code) {
-            frm.add_custom_button("Đẩy hóa đơn sang MISA", () => pushToMisa(frm), "MISA");
+            const btn = frm.add_custom_button("Đẩy hóa đơn sang MISA", () => pushToMisa(frm), "MISA");
+            if (btn) btn.setAttribute("data-misa-push", "1");
         }
         if (frm.doc.docstatus === 1 && frm.doc.custom_misa_ref_id) {
             frm.add_custom_button("Xem trước dữ liệu gửi MISA", () => {
@@ -245,53 +262,98 @@ frappe.ui.form.on("Sales Invoice", {
             is_return,
             customer_group,
             custom_hàng_dùng_thử: hangdungthu,
-            grand_total,
-            total
-        } = frm.doc;
+        } = frm.doc;   // KHÔNG lấy grand_total/total ở đây — chúng còn đổi bên dưới
 
-        // 1. Auto-load Item Price khi rate trống
+        // 1. Auto-load Item Price khi rate trống.
+        //
+        // BẮT BUỘC lọc theo ĐƠN VỊ TÍNH của dòng và theo hiệu lực. Bản cũ chỉ lọc
+        // item_code + price_list rồi lấy bản valid_from mới nhất, nên mặt hàng có
+        // cả giá /Thùng lẫn giá /Hộp sẽ nhận nhầm giá của đơn vị kia — sai đơn giá
+        // trên hóa đơn thật. Bản cũ cũng ghi đè price_list_rate làm báo cáo soát
+        // giá mất mốc so sánh, nên ở đây chỉ đặt rate.
+        const postingDate = frm.doc.posting_date || frappe.datetime.get_today();
         for (let row of items) {
-            if ((!row.rate || row.rate === 0) && frm.doc.selling_price_list) {
-                try {
-                    const result = await frappe.call({
-                        method: "frappe.client.get_list",
-                        args: {
-                            doctype: "Item Price",
-                            filters: {
-                                item_code: row.item_code,
-                                price_list: frm.doc.selling_price_list,
-                                selling: 1
-                            },
-                            fields: ["price_list_rate", "uom"],
-                            limit: 1,
-                            order_by: "valid_from desc"
-                        }
-                    });
-
-                    if (result.message && result.message.length > 0) {
-                        row.rate = result.message[0].price_list_rate;
-                        row.price_list_rate = result.message[0].price_list_rate;
-
-                        frappe.show_alert({
-                            message: `Đã load giá cho ${row.item_name}: ${frappe.format(row.rate, { fieldtype: 'Currency' })}`,
-                            indicator: 'green'
-                        });
-                    } else {
-                        frappe.show_alert({
-                            message: `Không tìm thấy giá cho ${row.item_name} trong bảng giá ${frm.doc.selling_price_list}`,
-                            indicator: 'orange'
-                        });
+            if ((row.rate && row.rate !== 0) || !frm.doc.selling_price_list || !row.item_code) continue;
+            try {
+                const result = await frappe.call({
+                    method: "frappe.client.get_list",
+                    args: {
+                        doctype: "Item Price",
+                        filters: {
+                            item_code: row.item_code,
+                            price_list: frm.doc.selling_price_list,
+                            selling: 1
+                        },
+                        fields: ["price_list_rate", "uom", "valid_from", "valid_upto"],
+                        limit: 50,
+                        order_by: "valid_from desc"
                     }
-                } catch (error) {
-                    console.error(`Lỗi khi load giá cho ${row.item_code}:`, error);
+                });
+                const all = (result.message || []).filter((p) => {
+                    if (p.valid_from && p.valid_from > postingDate) return false;
+                    if (p.valid_upto && p.valid_upto < postingDate) return false;
+                    return true;
+                });
+                // Ưu tiên giá đúng đơn vị tính của dòng; giá không khai đơn vị mới
+                // dùng làm dự phòng. Giá của đơn vị KHÁC thì tuyệt đối không lấy.
+                const exact = all.find((p) => p.uom && row.uom && p.uom === row.uom);
+                const generic = all.find((p) => !p.uom);
+                const picked = exact || generic;
+
+                if (picked) {
+                    row.rate = picked.price_list_rate;
+                    frappe.show_alert({
+                        message: `Đã load giá cho ${row.item_name}: ${frappe.format(picked.price_list_rate, { fieldtype: 'Currency' })}`
+                            + (picked.uom ? ` / ${picked.uom}` : ""),
+                        indicator: 'green'
+                    });
+                } else if (all.length) {
+                    frappe.show_alert({
+                        message: `Bảng giá ${frm.doc.selling_price_list} có giá cho ${row.item_name}`
+                            + ` nhưng KHÔNG phải đơn vị ${row.uom} — nhập đơn giá tay`,
+                        indicator: 'red'
+                    }, 10);
+                } else {
+                    frappe.show_alert({
+                        message: `Không tìm thấy giá cho ${row.item_name} trong bảng giá ${frm.doc.selling_price_list}`,
+                        indicator: 'orange'
+                    });
                 }
+            } catch (error) {
+                console.error(`Lỗi khi load giá cho ${row.item_code}:`, error);
             }
         }
 
-        // 2. Batch fetch master data (custom_quycach, custom_thể_tích) từ Item
+        // 2. Nạp bảng thuế nếu chưa có — PHẢI chạy trước bước tính tổng, vì
+        // "số tiền bằng chữ" dựng từ grand_total. Bản cũ để bước này ở cuối nên
+        // chứng từ in ra có số bằng chữ chưa gồm thuế, lệch số bằng số.
+        if (frm.doc.taxes_and_charges && (!frm.doc.taxes || frm.doc.taxes.length === 0)) {
+            const result = await frappe.call({
+                method: "erpnext.controllers.accounts_controller.get_taxes_and_charges",
+                args: {
+                    doctype: frm.doc.doctype,
+                    master_name: frm.doc.taxes_and_charges,
+                    master_doctype: "Sales Taxes and Charges Template"
+                }
+            });
+            if (result.message) {
+                frm.clear_table("taxes");
+                result.message.forEach(d => {
+                    let row = frm.add_child("taxes");
+                    Object.assign(row, d);
+                });
+                frm.refresh_field("taxes");
+            }
+        }
+
+        // Ép ERPNext tính lại tổng sau khi đã đổi đơn giá và bảng thuế, để các
+        // bước sau đọc được grand_total ĐÚNG chứ không phải số chụp lúc đầu hàm.
+        try { frm.cscript.calculate_taxes_and_totals(); } catch (_) {}
+
+        // 3. Batch fetch master data (custom_quycach, custom_thể_tích) từ Item
         const itemMaster = await fetchItemMasterData(items);
 
-        // 3. Tính tổng (KHÔNG persist xuống row — dùng standard fields)
+        // 4. Tính tổng (KHÔNG persist xuống row — dùng standard fields)
         let total_amount = 0, total_volume = 0, full_boxes = 0, rem_pieces = 0;
 
         items.forEach(row => {
@@ -310,45 +372,25 @@ frappe.ui.form.on("Sales Invoice", {
             if (is_return) row.income_account = "5213 - Hàng bán bị trả lại - HGC";
         });
 
-        // 4. Set parent fields
+        // 5. Set parent fields
         await frm.set_value({
             po_no: so_po,
             custom_tổng_cộng: total_amount,
             custom_thể_tích_lô: total_volume,
             custom_tổng_kiện: full_boxes,
             custom_hộp_lẻ: rem_pieces,
-            custom_tiền_chiết_khấu: total_amount - total,
-            custom_ghi_bằng_chữ: jsUcfirst(numberToWords(Math.round(grand_total)) + " đồng"),
+            custom_tiền_chiết_khấu: total_amount - (frm.doc.total || 0),
+            custom_ghi_bằng_chữ: jsUcfirst(numberToWords(frm.doc.grand_total) + " đồng"),
             remarks: is_return ? "Trả hàng" : "Nhập hàng",
             update_stock: !is_return
         });
 
-        // 5. COD handling
+        // 6. COD handling
         if (số_tiền_cod > 0) {
             await frm.set_value({
                 po_no: "THU HỘ COD",
                 remarks: `Thu hộ COD. Số tiền: ${số_tiền_cod}`
             });
-        }
-
-        // 6. Auto-load taxes nếu chưa có
-        if (frm.doc.taxes_and_charges && (!frm.doc.taxes || frm.doc.taxes.length === 0)) {
-            const result = await frappe.call({
-                method: "erpnext.controllers.accounts_controller.get_taxes_and_charges",
-                args: {
-                    doctype: frm.doc.doctype,
-                    master_name: frm.doc.taxes_and_charges,
-                    master_doctype: "Sales Taxes and Charges Template"
-                }
-            });
-            if (result.message) {
-                frm.clear_table("taxes");
-                result.message.forEach(d => {
-                    let row = frm.add_child("taxes");
-                    Object.assign(row, d);
-                });
-                frm.refresh_field("taxes");
-            }
         }
 
         // 7. Cảnh báo hàng dùng thử cho khách Du lịch
@@ -369,7 +411,10 @@ frappe.ui.form.on("Sales Invoice", {
         if (
             frm.doc.docstatus === 1 &&
             !frm.doc.is_return &&
-            (frm.doc.custom_xuất_hoá_đơn === 1 || frm.doc.custom_xuất_theo_hộp_ === 1) &&
+            // CHỈ cờ xuất hóa đơn. custom_xuất_theo_hộp_ thuần túy là cờ trình bày
+            // (quy đổi số lượng/đơn giá về Hộp) — để nó ở đây thì tick nhầm một ô
+            // định dạng là PHÁT HÀNH hóa đơn điện tử có giá trị pháp lý.
+            frm.doc.custom_xuất_hoá_đơn === 1 &&
             !frm.doc.custom_misa_pushed_at &&
             !frm.doc.vn_einvoice_lookup_code
         ) {
