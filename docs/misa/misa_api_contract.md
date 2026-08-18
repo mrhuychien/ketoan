@@ -904,3 +904,59 @@ Lỗi KHÔNG phải `Unknown column` thì ném ra bình thường — không nu�
 `kéo=2` trong nhật ký là của `poll_pending` (hỏi số hóa đơn cho SI đã đẩy), KHÔNG
 phải kéo danh sách. Snapshot vẫn 0 — endpoint danh sách chưa từng chạy thành công
 lần nào. Lo ngại "968 so với 3" ở lượt trước là đọc nhầm nhật ký.
+
+---
+
+## P. ĐÃ GIẢI — endpoint danh sách chạy được (18/08/2026)
+
+`find_list_endpoint` quét 12 đường dẫn × 6 biến thể tham số trên site thật.
+
+### P.1 Thủ phạm: DẤU NHÁY KÉP quanh giá trị ngày
+
+| Biến thể trên `code/v3sainvoice/paging` | Kết quả |
+|---|---|
+| `fromDate="2026-07-18T00:00:00.000Z"` (CÓ nháy) | **0 dòng** |
+| `fromDate=2026-07-18T00:00:00.000Z` (không nháy) | **5 dòng · recordsTotal 1260** ✅ |
+| `fromDate=2026-07-18` (ngày trần) | **5 dòng · 1260** ✅ |
+| không gửi ngày | 0 dòng |
+
+Lưới web `app3` gửi giá trị **kèm nháy kép bên trong chuỗi** vì tầng của nó tự
+bóc. Bề mặt `/api/v2` model-bind thẳng vào `DateTime`, chuỗi có nháy parse hỏng,
+rơi về khoảng rỗng — và **không ném lỗi**, chỉ trả 0 dòng.
+
+Chép nguyên quirk của một tầng sang tầng khác mà không kiểm là gốc của cả chuỗi
+"0 bản ghi" ở §M.6 và §O.
+
+### P.2 Hợp đồng đã chốt
+
+```
+POST {base}/api/v2/code/v3sainvoice/paging     ·  form-urlencoded
+    start      = 0
+    length     = 100
+    fromDate   = YYYY-MM-DDT00:00:00.000Z      ← KHÔNG nháy kép
+    toDate     = YYYY-MM-DDT23:59:59.000Z      ← KHÔNG nháy kép
+→ {"data": "<chuỗi JSON mảng>", "recordsTotal": <tổng thật>, "success": true}
+```
+
+- **Ngày là BẮT BUỘC.** Thiếu ngày → 0 dòng.
+- **Tiền tố `code/` là BẮT BUỘC.** `v3sainvoice/paging` trả 0 kể cả khi có ngày.
+- **Bộ tối giản là đủ.** 17 tham số chép từ lưới web đều không cần.
+- **`recordsTotal` ở endpoint này CÓ giá trị thật** (1260) — khác lưới web luôn
+  trả 0. Chốt chặn "kéo thiếu" ở §O nhờ vậy mới hoạt động.
+
+### P.3 Bản đồ đường dẫn — đã dò hết
+
+| Đường dẫn | Kết quả |
+|---|---|
+| `code/v3sainvoice/paging` | ✅ **dùng cái này** |
+| `v3sainvoice/paging` · `code/v3sainvoice/list` · `v3sainvoice/list` | tồn tại, luôn 0 dòng |
+| `sainvoicewithcode/list` và 4 biến thể cùng nhóm | **404** — tên của lưới web không tồn tại trên API |
+| `v3sainvoice/getpaging` · `v3sainvoice/search` | **405** — có route nhưng không nhận POST |
+
+⇒ Đóng lại nhánh "tên route phản chiếu lưới web" bằng bằng chứng, không phải phỏng đoán.
+
+### P.4 Lưới an toàn
+
+`columns` chưa được kiểm chứng cùng biến thể chạy được, nên `_paging_call` thử bộ
+đầy đủ trước; trả rỗng thì tự lùi về **bộ tối giản đã xác minh** rồi ghi log. Thà
+lấy được dữ liệu với ít cột còn hơn im lặng trả rỗng.

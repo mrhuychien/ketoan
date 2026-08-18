@@ -110,8 +110,9 @@ def run(ref_id=None, from_date=None, to_date=None):
     paging = {
         "start": 0,
         "length": 2,
-        "fromDate": f'"{frm}T00:00:00.000Z"',
-        "toDate": f'"{to}T23:59:59.000Z"',
+        # KHÔNG nháy kép — đã xác minh nháy làm MISA trả rỗng (§P).
+        "fromDate": f"{frm}T00:00:00.000Z",
+        "toDate": f"{to}T23:59:59.000Z",
     }
 
     _try("danh sách hóa đơn trên bề mặt API",
@@ -236,7 +237,7 @@ def diagnose_vat(from_date=None, to_date=None):
     base = dict(PAGING_BASE)
     base.update({
         "draw": "1", "columns": PAGING_COLUMNS, "start": "0", "length": "5",
-        "fromDate": f'"{from_date}T00:00:00.000Z"', "toDate": f'"{to_date}T23:59:59.000Z"',
+        "fromDate": f"{from_date}T00:00:00.000Z", "toDate": f"{to_date}T23:59:59.000Z",
     })
 
     full_filter = ('[{"FilterValue":6,"FilterOperator":"=","FilterType":"comboboxenum",'

@@ -442,27 +442,12 @@ PAGING_COLUMNS = ",".join([
 # đó trỏ vào cột `InvoiceSummaryStatus` không tồn tại trong bảng hóa đơn CÓ MÃ
 # → "Unknown column ... in 'where clause'". Lưới trên app3 gửi được vì nó chạy
 # trên bảng khác.
-PAGING_BASE = {
-    "publishStatus": "6",
-    "sendEmailStatus": "-1",
-    "searchKey": "",
-    "filterInvoiceStatus": "0",
-    "sendToTaxStatus": "-1",
-    "searchField": "AccountObjectCode,AccountObjectName",
-    "keyValue": "",
-    "filterCustomField": "false",
-    "buyerSignature": "",
-    "filterPaymentStatus": "",
-    "lstOrganizationUnit": "",
-    "invTemplate": "",
-    "approveSteps": "",
-    "gridSort": "`InvDate` DESC, `InvNo` DESC",
-    "sort": "",
-    "filter": "[]",
-    "pagingType": "0",
-}
+# ĐÃ XÁC MINH trên site thật (§P): chỉ cần start + length + fromDate + toDate.
+# Mọi tham số khác chép từ lưới web đều KHÔNG cần, và invoiceSummaryStatus còn
+# làm vỡ SQL. Giữ bộ tối giản — thêm thứ chưa xác minh chỉ tạo thêm chỗ hỏng.
+PAGING_BASE = {}
 
-PAGE_SIZE = 30   # đúng bằng trang của lưới MISA; server có thể trả ít hơn length
+PAGE_SIZE = 100  # server tôn trọng length (đã thử 5); vòng lặp tiến theo số dòng THẬT
 MAX_PAGES = 100
 
 
@@ -471,12 +456,31 @@ MAX_PAGES = 100
 _UNKNOWN_COL = re.compile(r"Unknown column '([^']+)'", re.I)
 
 
+# Bộ tối giản ĐÃ XÁC MINH trả dữ liệu. Dùng làm lưới an toàn khi bộ đầy đủ rỗng.
+MINIMAL_KEYS = ("start", "length", "fromDate", "toDate")
+
+
 def _paging_call(settings, payload, dropped, max_drop=6):
     """Gọi endpoint danh sách, tự gỡ tham số nào khiến MISA vỡ SQL rồi gọi lại.
 
     Trả về (rows, meta). `dropped` là set dùng chung giữa các trang để đã gỡ rồi
     thì trang sau không gửi lại.
+
+    Nếu bộ đầy đủ trả 0 dòng, thử lại bằng bộ TỐI GIẢN đã xác minh: `columns`
+    chưa được kiểm chứng cùng biến thể chạy được, thà lấy được dữ liệu với ít
+    cột còn hơn im lặng trả rỗng.
     """
+    rows, meta = _paging_try(settings, payload, dropped, max_drop)
+    if not rows and any(k not in MINIMAL_KEYS for k in payload):
+        minimal = {k: v for k, v in payload.items() if k in MINIMAL_KEYS}
+        rows2, meta2 = _paging_try(settings, minimal, set(), max_drop)
+        if rows2:
+            frappe.logger().info("misa: bộ tham số đầy đủ trả rỗng, dùng bộ tối giản")
+            return rows2, meta2
+    return rows, meta
+
+
+def _paging_try(settings, payload, dropped, max_drop=6):
     payload = {k: v for k, v in payload.items() if k not in dropped}
     for _ in range(max_drop):
         try:
@@ -601,9 +605,12 @@ def _pull_invoices(from_date=None, to_date=None, trigger_type="Manual"):
         payload = dict(PAGING_BASE)
         payload.update({
             "draw": str(page + 1),
-            # Giá trị CÓ KÈM dấu nháy kép bên trong — đúng như lưới thật gửi (§J.3).
-            "fromDate": f'"{from_date}T00:00:00.000Z"',
-            "toDate": f'"{to_date}T23:59:59.000Z"',
+            # KHÔNG dấu nháy kép. Lưới web gửi kèm nháy vì tầng của nó tự bóc;
+            # bề mặt /api/v2 model-bind thẳng vào DateTime nên chuỗi có nháy parse
+            # HỎNG, rơi về khoảng rỗng và trả 0 dòng mà KHÔNG hề báo lỗi. Đây đúng
+            # là thủ phạm của cả chuỗi "0 bản ghi" trước đó (§P).
+            "fromDate": f"{from_date}T00:00:00.000Z",
+            "toDate": f"{to_date}T23:59:59.000Z",
             "columns": PAGING_COLUMNS,
             "start": str(start),
             "length": str(PAGE_SIZE),
