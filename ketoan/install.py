@@ -188,6 +188,43 @@ MISA_RELATION_OPTIONS = "\n".join(
      "Bị thay thế", "Bị điều chỉnh", "Chưa xác định")
 )
 
+# Chuỗi siêu thị của khách hàng MT — LƯU TRÊN CHÍNH KHÁCH HÀNG.
+#
+# VÌ SAO cần field riêng thay vì suy từ bảng kê đã nạp: suy ngược là vòng luẩn
+# quẩn. Khách chưa có bảng kê nào thì không gán được chuỗi, mà muốn nạp bảng kê
+# đúng chuỗi thì lại cần biết khách thuộc chuỗi nào. Khách mới ký hợp đồng phải
+# gán được NGAY, trước khi có đồng thanh toán nào.
+#
+# Suy từ bảng kê vẫn giữ làm lớp dự phòng cho dữ liệu cũ (mt._customer_chain_map).
+MT_CHAIN_OPTIONS = "\n".join(
+    ("", "WinCommerce", "Central Retail", "LOTTE", "Emart", "Saigon Co.op")
+)
+
+MT_CUSTOM_FIELDS = {
+    "Customer": [
+        {
+            "fieldname": "custom_mt_chain",
+            "label": "Chuỗi siêu thị (kênh MT)",
+            "fieldtype": "Select",
+            "options": MT_CHAIN_OPTIONS,
+            "in_standard_filter": 1,
+            "description": "Khách thuộc chuỗi nào. Dùng để gom công nợ theo chuỗi ở màn hình Công nợ MT.",
+            "insert_after": "customer_group",
+        },
+    ]
+}
+
+
+def setup_mt_fields():
+    """Tạo custom field kênh MT trên Customer. Idempotent."""
+    from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+
+    try:
+        create_custom_fields(MT_CUSTOM_FIELDS, ignore_validate=True)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "ketoan: setup_mt_fields")
+
+
 MISA_CUSTOM_FIELDS = {
     "Sales Invoice": [
         {

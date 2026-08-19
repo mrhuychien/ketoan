@@ -1135,6 +1135,9 @@ async function loadCustomers(container, state) {
         <option value="">Tất cả chuỗi</option>
         ${(res.chains || []).map((c) => html`<option value="${c}" ${state.chain === c ? "selected" : ""}>${c}</option>`)}
       </select>
+      <button class="kt-btn kt-btn--outline kt-btn--sm" id="mt-assign-chain">
+        <i class="fas fa-diagram-project"></i> Gán chuỗi cho khách
+      </button>
       <input class="kt-input kt-input--sm" id="mt-cus-search" placeholder="Tìm khách hàng…"
              value="${state.search}" style="margin-left:auto;min-width:220px">
     </div></div>
@@ -1202,6 +1205,8 @@ async function loadCustomers(container, state) {
   bindPager(container, state);
   bindViewSwitch(container, state);
   bindDrill(container, state);
+  const asg = container.querySelector("#mt-assign-chain");
+  if (asg) asg.addEventListener("click", () => openChainAssign(container, state));
 
   const box = container.querySelector("#mt-cus-search");
   if (box) {
@@ -1269,5 +1274,111 @@ function bindCustomerFilter(container, state) {
     state.customer = "";
     state.page = 1;
     loadTab(container, state);
+  });
+}
+
+
+// ── Gán chuỗi cho khách hàng ───────────────────────────────────────────────
+// Đây là chỗ gán CHÍNH THỨC. Trước đó chuỗi chỉ suy được từ bảng kê đã nạp —
+// vòng luẩn quẩn: khách mới ký hợp đồng, chưa có đồng thanh toán nào, thì không
+// gán được; mà không gán thì công nợ của họ rơi vào rổ "Chưa gán chuỗi".
+async function openChainAssign(container, state) {
+  const modal = openModal({
+    title: "Gán chuỗi siêu thị cho khách hàng",
+    icon: "fa-diagram-project",
+    maxWidth: 860,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  await renderChainAssign(container, state, modal, 1);
+}
+
+async function renderChainAssign(container, state, modal, onlyUnassigned) {
+  setHTML(modal.body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let res;
+  try {
+    res = await api.mtChainAssignment({ only_unassigned: onlyUnassigned ? 1 : 0 });
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = res.rows || [];
+
+  setHTML(modal.body, html`
+    ${!res.has_field
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)">Site chưa có field gán chuỗi.</b>
+          <div class="kt-sub">Quản trị chạy <code>bench --site TÊN_SITE migrate</code> rồi mở lại.</div>
+        </div></div>`
+      : ""}
+
+    <p class="kt-sub">
+      Gán ở đây thì <b>không cần chờ có bảng kê</b>. Khách đã gán tường minh sẽ được ưu tiên
+      hơn kết quả máy suy từ bảng kê — kể cả khi khách từng xuất hiện trên bảng kê của chuỗi khác.
+    </p>
+
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <label style="display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="ca-only" ${onlyUnassigned ? "checked" : ""}>
+        <span class="kt-sub">Chỉ hiện khách chưa chốt</span>
+      </label>
+      <span class="kt-sub" style="margin-left:auto">${rows.length} khách</span>
+    </div>
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i>
+          <p>Mọi khách hàng kênh MT đều đã được gán chuỗi.</p></div>`
+      : html`<div class="kt-table-wrap" style="max-height:420px;overflow:auto">
+          <table class="kt-table">
+            <thead><tr><th>Khách hàng</th><th>Nguồn</th><th>Chuỗi</th></tr></thead>
+            <tbody>${rows.map((r) => html`<tr>
+              <td><b>${r.customer_name || r.customer}</b>
+                ${r.customer_name ? html`<div class="kt-sub">${r.customer}</div>` : ""}</td>
+              <td>${r.source === "khai_bao"
+                ? html`<span class="kt-badge kt-badge--green">đã chốt</span>`
+                : r.source === "suy_tu_bang_ke"
+                  ? html`<span class="kt-badge kt-badge--yellow">máy suy từ bảng kê</span>`
+                  : html`<span class="kt-badge kt-badge--gray">chưa gán</span>`}</td>
+              <td><select class="kt-input kt-input--sm" data-assign="${r.customer}"
+                    ${res.can_assign && res.has_field ? "" : "disabled"}>
+                <option value="">— chưa gán —</option>
+                ${(res.chains || []).map((c) => html`<option value="${c}" ${r.chain === c ? "selected" : ""}>${c}</option>`)}
+              </select></td>
+            </tr>`)}</tbody>
+          </table></div>`}
+
+    <div class="kt-sub" style="margin-top:8px">${res.note || ""}</div>
+    ${!res.can_assign
+      ? html`<div class="kt-sub" style="margin-top:6px">Chỉ kế toán trưởng mới được gán.</div>`
+      : ""}
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
+      <button class="kt-btn kt-btn--outline" id="ca-close">Đóng</button>
+    </div>
+  `);
+
+  modal.body.querySelector("#ca-close").addEventListener("click", () => {
+    modal.close();
+    loadTab(container, state);   // số liệu đổi theo chuỗi vừa gán
+  });
+  modal.body.querySelector("#ca-only").addEventListener("change", (e) =>
+    renderChainAssign(container, state, modal, e.target.checked ? 1 : 0));
+
+  modal.body.querySelectorAll("select[data-assign]").forEach((sel) => {
+    sel.addEventListener("change", async () => {
+      const prev = sel.dataset.prev || "";
+      sel.disabled = true;
+      try {
+        const r = await api.mtSetCustomerChain(sel.dataset.assign, sel.value || undefined);
+        toast(r.message, "success");
+        sel.dataset.prev = sel.value;
+        const cell = sel.closest("tr").querySelector("td:nth-child(2)");
+        if (cell) setHTML(cell, sel.value
+          ? html`<span class="kt-badge kt-badge--green">đã chốt</span>`
+          : html`<span class="kt-badge kt-badge--gray">chưa gán</span>`);
+      } catch (e) {
+        toast(e.message, "error");
+        sel.value = prev;   // trả về giá trị cũ, đừng để màn hình nói dối
+      }
+      sel.disabled = false;
+    });
   });
 }

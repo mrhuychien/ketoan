@@ -108,6 +108,10 @@ PAGE_SIZE = 20
 MAX_PAGE_SIZE = 200
 
 # Nhãn row_kind trong DocType (tiếng Việt có dấu). Fieldname vẫn ASCII.
+# Đúng options của field `chain` trên MT Payment Advice. Khai ở một chỗ để màn
+# hình, API gán chuỗi và DocType không bao giờ lệch nhau.
+CHAIN_OPTIONS = ("WinCommerce", "Central Retail", "LOTTE", "Emart", "Saigon Co.op")
+
 KIND_PAYMENT = "Thanh toán"
 KIND_DISCOUNT = "Chiết khấu"
 KIND_FEE = "Phí"
@@ -719,6 +723,23 @@ def _customer_chain_map():
             mapping[cus] = next(iter(chains))
         else:
             ambiguous.append({"customer": cus, "chains": sorted(chains)})
+
+    # Field trên chính khách hàng ĐÈ kết quả suy từ bảng kê.
+    #
+    # Suy ngược từ bảng kê là vòng luẩn quẩn: khách chưa có bảng kê nào thì không
+    # gán được chuỗi. Field này là chỗ kế toán gán TRỰC TIẾP, và vì là khai báo
+    # tường minh nên nó thắng suy đoán — kể cả khi khách từng xuất hiện trên bảng
+    # kê của chuỗi khác (chuyển chuỗi, hoặc nạp nhầm rồi đã sửa).
+    if frappe.db.has_column("Customer", "custom_mt_chain"):
+        declared = frappe.db.sql("""
+            SELECT name, custom_mt_chain AS chain
+            FROM `tabCustomer` WHERE IFNULL(custom_mt_chain, '') != ''
+        """, as_dict=True)
+        named = {d.name for d in declared}
+        for d in declared:
+            mapping[d.name] = d.chain
+        # Đã khai tường minh thì hết mập mờ — bỏ khỏi danh sách cần xử lý.
+        ambiguous = [a for a in ambiguous if a["customer"] not in named]
     return mapping, ambiguous
 
 
@@ -2241,4 +2262,93 @@ def get_customer_summary(company=None, from_date=None, to_date=None, chain=None,
                   "'Tiền hàng / chiết khấu / phí / thực nhận' tính theo ngày thanh toán của "
                   "bảng kê (dòng tiền). Dòng 'Chưa gán khách' là các kỳ bảng kê chưa xác định "
                   "được khách — cần kế toán điền, không được bỏ qua."),
+    }
+
+
+@frappe.whitelist()
+def set_customer_chain(customer, chain=None):
+    """Gán (hoặc gỡ) chuỗi siêu thị cho MỘT khách hàng.
+
+    Đây là chỗ gán CHÍNH THỨC. Trước đó chuỗi chỉ suy được từ bảng kê đã nạp,
+    tức là khách mới ký hợp đồng — chưa có đồng thanh toán nào — thì không gán
+    được, mà không gán thì công nợ của họ rơi vào rổ "Chưa gán chuỗi".
+
+    Ghi thẳng vào Customer, không tạo bản ghi trung gian: "khách này thuộc chuỗi
+    nào" là thuộc tính của khách.
+    """
+    guard_manager()
+    _require_tables()
+
+    chain = norm_text(chain) or None
+    if chain and chain not in CHAIN_OPTIONS:
+        frappe.throw(_("Chuỗi không hợp lệ: {0}").format(chain))
+    if not frappe.db.exists("Customer", customer):
+        frappe.throw(_("Không tìm thấy khách hàng {0}").format(customer))
+    if not frappe.db.has_column("Customer", "custom_mt_chain"):
+        frappe.throw(_("Site chưa có field gán chuỗi. Quản trị chạy: bench --site TÊN_SITE migrate"))
+
+    # Chỉ gán cho khách THUỘC kênh MT: gán chuỗi siêu thị cho khách NPP là làm
+    # hỏng số liệu của cả hai kênh.
+    group = frappe.db.get_value("Customer", customer, "customer_group")
+    mt_group = (get_settings().get("mt_customer_group") or "MT")
+    if group != mt_group:
+        frappe.throw(_("Khách {0} thuộc nhóm {1}, không phải kênh MT ({2})")
+                     .format(customer, group or "—", mt_group))
+
+    frappe.db.set_value("Customer", customer, "custom_mt_chain", chain,
+                        update_modified=False)
+    frappe.db.commit()
+    return {"customer": customer, "chain": chain,
+            "message": _("Đã gán {0} vào chuỗi {1}").format(customer, chain) if chain
+            else _("Đã gỡ chuỗi của {0}").format(customer)}
+
+
+@frappe.whitelist()
+def get_chain_assignment(company=None, only_unassigned=1):
+    """Danh sách khách kênh MT kèm chuỗi đang gán — màn hình để gán hàng loạt.
+
+    Mặc định chỉ trả khách CHƯA gán, vì đó là việc cần làm. Nguồn "đang gán" lấy
+    từ `_customer_chain_map` nên phản ánh cả field khai tường minh lẫn suy đoán
+    từ bảng kê — cột `source` nói rõ cái nào là cái nào để kế toán biết cái nào
+    còn phải chốt.
+    """
+    guard_mt()
+    _require_tables()
+    company = _company(company)
+    mapping, ambiguous = _customer_chain_map()
+
+    has_field = frappe.db.has_column("Customer", "custom_mt_chain")
+    p = {"company": company}
+    mt = _mt_clause(p)
+    col = "c.custom_mt_chain" if has_field else "NULL"
+    rows = frappe.db.sql(f"""
+        SELECT c.name AS customer, c.customer_name, {col} AS declared_chain
+        FROM `tabCustomer` c
+        WHERE c.disabled = 0 AND {mt}
+        ORDER BY c.customer_name
+    """, p, as_dict=True)
+
+    out = []
+    for r in rows:
+        declared = norm_text(r.declared_chain) or None
+        guessed = mapping.get(r.customer)
+        out.append({
+            "customer": r.customer,
+            "customer_name": r.customer_name,
+            "chain": declared or guessed or None,
+            # 'khai_bao' = kế toán đã chốt; 'suy_tu_bang_ke' = máy đoán, nên chốt lại.
+            "source": "khai_bao" if declared else ("suy_tu_bang_ke" if guessed else None),
+        })
+
+    if cint(only_unassigned):
+        out = [x for x in out if x["source"] != "khai_bao"]
+
+    return {
+        "rows": out,
+        "chains": list(CHAIN_OPTIONS),
+        "can_assign": is_chief(),
+        "ambiguous_customers": ambiguous,
+        "has_field": has_field,
+        "note": _("'Suy từ bảng kê' là máy đoán từ các bảng kê đã nạp — nên chốt lại "
+                  "bằng cách chọn chuỗi, vì khách có thể đổi chuỗi hoặc từng bị nạp nhầm."),
     }

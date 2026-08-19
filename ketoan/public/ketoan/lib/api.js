@@ -146,6 +146,10 @@ export const api = {
   // Công nợ chi tiết TRÊN ĐẦU TỪNG KHÁCH — cấp chuỗi chỉ để nhìn tổng, đi đòi
   // nợ thì phải theo pháp nhân (riêng Co.op có 120 siêu thị thành viên).
   mtCustomerSummary: (a) => callMethod(NS + "mt.get_customer_summary", withCompany(a)),
+  // Gán chuỗi cho khách — chỗ gán CHÍNH THỨC. Suy từ bảng kê đã nạp là vòng
+  // luẩn quẩn: khách mới ký hợp đồng chưa có bảng kê nào thì không gán được.
+  mtChainAssignment: (a) => callMethod(NS + "mt.get_chain_assignment", withCompany(a)),
+  mtSetCustomerChain: (customer, chain) => callMethod(NS + "mt.set_customer_chain", { customer, chain }),
   // Xem trước BẮT BUỘC chạy trước khi nạp — nó trả `plan_hash` mà commit đòi.
   mtAdvicePreview: (a) => callMethod(NS + "mt.preview_advice", withCompany(a)),
   mtAdviceCommit: (a) => callMethod(NS + "mt.commit_advice", withCompany(a)),
