@@ -143,6 +143,9 @@ export const api = {
   mtOverview: (a) => callMethod(NS + "mt.get_overview", withCompany(a)),
   mtInvoices: (bucket, a) => callMethod(NS + "mt.get_invoices", withCompany({ bucket, ...a })),
   mtChainSummary: (a) => callMethod(NS + "mt.get_chain_summary", withCompany(a)),
+  // Công nợ chi tiết TRÊN ĐẦU TỪNG KHÁCH — cấp chuỗi chỉ để nhìn tổng, đi đòi
+  // nợ thì phải theo pháp nhân (riêng Co.op có 120 siêu thị thành viên).
+  mtCustomerSummary: (a) => callMethod(NS + "mt.get_customer_summary", withCompany(a)),
   // Xem trước BẮT BUỘC chạy trước khi nạp — nó trả `plan_hash` mà commit đòi.
   mtAdvicePreview: (a) => callMethod(NS + "mt.preview_advice", withCompany(a)),
   mtAdviceCommit: (a) => callMethod(NS + "mt.commit_advice", withCompany(a)),

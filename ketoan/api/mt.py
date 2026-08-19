@@ -511,10 +511,16 @@ def get_overview(company=None, from_date=None, to_date=None):
 # Màn hình 2 — Danh sách hóa đơn (chia trang 20/trang)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _invoice_page(company, from_date, to_date, where, search, page_size, offset, sort=None):
+def _invoice_page(company, from_date, to_date, where, search, page_size, offset, sort=None,
+                  customer=None):
     p = {"company": company, "fd": from_date, "td": to_date, "tol": PAID_TOLERANCE,
          "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT, "limit": page_size, "offset": offset}
     mt = _mt_clause(p)
+    # Lọc theo KHÁCH: kế toán MT đối chiếu trên đầu từng khách, không phải trên
+    # cả kênh. Lọc bằng tham số ràng buộc, không nối chuỗi vào SQL.
+    if customer:
+        p["cus"] = customer
+        where += " AND si.customer = %(cus)s"
     join = _paid_subquery()
     if search:
         p["kw"] = f"%{search}%"
@@ -590,7 +596,8 @@ def _attach_payment_lines(rows):
         r["payments"] = grouped.get(r["name"], [])
 
 
-def _deduction_page(company, from_date, to_date, search, page_size, offset, chain=None):
+def _deduction_page(company, from_date, to_date, search, page_size, offset, chain=None,
+                    customer=None):
     """Rổ 'chiết khấu' KHÔNG phải danh sách hóa đơn — nó là danh sách DÒNG khấu trừ.
 
     Chuỗi trừ lại chiết khấu, phí dịch vụ, hàng trả lại... phần lớn không gắn với
@@ -609,6 +616,11 @@ def _deduction_page(company, from_date, to_date, search, page_size, offset, chai
     if chain:
         p["chain"] = chain
         where.append("a.chain = %(chain)s")
+    if customer:
+        # Khấu trừ thuộc về khách của BẢNG KÊ: chuỗi trừ tiền trên đúng lần thanh
+        # toán cho khách đó. Kỳ chưa gán khách thì không thuộc khách nào.
+        p["cus"] = customer
+        where.append("a.customer = %(cus)s")
     if search:
         p["kw"] = f"%{search}%"
         where.append("(l.description LIKE %(kw)s OR l.doc_no LIKE %(kw)s"
@@ -639,7 +651,7 @@ def _deduction_page(company, from_date, to_date, search, page_size, offset, chai
 
 @frappe.whitelist()
 def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None,
-                 page=1, page_size=PAGE_SIZE, chain=None):
+                 page=1, page_size=PAGE_SIZE, chain=None, customer=None):
     """Một TRANG của một rổ. bucket ∈ chua_thanh_toan | da_thanh_toan | chiet_khau | tat_ca.
 
     Chia trang ở tầng SQL, 20 dòng/trang. Kênh MT một tháng có hàng nghìn hóa
@@ -653,18 +665,21 @@ def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None
     company = _company(company)
     page, page_size, offset = _page(page, page_size)
     search = norm_text(search)
+    customer = norm_text(customer) or None
 
     if bucket == "chiet_khau":
         source = "mt_line"
-        rows, total = _deduction_page(company, from_date, to_date, search, page_size, offset, chain)
+        rows, total = _deduction_page(company, from_date, to_date, search, page_size, offset,
+                                      chain, customer)
     else:
         source = "erp"
         rows, total = _invoice_page(company, from_date, to_date, _BUCKET_WHERE[bucket],
-                                    search, page_size, offset)
+                                    search, page_size, offset, customer=customer)
 
     return {
         "bucket": bucket,
         "source": source,
+        "customer": customer,
         "rows": rows,
         "total": total,
         "page": page,
@@ -2077,4 +2092,153 @@ def relink_line(line, sales_invoice=None, note=None):
         "previous": row.sales_invoice,
         **values,
         "other_lines_on_invoice": others,
+    }
+
+
+@frappe.whitelist()
+def get_customer_summary(company=None, from_date=None, to_date=None, chain=None,
+                         search=None, page=1, page_size=50):
+    """Công nợ MT chi tiết TRÊN ĐẦU TỪNG KHÁCH HÀNG.
+
+    Khác `get_chain_summary` ở chỗ gom theo khách chứ không theo chuỗi — kế toán
+    MT đối chiếu với từng pháp nhân, còn "chuỗi" chỉ là cách nhóm để nhìn tổng.
+    Riêng Co.op có tới 120 siêu thị thành viên nên con số cấp chuỗi không dùng
+    để đi đòi nợ được.
+
+    HAI TRỤC THỜI GIAN, giữ nguyên như bản theo chuỗi:
+      · 'đã xuất / đã thu / còn lại' — theo HÓA ĐƠN ghi sổ trong kỳ (công nợ)
+      · 'tiền hàng / chiết khấu / phí / thực nhận' — theo NGÀY THANH TOÁN của
+        bảng kê (dòng tiền)
+    Cộng hai trục vào nhau là ra số không có nghĩa kế toán nào.
+
+    Dòng tiền gom theo `MT Payment Advice.customer`. Kỳ nào máy chưa xác định
+    được khách thì dồn vào một dòng riêng "Chưa gán khách" — KHÔNG chia đều và
+    KHÔNG giấu đi, vì đó chính là phần việc kế toán còn phải làm.
+    """
+    guard_mt()
+    _require_tables()
+    from_date, to_date = _range(from_date, to_date)
+    company = _company(company)
+    page, page_size, offset = _page(page, page_size)
+    search = norm_text(search)
+    mapping, ambiguous = _customer_chain_map()
+
+    p = {"company": company, "fd": from_date, "td": to_date,
+         "tol": PAID_TOLERANCE, "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}
+    mt = _mt_clause(p)
+    join = _paid_subquery()
+
+    # ── Vế CÔNG NỢ: theo hóa đơn ghi sổ trong kỳ ────────────────────────────
+    inv_where = ""
+    if search:
+        p["kw"] = f"%{search}%"
+        inv_where = " AND (si.customer LIKE %(kw)s OR si.customer_name LIKE %(kw)s)"
+    by_customer = frappe.db.sql(f"""
+        SELECT si.customer, si.customer_name,
+               COUNT(*) AS cnt,
+               IFNULL(SUM(CASE WHEN si.is_return = 0 THEN ABS(si.grand_total) ELSE 0 END), 0) AS invoiced,
+               IFNULL(SUM(CASE WHEN si.is_return = 1 THEN ABS(si.grand_total) ELSE 0 END), 0) AS returns_amt,
+               IFNULL(SUM(LEAST({_NET_PAID}, ABS(si.grand_total))), 0) AS collected,
+               IFNULL(SUM(CASE WHEN si.is_return = 0
+                          THEN GREATEST(ABS(si.grand_total) - {_NET_PAID}, 0) ELSE 0 END), 0) AS outstanding,
+               SUM(CASE WHEN si.is_return = 0
+                        AND {_NET_PAID} < ABS(si.grand_total) - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
+        FROM `tabSales Invoice` si
+        INNER JOIN `tabCustomer` c ON c.name = si.customer
+        {join}
+        WHERE si.docstatus = 1 AND si.company = %(company)s
+          AND si.posting_date BETWEEN %(fd)s AND %(td)s AND {mt}{inv_where}
+        GROUP BY si.customer, si.customer_name
+    """, p, as_dict=True)
+
+    # ── Vế DÒNG TIỀN: theo bảng kê có ngày thanh toán trong kỳ ──────────────
+    #
+    # Gom theo a.customer (KHÔNG phải a.chain). Dòng 'Thanh toán' lấy độ lớn ngay
+    # từng dòng vì bản chất đã chắc nhờ cột loại chứng từ; dòng khấu trừ cộng
+    # THEO DẤU rồi mới lấy độ lớn ở cấp (khách, loại) — LOTTE có dòng NET OFF
+    # dương lẫn trong ghi giảm âm, lấy độ lớn từng dòng là lật chiều chúng.
+    by_advice = frappe.db.sql("""
+        SELECT IFNULL(a.customer, '') AS customer, a.chain, l.row_kind, COUNT(*) AS n,
+               IFNULL(SUM(CASE WHEN l.row_kind = %(kind_payment)s
+                               THEN ABS(l.total_amount) ELSE l.total_amount END), 0) AS amt
+        FROM `tabMT Payment Advice Line` l
+        INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent
+        WHERE l.parenttype = 'MT Payment Advice'
+          AND a.company = %(company)s
+          AND IFNULL(l.payment_date, a.payment_date) BETWEEN %(fd)s AND %(td)s
+        GROUP BY IFNULL(a.customer, ''), a.chain, l.row_kind
+    """, p, as_dict=True)
+
+    def blank(cus, name=None, ch=None):
+        return {"customer": cus, "customer_name": name, "chain": ch or UNASSIGNED,
+                "invoice_count": 0, "unpaid_count": 0, "invoiced": 0.0, "returns": 0.0,
+                "collected": 0.0, "outstanding": 0.0, "received_in_period": 0.0,
+                "discount": 0.0, "fee": 0.0, "other": 0.0, "advice_lines": 0}
+
+    out = {}
+    for r in by_customer:
+        d = out.setdefault(r.customer, blank(r.customer, r.customer_name,
+                                             mapping.get(r.customer)))
+        d["invoice_count"] += cint(r.cnt)
+        d["unpaid_count"] += cint(r.unpaid_count)
+        d["invoiced"] += flt(r.invoiced)
+        d["returns"] += flt(r.returns_amt)
+        d["collected"] += flt(r.collected)
+        d["outstanding"] += flt(r.outstanding)
+
+    kind_field = {KIND_PAYMENT: "received_in_period", KIND_DISCOUNT: "discount",
+                  KIND_FEE: "fee", KIND_DEDUCT: "other", KIND_OTHER: "other"}
+    UNKNOWN_CUS = "Chưa gán khách"
+    for r in by_advice:
+        cus = r.customer or UNKNOWN_CUS
+        d = out.get(cus)
+        if d is None:
+            # Khách có bảng kê nhưng KHÔNG có hóa đơn nào ghi sổ trong kỳ — vẫn
+            # phải hiện, vì đó là tiền đã về mà không thấy hóa đơn đối ứng.
+            name = None if cus == UNKNOWN_CUS else frappe.db.get_value(
+                "Customer", cus, "customer_name")
+            d = out.setdefault(cus, blank(cus, name, mapping.get(cus) or r.chain))
+        if not d.get("chain") or d["chain"] == UNASSIGNED:
+            d["chain"] = mapping.get(cus) or r.chain or UNASSIGNED
+        field = kind_field.get(r.row_kind) or "other"
+        d[field] += abs(flt(r.amt))
+        d["advice_lines"] += cint(r.n)
+
+    for d in out.values():
+        d["net_received_est"] = (flt(d["received_in_period"]) - flt(d["discount"])
+                                 - flt(d["fee"]) - flt(d["other"]))
+
+    rows = list(out.values())
+    if chain:
+        rows = [d for d in rows if d["chain"] == chain]
+    if search:
+        kw = search.lower()
+        rows = [d for d in rows
+                if kw in (d["customer"] or "").lower() or kw in (d["customer_name"] or "").lower()]
+
+    # TỔNG tính trên TOÀN BỘ kết quả lọc, không phải trên trang đang xem — tổng
+    # của một trang là con số vô nghĩa với người đang đối chiếu.
+    totals = blank("TỔNG")
+    totals["net_received_est"] = 0.0
+    for d in rows:
+        for k in ("invoice_count", "unpaid_count", "advice_lines", "invoiced", "returns",
+                  "collected", "outstanding", "received_in_period", "discount", "fee",
+                  "other", "net_received_est"):
+            totals[k] += d[k]
+
+    rows.sort(key=lambda x: -x["outstanding"])
+    total = len(rows)
+    return {
+        "from_date": from_date, "to_date": to_date, "company": company,
+        "rows": rows[offset:offset + page_size],
+        "totals": totals,
+        "total": total,
+        "page": page, "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "chains": sorted({d["chain"] for d in out.values() if d["chain"]}),
+        "ambiguous_customers": ambiguous,
+        "note": _("'Đã xuất / đã thu / còn lại' tính theo hóa đơn ghi sổ trong kỳ (công nợ). "
+                  "'Tiền hàng / chiết khấu / phí / thực nhận' tính theo ngày thanh toán của "
+                  "bảng kê (dòng tiền). Dòng 'Chưa gán khách' là các kỳ bảng kê chưa xác định "
+                  "được khách — cần kế toán điền, không được bỏ qua."),
     }

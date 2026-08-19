@@ -63,6 +63,12 @@ export async function render({ container, query }) {
     from: query?.from || monthsAgo(3),
     to: query?.to || todayISO(),
     chain: query?.chain || "",
+    // Lọc theo KHÁCH, dùng chung cho cả ba tab: kế toán MT đối chiếu trên đầu
+    // từng pháp nhân chứ không phải trên cả kênh.
+    customer: query?.customer || "",
+    // Tab 3 xem theo "khach" (chi tiết từng khách) hay "chuoi" (nhìn tổng).
+    // Mặc định theo khách vì đó mới là cái đi đòi nợ được.
+    chainView: query?.view === "chuoi" ? "chuoi" : "khach",
     search: "",
     page: 1,
     // Chốt tay liên kết đi qua guard_manager ở backend. Hiện nút cho người không
@@ -261,6 +267,7 @@ async function loadTab(container, state) {
     res = await api.mtInvoices(bucket, {
       from_date: state.from, to_date: state.to, search: state.search,
       page: state.page, chain: state.tab === "chiet-khau" ? (state.chain || undefined) : undefined,
+      customer: state.customer || undefined,
     });
   } catch (e) {
     setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
@@ -275,13 +282,14 @@ async function loadTab(container, state) {
   }
 
   if (state.tab === "chiet-khau") {
-    setHTML(body, deductionTable(state, res));
+    setHTML(body, html`${customerFilterBar(state)}${deductionTable(state, res)}`);
     bindChainFilter(container, state);
   } else {
-    setHTML(body, invoiceTable(state, res));
+    setHTML(body, html`${customerFilterBar(state)}${invoiceTable(state, res)}`);
     bindBuckets(container, state);
     bindRelink(container, state);
   }
+  bindCustomerFilter(container, state);
   bindPager(container, state);
 }
 
@@ -479,6 +487,7 @@ function bindChainFilter(container, state) {
 
 // ── Tab 3: Công nợ chung của chuỗi ─────────────────────────────────────────
 async function loadChains(container, state) {
+  if (state.chainView === "khach") return loadCustomers(container, state);
   const body = container.querySelector("#mt-body");
   let res;
   try {
@@ -1086,4 +1095,179 @@ function customerBlock(advices) {
             </div>`
           : ""}
       </div></div>`;
+}
+
+
+// ── Tab 3 (chế độ mặc định): công nợ chi tiết TRÊN ĐẦU TỪNG KHÁCH ──────────
+// Cấp chuỗi chỉ để nhìn tổng. Đi đòi nợ thì phải theo pháp nhân — riêng Co.op
+// có tới 120 siêu thị thành viên, con số cấp chuỗi không dùng được vào việc gì.
+function viewSwitch(state) {
+  const btn = (v, label, icon) => html`<button
+    class="kt-btn kt-btn--sm ${state.chainView === v ? "" : "kt-btn--outline"}"
+    data-view="${v}"><i class="fas ${icon}"></i> ${label}</button>`;
+  return html`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+    ${btn("khach", "Theo khách hàng", "fa-user")}
+    ${btn("chuoi", "Theo chuỗi", "fa-store")}
+  </div>`;
+}
+
+async function loadCustomers(container, state) {
+  const body = container.querySelector("#mt-body");
+  let res;
+  try {
+    res = await api.mtCustomerSummary({
+      from_date: state.from, to_date: state.to,
+      chain: state.chain || undefined, search: state.search || undefined,
+      page: state.page,
+    });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = res.rows || [];
+  const t = res.totals || {};
+
+  setHTML(body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      ${viewSwitch(state)}
+      <label class="kt-label" style="margin:0 0 0 8px">Chuỗi</label>
+      <select class="kt-input kt-input--sm" id="mt-chain">
+        <option value="">Tất cả chuỗi</option>
+        ${(res.chains || []).map((c) => html`<option value="${c}" ${state.chain === c ? "selected" : ""}>${c}</option>`)}
+      </select>
+      <input class="kt-input kt-input--sm" id="mt-cus-search" placeholder="Tìm khách hàng…"
+             value="${state.search}" style="margin-left:auto;min-width:220px">
+    </div></div>
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-store-slash"></i><p>Chưa có phát sinh nào của kênh MT trong khoảng này.</p></div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr>
+              <th>Khách hàng</th><th>Chuỗi</th><th class="num">Hóa đơn</th>
+              <th class="num">Đã xuất</th><th class="num">Trả hàng</th>
+              <th class="num">Đã thu</th><th class="num">Còn lại</th>
+              <th class="num">Tiền hàng trong kỳ</th><th class="num">Chiết khấu</th>
+              <th class="num">Phí</th><th class="num">Khác</th>
+              <th class="num">Thực nhận</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((r) => html`<tr>
+                <td><b>${r.customer_name || r.customer}</b>
+                  ${r.customer_name ? html`<div class="kt-sub">${r.customer}</div>` : ""}</td>
+                <td>${r.chain === "Chưa gán chuỗi"
+                  ? html`<span class="kt-badge kt-badge--yellow">${r.chain}</span>`
+                  : html`<span class="kt-sub">${r.chain}</span>`}</td>
+                <td class="num">${r.invoice_count}${r.unpaid_count
+                  ? html` <span class="kt-badge kt-badge--yellow">${r.unpaid_count} chưa đủ</span>`
+                  : ""}</td>
+                <td class="num">${formatVND(r.invoiced)}</td>
+                <td class="num">${r.returns ? formatVND(r.returns) : html`<span class="kt-sub">—</span>`}</td>
+                <td class="num">${formatVND(r.collected)}</td>
+                <td class="num"><b>${formatVND(r.outstanding)}</b></td>
+                <td class="num">${formatVND(r.received_in_period)}</td>
+                <td class="num">${formatVND(r.discount)}</td>
+                <td class="num">${formatVND(r.fee)}</td>
+                <td class="num">${formatVND(r.other)}</td>
+                <td class="num"><b>${formatVND(r.net_received_est)}</b></td>
+                <td class="num" style="white-space:nowrap">
+                  ${r.customer && r.customer !== "Chưa gán khách"
+                    ? html`<button class="kt-btn-icon" data-drill-inv="${r.customer}" title="Xem hóa đơn của khách này"><i class="fas fa-file-invoice"></i></button>
+                           <button class="kt-btn-icon" data-drill-ded="${r.customer}" title="Xem khoản khấu trừ của khách này"><i class="fas fa-percent"></i></button>`
+                    : ""}
+                </td>
+              </tr>`)}
+              <tr>
+                <td><b>TỔNG</b></td><td></td>
+                <td class="num"><b>${t.invoice_count || 0}</b></td>
+                <td class="num"><b>${formatVND(t.invoiced)}</b></td>
+                <td class="num"><b>${formatVND(t.returns)}</b></td>
+                <td class="num"><b>${formatVND(t.collected)}</b></td>
+                <td class="num"><b>${formatVND(t.outstanding)}</b></td>
+                <td class="num"><b>${formatVND(t.received_in_period)}</b></td>
+                <td class="num"><b>${formatVND(t.discount)}</b></td>
+                <td class="num"><b>${formatVND(t.fee)}</b></td>
+                <td class="num"><b>${formatVND(t.other)}</b></td>
+                <td class="num"><b>${formatVND(t.net_received_est)}</b></td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table></div>
+          ${pager(res, "khách hàng")}
+          <div class="kt-sub" style="margin-top:8px">${res.note || ""}</div>
+        </div></div>`}
+  `);
+
+  bindChainFilter(container, state);
+  bindPager(container, state);
+  bindViewSwitch(container, state);
+  bindDrill(container, state);
+
+  const box = container.querySelector("#mt-cus-search");
+  if (box) {
+    let timer = null;
+    box.addEventListener("input", (e) => {
+      state.search = e.target.value.trim();
+      state.page = 1;
+      clearTimeout(timer);
+      timer = setTimeout(() => loadTab(container, state), 350);
+    });
+  }
+}
+
+function bindViewSwitch(container, state) {
+  container.querySelectorAll("button[data-view]").forEach((b) => {
+    b.addEventListener("click", () => {
+      if (state.chainView === b.dataset.view) return;
+      state.chainView = b.dataset.view;
+      state.page = 1;
+      loadTab(container, state);
+    });
+  });
+}
+
+// Bấm từ dòng khách sang đúng danh sách của khách đó — đây là thao tác chính
+// khi đối chiếu: nhìn số tổng thấy lệch thì mở ngay chi tiết của khách đó.
+function bindDrill(container, state) {
+  const go = (tab, customer, bucket) => {
+    state.customer = customer;
+    state.tab = tab;
+    if (bucket) state.bucket = bucket;
+    state.page = 1;
+    state.search = "";
+    const btn = container.querySelector(`#mt-tabs button[data-tab="${tab}"]`);
+    if (btn) container.querySelectorAll("#mt-tabs button").forEach((x) => x.classList.toggle("is-active", x === btn));
+    loadTab(container, state);
+  };
+  container.querySelectorAll("button[data-drill-inv]").forEach((b) =>
+    b.addEventListener("click", () => go("thanh-toan", b.dataset.drillInv, "tat_ca")));
+  container.querySelectorAll("button[data-drill-ded]").forEach((b) =>
+    b.addEventListener("click", () => go("chiet-khau", b.dataset.drillDed)));
+}
+
+
+// Thanh báo "đang xem của riêng khách X". Lọc mà không hiện là nguy hiểm: kế
+// toán nhìn một danh sách đã bị lọc rồi tưởng đó là toàn bộ kênh MT.
+function customerFilterBar(state) {
+  if (!state.customer) return "";
+  return html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-primary)">
+      <div class="kt-card-body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <i class="fas fa-filter"></i>
+        <span>Đang lọc theo khách hàng <b>${state.customer}</b> — danh sách dưới đây
+          <b>không phải</b> toàn bộ kênh MT.</span>
+        <button class="kt-btn kt-btn--outline kt-btn--sm" id="mt-clear-cus" style="margin-left:auto">
+          <i class="fas fa-xmark"></i> Bỏ lọc
+        </button>
+      </div></div>`;
+}
+
+function bindCustomerFilter(container, state) {
+  const btn = container.querySelector("#mt-clear-cus");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    state.customer = "";
+    state.page = 1;
+    loadTab(container, state);
+  });
 }
