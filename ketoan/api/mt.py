@@ -709,6 +709,87 @@ def _customer_chain_map():
 
 UNASSIGNED = "Chưa gán chuỗi"
 
+# Tỷ lệ tiền tối thiểu để coi MỘT khách hàng là chủ của cả kỳ thanh toán.
+# 0.9 chứ không phải 1.0: một dòng khớp nhầm lẻ loi không nên phá kết luận, nhưng
+# 10% tiền đi chỗ khác thì phải để người nhìn.
+CUSTOMER_DOMINANT = 0.9
+
+
+def detect_customer(lines, chain=None):
+    """Đoán KHÁCH HÀNG của một kỳ thanh toán. Trả (customer, confidence, evidence, candidates).
+
+    ⚠ KHÔNG đọc mã/tên trong file. Lý do đã xác minh trên cả 5 file thật: cái mà
+    bảng kê in ra là ĐỊNH DANH CỦA CHÍNH TA, không phải của khách —
+        LOTTE   `Vendor CD 007466`  = CONG TY CO PHAN HOANG GIANG
+        Emart   `VENDOR CODE 100968` = CÔNG TY CỔ PHẦN HOÀNG GIANG
+        Co.op   `Mã cung cấp 012556` = 233-Cty CP Hoang Giang
+    Lấy mấy mã đó làm khách là gán ngược chiều mua bán. Còn mã BÊN MUA thì mỗi
+    chuỗi một kiểu và ánh xạ sang Customer của ERPNext CHƯA chuỗi nào xác minh
+    (§I hợp đồng): Central Retail có 2 `Account`, Co.op có 120 mã siêu thị thành
+    viên, LOTTE 19 `Store CD`, Emart không có gì.
+
+    Nguồn đáng tin duy nhất là SỔ CỦA CHÍNH MÌNH: hóa đơn đã khớp được thì
+    `Sales Invoice.customer` chính là người ta đã xuất bán cho. Không cần bảng
+    ánh xạ nào, và không thể sai theo kiểu đoán tên.
+
+    Ba tầng, dừng ở tầng đầu tiên kết luận được:
+      1. Từ hóa đơn đã khớp — cân theo TIỀN, không theo số dòng (một hóa đơn 100tr
+         nặng hơn năm hóa đơn 1tr). Một khách chiếm >= 90% tiền -> 'Chắc chắn'.
+      2. Nhiều khách cùng đáng kể -> KHÔNG chọn. Đây là chuyện THẬT: một bảng kê
+         Co.op trả cho nhiều pháp nhân thành viên. Chọn đại khách lớn nhất là
+         ghi tiền của pháp nhân này sang công nợ của pháp nhân khác.
+      3. Không khớp được hóa đơn nào -> tra lịch sử: chuỗi này trước giờ kế toán
+         gán cho khách nào. Đúng một khách -> đề xuất, nhưng 'Cần xác nhận'.
+    """
+    by_cus = defaultdict(lambda: {"amount": 0.0, "lines": 0, "name": None})
+    total = 0.0
+    for ln in lines:
+        if ln.get("row_kind") != KIND_PAYMENT or not ln.get("_si_customer"):
+            continue
+        amt = abs(flt(ln.get("total_amount")))
+        d = by_cus[ln["_si_customer"]]
+        d["amount"] += amt
+        d["lines"] += 1
+        d["name"] = d["name"] or ln.get("_si_customer_name")
+        total += amt
+
+    cands = sorted(
+        ({"customer": k, "customer_name": v["name"], "amount": v["amount"],
+          "lines": v["lines"], "share": (v["amount"] / total) if total else 0.0}
+         for k, v in by_cus.items()),
+        key=lambda x: -x["amount"])
+
+    if cands and total > 0:
+        top = cands[0]
+        if len(cands) == 1:
+            return top["customer"], "Chắc chắn", "hoa_don_da_khop", cands
+        if top["share"] >= CUSTOMER_DOMINANT:
+            return top["customer"], "Chắc chắn", "hoa_don_da_khop_ap_dao", cands
+        # Nhiều khách cùng đáng kể — KHÔNG chọn hộ.
+        return None, "Nhiều khách", "nhieu_khach_trong_mot_ky", cands
+
+    # Chưa khớp được hóa đơn nào. Lùi về lịch sử do kế toán tự chốt.
+    if chain:
+        hist = frappe.db.sql("""
+            SELECT a.customer, COUNT(*) AS n
+            FROM `tabMT Payment Advice` a
+            WHERE a.chain = %(chain)s AND IFNULL(a.customer, '') != ''
+            GROUP BY a.customer ORDER BY n DESC
+        """, {"chain": chain}, as_dict=True)
+        if len(hist) == 1:
+            cus = hist[0].customer
+            return cus, "Cần xác nhận", "lich_su_bang_ke_cua_chuoi", [{
+                "customer": cus,
+                "customer_name": frappe.db.get_value("Customer", cus, "customer_name"),
+                "amount": 0.0, "lines": 0, "share": 0.0}]
+        if len(hist) > 1:
+            return None, "Nhiều khách", "lich_su_chuoi_co_nhieu_khach", [{
+                "customer": h.customer,
+                "customer_name": frappe.db.get_value("Customer", h.customer, "customer_name"),
+                "amount": 0.0, "lines": h.n, "share": 0.0} for h in hist]
+
+    return None, "Không xác định", "khong_co_can_cu", []
+
 
 @frappe.whitelist()
 def get_chain_summary(company=None, from_date=None, to_date=None):
@@ -1558,12 +1639,21 @@ def _summarize(a):
     overpaid = [_ref(ln, over=flt(ln["_overpaid"]), paid_before=flt(ln.get("_paid_before")))
                 for ln in matched if ln.get("_overpaid")]
 
+    # Nhận diện khách hàng cho ĐÚNG KỲ NÀY, không phải cho cả file: một file
+    # Co.op chứa 8 kỳ và các kỳ hoàn toàn có thể thuộc pháp nhân thành viên khác
+    # nhau. Gán một khách cho cả file là dồn công nợ của nhiều pháp nhân vào một.
+    det_cus, det_conf, det_ev, det_cands = detect_customer(lines, a["chain"])
+
     return {
         "chain": a["chain"],
         "advice_no": a["advice_no"],
         "payment_date": a["payment_date"],
         "group_key": a["group_key"],
         "source_sheet": a["source_sheet"],
+        "detected_customer": det_cus,
+        "detected_confidence": det_conf,
+        "detected_evidence": det_ev,
+        "customer_candidates": det_cands,
         "line_count": len(lines),
         "dropped_rows": a["dropped_rows"],
         "payment_lines": len(pay),
@@ -1801,11 +1891,26 @@ def _commit_advice_locked(content, filename, chain, expected_hash, company, cust
                     })
 
     created = []
+    auto_customer = []
     for a in plan:
+        # Khách hàng: người chọn tay ĐÈ máy. Không chọn thì lấy máy nhận diện,
+        # nhưng CHỈ khi máy chắc chắn — tự điền một phỏng đoán vào field công nợ
+        # là gán tiền cho khách mà không ai kiểm.
+        #
+        # Nhận diện theo TỪNG KỲ, vì một file Co.op 8 kỳ có thể thuộc nhiều pháp
+        # nhân thành viên khác nhau.
+        row_customer = customer or None
+        if not row_customer:
+            det, conf, ev, _c = detect_customer(a["lines"], a["chain"])
+            if det and conf == "Chắc chắn":
+                row_customer = det
+                auto_customer.append({"advice_group": a["group_key"],
+                                      "customer": det, "evidence": ev})
+
         doc = frappe.get_doc({
             "doctype": "MT Payment Advice",
             "chain": a["chain"],
-            "customer": customer or None,
+            "customer": row_customer,
             "company": company,
             "advice_no": a["advice_no"],
             "payment_date": a["payment_date"],
@@ -1842,9 +1947,16 @@ def _commit_advice_locked(content, filename, chain, expected_hash, company, cust
         warnings.append(_("Chỉ mục hóa đơn bị cắt cụt lúc khớp — có dòng 'chưa nối được "
                           "hóa đơn' chỉ vì hóa đơn không nằm trong chỉ mục."))
 
+    if auto_customer:
+        # Máy tự điền khách thì phải NÓI RA. Điền im lặng nghĩa là gán công nợ
+        # cho một khách hàng mà không ai xác nhận.
+        warnings.append(_("Đã tự nhận diện khách hàng cho {0} kỳ (suy từ hóa đơn đã khớp). "
+                          "Kiểm lại trên bảng kê nếu thấy lạ.").format(len(auto_customer)))
+
     return {
         "created": created,
         "advice_count": len(created),
+        "auto_customer": auto_customer,
         "lines_on_other_customer": other_customer,
         "warnings": warnings,
         "checks": parsed.get("checks") or [],

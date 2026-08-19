@@ -842,13 +842,15 @@ async function showAdvicePreview(container, state, modal, content, filename, cha
         </div></div>`
       : ""}
 
+    ${customerBlock(advices)}
+
     <div class="kt-card kt-mb"><div class="kt-card-body">
-      <label class="kt-label">Khách hàng của chuỗi (không bắt buộc, nhưng nên điền)</label>
+      <label class="kt-label">Ghi đè khách hàng cho MỌI kỳ (để trống = dùng kết quả nhận diện ở trên)</label>
       <input class="kt-input" id="ma-customer" placeholder="Mã Customer trong ERPNext, vd CUS-0001">
       <div class="kt-sub" style="margin-top:6px">
-        Hệ thống <b>không tự đoán</b> ánh xạ mã nhà cung cấp của chuỗi sang Customer — hợp đồng đọc
-        file ghi rõ điều này chưa được xác minh. Điền vào đây thì tab "Công nợ chung của chuỗi"
-        mới gom được đúng chuỗi, để trống thì công nợ rơi vào nhóm "Chưa gán chuỗi".
+        Chỉ điền khi muốn <b>đè</b> kết quả tự nhận diện — giá trị này áp cho <b>tất cả</b> các kỳ
+        trong file. File nhiều kỳ thuộc nhiều pháp nhân (Co.op) thì <b>đừng</b> điền: để máy nhận
+        diện theo từng kỳ, kỳ nào máy không chắc thì sửa sau trên Desk.
       </div>
       <label class="kt-label" style="margin-top:12px">Ghi chú</label>
       <input class="kt-input" id="ma-note" placeholder="vd: bảng kê chuỗi gửi qua email ngày…">
@@ -1016,4 +1018,72 @@ function riskBlocks(advices) {
         </div></div>`
       : ""}
   `;
+}
+
+
+// ── Nhận diện khách hàng theo TỪNG KỲ ──────────────────────────────────────
+// Không đọc mã trong file: cái bảng kê in ra là định danh của CHÍNH TA
+// (LOTTE Vendor CD 007466, Emart VENDOR CODE 100968, Co.op Mã cung cấp 012556
+// đều là Hoàng Giang). Máy suy từ SỔ CỦA MÌNH — hóa đơn nào khớp được thì
+// Sales Invoice.customer chính là người đã mua.
+const DET_TONE = {
+  "Chắc chắn": "green",
+  "Cần xác nhận": "yellow",
+  "Nhiều khách": "red",
+  "Không xác định": "gray",
+};
+
+const DET_WHY = {
+  hoa_don_da_khop: "mọi hóa đơn khớp được đều của khách này",
+  hoa_don_da_khop_ap_dao: "khách này chiếm phần lớn tiền của kỳ",
+  nhieu_khach_trong_mot_ky: "kỳ này trả cho NHIỀU khách — máy không chọn hộ",
+  lich_su_bang_ke_cua_chuoi: "suy từ các bảng kê trước của chuỗi, chưa có hóa đơn nào khớp",
+  lich_su_chuoi_co_nhieu_khach: "chuỗi này trước giờ gán cho nhiều khách khác nhau",
+  khong_co_can_cu: "không khớp được hóa đơn nào và chuỗi chưa có lịch sử",
+};
+
+function customerBlock(advices) {
+  const list = advices || [];
+  if (!list.length) return "";
+  const sure = list.filter((a) => a.detected_confidence === "Chắc chắn").length;
+  const bad = list.filter((a) => a.detected_confidence === "Nhiều khách"
+                              || a.detected_confidence === "Không xác định");
+
+  return html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-${bad.length ? "warning" : "success"})">
+      <div class="kt-card-body">
+        <b><i class="fas fa-user-check"></i> Nhận diện khách hàng — ${sure}/${list.length} kỳ chắc chắn</b>
+        <div class="kt-sub" style="margin:6px 0">
+          Máy suy từ <b>hóa đơn đã khớp trong sổ của mình</b>, không đọc mã trong file:
+          mã "nhà cung cấp" mà bảng kê in ra là mã của <b>chính công ty ta</b> bên hệ thống chuỗi,
+          không phải mã khách. Chỉ kỳ nào <b>Chắc chắn</b> mới được điền tự động.
+        </div>
+        <div class="kt-table-wrap"><table class="kt-table">
+          <thead><tr><th>Kỳ thanh toán</th><th>Khách hàng</th><th>Mức tin</th><th>Căn cứ</th></tr></thead>
+          <tbody>${list.map((a) => html`<tr>
+            <td>${formatDate(a.payment_date) || html`<span class="kt-sub">chưa rõ ngày</span>`}
+              ${a.advice_no ? html`<div class="kt-sub">${a.advice_no}</div>` : ""}</td>
+            <td>${a.detected_customer
+              ? html`<b>${a.detected_customer}</b>${(a.customer_candidates || [])[0]
+                  && (a.customer_candidates[0].customer_name)
+                  ? html`<div class="kt-sub">${a.customer_candidates[0].customer_name}</div>` : ""}`
+              : html`<span class="kt-sub">— sẽ để trống, sửa sau trên Desk —</span>`}</td>
+            <td><span class="kt-badge kt-badge--${DET_TONE[a.detected_confidence] || "gray"}">
+              ${a.detected_confidence || "?"}</span></td>
+            <td class="kt-sub">${DET_WHY[a.detected_evidence] || a.detected_evidence || ""}
+              ${(a.customer_candidates || []).length > 1
+                ? html`<div>${a.customer_candidates.slice(0, 4).map((c) => html`
+                    <span class="kt-badge kt-badge--gray">${c.customer} ${Math.round((c.share || 0) * 100)}%</span> `)}</div>`
+                : ""}</td>
+          </tr>`)}</tbody>
+        </table></div>
+        ${bad.length
+          ? html`<div class="kt-sub" style="margin-top:8px">
+              <b>${bad.length} kỳ máy không kết luận được.</b> Những kỳ đó sẽ được ghi nhận với
+              khách hàng <b>để trống</b> — công nợ rơi vào nhóm "Chưa gán chuỗi" cho tới khi kế toán
+              mở bảng kê trên Desk và điền. Máy cố ý không chọn đại: một kỳ trả cho nhiều pháp nhân
+              (Co.op có 120 siêu thị thành viên) mà gán một khách là dồn công nợ sai chỗ.
+            </div>`
+          : ""}
+      </div></div>`;
 }
