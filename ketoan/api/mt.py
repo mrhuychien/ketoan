@@ -91,6 +91,7 @@ from frappe.utils import add_days, add_months, cint, cstr, flt, getdate, nowdate
 
 from ketoan.api._guard import (
     channel_group_clause,
+    get_settings,
     guard_manager,
     guard_mt,
     is_chief,
@@ -170,9 +171,20 @@ def _range(from_date, to_date):
 
 
 def _company(company=None):
+    """Công ty của màn hình — LUÔN kiểm quyền, kể cả khi lấy từ mặc định.
+
+    VÌ SAO: mọi truy vấn của module này là `frappe.db.sql` thô, mà SQL thô KHÔNG
+    đi qua permission và KHÔNG áp User Permission của Frappe. Client tự đặt
+    `?company=` là đọc trọn công nợ, tên khách, số hóa đơn của công ty khác —
+    và `commit_advice` còn GHI bảng kê vào công ty do client chỉ định. Nên chốt
+    chặn duy nhất phải nằm ở đây.
+    """
     company = resolve_company(company)
     if not company:
         frappe.throw(_("Chưa xác định được công ty"))
+    if not frappe.has_permission("Company", doc=company, ptype="read"):
+        frappe.throw(_("Bạn không có quyền trên công ty {0}").format(company),
+                     frappe.PermissionError)
     return company
 
 
@@ -205,15 +217,30 @@ def _paid_subquery():
     Đếm cả bảng kê còn ở trạng thái 'Nháp': dòng đã được ghi nhận nghĩa là tiền
     đã về theo bản kê của chuỗi. Trạng thái Nháp/Đã đối chiếu/Đã ghi nhận nói về
     việc CON NGƯỜI đã soi tới đâu, không nói về việc tiền đã về hay chưa.
+
+    HAI CỘT, cố ý tách:
+      · `paid`        — chỉ dòng khớp 'Chắc chắn' (ký hiệu + số, hoặc người chốt
+        tay). Đây là cột quyết định hóa đơn nằm rổ nào.
+      · `paid_review` — dòng máy ĐOÁN ('Cần review': Emart khớp bằng số+ngày+tiền,
+        dòng lệch chuỗi, dòng vượt tiền hóa đơn). Gộp chung vào `paid` là để một
+        phỏng đoán tự đẩy hóa đơn ra khỏi rổ nợ — sai thì không còn màn hình nào
+        hiện nó ra để người phát hiện.
+
+    Lọc company NGAY TRONG JOIN: bảng kê của công ty khác không được phép làm
+    hóa đơn của công ty này thành "đã thanh toán".
     """
     return """
         LEFT JOIN (
             SELECT l.sales_invoice AS si_name,
-                   SUM(ABS(l.total_amount)) AS paid,
+                   SUM(CASE WHEN l.match_confidence = 'Chắc chắn'
+                            THEN ABS(l.total_amount) ELSE 0 END) AS paid,
+                   SUM(CASE WHEN IFNULL(l.match_confidence, '') != 'Chắc chắn'
+                            THEN ABS(l.total_amount) ELSE 0 END) AS paid_review,
                    COUNT(*) AS pay_lines,
                    MAX(IFNULL(l.payment_date, a.payment_date)) AS last_payment_date
             FROM `tabMT Payment Advice Line` l
             INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent
+                   AND a.company = %(company)s
             WHERE l.parenttype = 'MT Payment Advice'
               AND l.row_kind = %(kind_payment)s
               AND IFNULL(l.sales_invoice, '') != ''
@@ -259,7 +286,8 @@ def get_overview(company=None, from_date=None, to_date=None):
             SELECT COUNT(*) AS cnt,
                    IFNULL(SUM(ABS(si.grand_total)), 0) AS amount,
                    IFNULL(SUM(GREATEST(ABS(si.grand_total) - IFNULL(p.paid, 0), 0)), 0) AS remaining,
-                   IFNULL(SUM(LEAST(IFNULL(p.paid, 0), ABS(si.grand_total))), 0) AS collected
+                   IFNULL(SUM(LEAST(IFNULL(p.paid, 0), ABS(si.grand_total))), 0) AS collected,
+                   IFNULL(SUM(IFNULL(p.paid_review, 0)), 0) AS pending_review
             FROM `tabSales Invoice` si
             INNER JOIN `tabCustomer` c ON c.name = si.customer
             {join}
@@ -273,18 +301,32 @@ def get_overview(company=None, from_date=None, to_date=None):
 
     # Rổ 3 đếm DÒNG BẢNG KÊ, không đếm hóa đơn: khoản chuỗi trừ lại thường không
     # gắn với hóa đơn nào (phí hỗ trợ, chiết khấu tháng, NET OFF).
+    #
+    # CỘNG THEO DẤU rồi mới lấy độ lớn Ở CẤP (chuỗi, loại) — KHÔNG ABS từng dòng.
+    # VÌ SAO: LOTTE có 5 dòng 'NET OFF REGULAR' DƯƠNG nằm lẫn trong các dòng ghi
+    # giảm ÂM; ABS từng dòng lật chiều 5 dòng đó, thổi ghi giảm LOTTE từ 809.335đ
+    # (số đúng, §J) lên 11.868.813đ. Ngược lại KHÔNG được cộng thẳng theo dấu qua
+    # nhiều chuỗi: §B của hợp đồng ghi rõ mỗi chuỗi một quy ước dấu (chiết khấu
+    # Central Retail dương +27.240.347, LOTTE âm −31.460.649) nên cộng chung là
+    # hai chuỗi triệt tiêu nhau. Lấy độ lớn theo từng chuỗi mới ra "chuỗi trừ lại
+    # bao nhiêu".
     ded = frappe.db.sql(f"""
-        SELECT l.row_kind, COUNT(*) AS cnt, IFNULL(SUM(ABS(l.total_amount)), 0) AS amount
+        SELECT a.chain, l.row_kind, COUNT(*) AS cnt,
+               IFNULL(SUM(l.total_amount), 0) AS amount
         FROM `tabMT Payment Advice Line` l
         INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent
         WHERE l.parenttype = 'MT Payment Advice'
           AND l.row_kind IN ({', '.join(['%(k' + str(i) + ')s' for i in range(len(DEDUCTION_KINDS))])})
-          AND IFNULL(a.company, %(company)s) = %(company)s
+          AND a.company = %(company)s
           AND IFNULL(l.payment_date, a.payment_date) BETWEEN %(fd)s AND %(td)s
-        GROUP BY l.row_kind
+        GROUP BY a.chain, l.row_kind
     """, dict(p, **{f"k{i}": k for i, k in enumerate(DEDUCTION_KINDS)}), as_dict=True)
 
-    by_kind = {r.row_kind: {"count": r.cnt, "amount": flt(r.amount)} for r in ded}
+    by_kind = {}
+    for r in ded:
+        d = by_kind.setdefault(r.row_kind, {"count": 0, "amount": 0.0})
+        d["count"] += cint(r.cnt)
+        d["amount"] += abs(flt(r.amount))
 
     # Công nợ chuỗi: tính tới HẾT to_date, không giới hạn trong khoảng xem.
     # Công nợ là SỐ DƯ, không phải phát sinh trong kỳ.
@@ -316,7 +358,7 @@ def get_overview(company=None, from_date=None, to_date=None):
         WHERE l.parenttype = 'MT Payment Advice'
           AND l.row_kind = %(kind_payment)s
           AND IFNULL(l.sales_invoice, '') = ''
-          AND IFNULL(a.company, %(company)s) = %(company)s
+          AND a.company = %(company)s
           AND IFNULL(l.payment_date, a.payment_date) BETWEEN %(fd)s AND %(td)s
     """, p, as_dict=True)[0]
 
@@ -326,16 +368,26 @@ def get_overview(company=None, from_date=None, to_date=None):
         INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent
         WHERE l.parenttype = 'MT Payment Advice'
           AND l.match_confidence = 'Cần review'
-          AND IFNULL(a.company, %(company)s) = %(company)s
+          AND a.company = %(company)s
           AND IFNULL(l.payment_date, a.payment_date) BETWEEN %(fd)s AND %(td)s
     """, p, as_dict=True)[0]
+
+    # Bảng kê KHÔNG điền công ty. Từ nay mọi truy vấn lọc `a.company = ...` cứng
+    # (bản ghi thiếu company trước đây được tính cho MỌI công ty ⇒ nhân đôi khoản
+    # ghi giảm trên toàn hệ thống). Đổi lại, bản ghi thiếu company sẽ biến khỏi
+    # mọi màn hình — nên phải ĐẾM và hiện ra, tuyệt đối không để tiền mất im lặng.
+    orphan = frappe.db.sql("""
+        SELECT COUNT(*) AS cnt
+        FROM `tabMT Payment Advice` a
+        WHERE IFNULL(a.company, '') = ''
+    """, as_dict=True)[0]
 
     advices = frappe.db.sql("""
         SELECT a.name, a.chain, a.customer, a.advice_no, a.payment_date, a.status,
                a.total_payment, a.total_discount, a.total_fee, a.total_other,
                a.declared_total_payment, a.reconciled, a.file_name
         FROM `tabMT Payment Advice` a
-        WHERE IFNULL(a.company, %(company)s) = %(company)s
+        WHERE a.company = %(company)s
           AND a.payment_date BETWEEN %(fd)s AND %(td)s
         ORDER BY a.payment_date DESC, a.creation DESC
         LIMIT 20
@@ -350,9 +402,13 @@ def get_overview(company=None, from_date=None, to_date=None):
         "tolerance": PAID_TOLERANCE,
         "buckets": {
             "chua_thanh_toan": {"count": chua.cnt, "amount": flt(chua.amount),
-                                "remaining": flt(chua.remaining), "collected": flt(chua.collected)},
+                                "remaining": flt(chua.remaining), "collected": flt(chua.collected),
+                                # Tiền đã về nhưng liên kết mới là PHỎNG ĐOÁN —
+                                # chưa được trừ vào nợ, phải hiện riêng.
+                                "pending_review": flt(chua.pending_review)},
             "da_thanh_toan": {"count": da.cnt, "amount": flt(da.amount),
-                              "collected": flt(da.collected)},
+                              "collected": flt(da.collected),
+                              "pending_review": flt(da.pending_review)},
             "chiet_khau": {"count": sum(v["count"] for v in by_kind.values()),
                            "amount": deduction_total,
                            "by_kind": by_kind},
@@ -370,6 +426,8 @@ def get_overview(company=None, from_date=None, to_date=None):
         "attention": {
             "unmatched_payment_lines": {"count": unmatched.cnt, "amount": flt(unmatched.amount)},
             "need_review_lines": cint(need_review.cnt),
+            # Bảng kê thiếu công ty: không còn được tính vào bất kỳ công ty nào.
+            "advices_missing_company": cint(orphan.cnt),
         },
         "recent_advices": advices,
         "can_import": is_chief(),
@@ -410,6 +468,7 @@ def _invoice_page(company, from_date, to_date, where, search, page_size, offset,
                si.net_total, si.total_taxes_and_charges, si.grand_total,
                {series_col} AS inv_series, {no_col} AS inv_no,
                IFNULL(p.paid, 0) AS paid,
+               IFNULL(p.paid_review, 0) AS paid_review,
                IFNULL(p.pay_lines, 0) AS pay_lines,
                p.last_payment_date,
                GREATEST(ABS(si.grand_total) - IFNULL(p.paid, 0), 0) AS remaining
@@ -466,7 +525,7 @@ def _deduction_page(company, from_date, to_date, search, page_size, offset, chai
     p = {"company": company, "fd": from_date, "td": to_date,
          "limit": page_size, "offset": offset}
     where = ["l.parenttype = 'MT Payment Advice'",
-             "IFNULL(a.company, %(company)s) = %(company)s",
+             "a.company = %(company)s",
              "IFNULL(l.payment_date, a.payment_date) BETWEEN %(fd)s AND %(td)s"]
     kinds = []
     for i, k in enumerate(DEDUCTION_KINDS):
@@ -618,12 +677,19 @@ def get_chain_summary(company=None, from_date=None, to_date=None):
     """, p, as_dict=True)
 
     # Dòng tiền theo bảng kê trong kỳ.
+    #
+    # Dòng 'Thanh toán' ABS ngay từng dòng (bản chất đã biết chắc nhờ cột loại
+    # chứng từ). Dòng KHẤU TRỪ thì cộng THEO DẤU rồi mới lấy độ lớn ở cấp
+    # (chuỗi, loại): LOTTE có dòng NET OFF dương lẫn trong ghi giảm âm, ABS từng
+    # dòng là lật chiều chúng (xem chú thích ở get_overview).
     by_advice = frappe.db.sql("""
-        SELECT a.chain, l.row_kind, COUNT(*) AS n, IFNULL(SUM(ABS(l.total_amount)), 0) AS amt
+        SELECT a.chain, l.row_kind, COUNT(*) AS n,
+               IFNULL(SUM(CASE WHEN l.row_kind = %(kind_payment)s
+                               THEN ABS(l.total_amount) ELSE l.total_amount END), 0) AS amt
         FROM `tabMT Payment Advice Line` l
         INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent
         WHERE l.parenttype = 'MT Payment Advice'
-          AND IFNULL(a.company, %(company)s) = %(company)s
+          AND a.company = %(company)s
           AND IFNULL(l.payment_date, a.payment_date) BETWEEN %(fd)s AND %(td)s
         GROUP BY a.chain, l.row_kind
     """, p, as_dict=True)
@@ -658,14 +724,27 @@ def get_chain_summary(company=None, from_date=None, to_date=None):
             # row_kind lạ (DocType đổi options mà quên sửa đây) — không nuốt tiền
             # vào hư không, dồn vào "other" để còn thấy.
             field = "other"
-        d[field] += flt(r.amt)
+        # Độ lớn ở cấp (chuỗi, loại) — xem chú thích của truy vấn.
+        d[field] += abs(flt(r.amt))
         d["advice_lines"] += cint(r.n)
+
+    # 'received_in_period' là TIỀN HÀNG GỘP của các dòng thanh toán, KHÔNG phải
+    # số tiền chuỗi thực chuyển vào tài khoản: chuỗi trừ chiết khấu/phí/ghi giảm
+    # trước khi chuyển. Đo trên file thật: Co.op 8.451.787.806 gộp vs 6.200.078.656
+    # chuỗi in ra là thực trả — lệch 2.251.709.150đ. Kế toán đối chiếu cột này với
+    # sao kê ngân hàng sẽ thấy lệch mà không hiểu vì sao, nên phải có cột 'thực
+    # nhận ước tính' bên cạnh và nói rõ trong `note`.
+    for d in out.values():
+        d["net_received_est"] = (flt(d["received_in_period"]) - flt(d["discount"])
+                                 - flt(d["fee"]) - flt(d["other"]))
 
     chains = sorted(out.values(), key=lambda x: -x["outstanding"])
     totals = blank("TỔNG")
+    totals["net_received_est"] = 0.0
     for d in chains:
         for k in ("invoice_count", "unpaid_count", "advice_lines", "invoiced", "returns",
-                  "collected", "outstanding", "received_in_period", "discount", "fee", "other"):
+                  "collected", "outstanding", "received_in_period", "discount", "fee", "other",
+                  "net_received_est"):
             totals[k] += d[k]
     totals["customers"] = []
 
@@ -676,7 +755,10 @@ def get_chain_summary(company=None, from_date=None, to_date=None):
         # Khách hàng bị gán nhiều chuỗi — kế toán phải sửa, hệ thống không tự chọn.
         "ambiguous_customers": ambiguous,
         "note": _("'Đã xuất / còn lại' tính theo hóa đơn ghi sổ trong kỳ; "
-                  "'nhận trong kỳ / chiết khấu / phí' tính theo ngày thanh toán của bảng kê."),
+                  "'nhận trong kỳ / chiết khấu / phí' tính theo ngày thanh toán của bảng kê. "
+                  "'Nhận trong kỳ' là TIỀN HÀNG GỘP của các dòng thanh toán, KHÔNG phải số "
+                  "tiền chuỗi chuyển khoản — chuỗi trừ chiết khấu/phí/ghi giảm trước khi "
+                  "chuyển; cột 'Thực nhận (ước tính)' mới là số so được với sao kê ngân hàng."),
     }
 
 
@@ -780,12 +862,27 @@ def _split_advices(parsed):
 # Chỉ mục Sales Invoice để khớp
 # ─────────────────────────────────────────────────────────────────────────
 
+# Trần số dòng nạp vào chỉ mục hóa đơn. Vượt trần thì chỉ mục BỊ CẮT CỤT: hóa
+# đơn rơi ra ngoài sẽ không khớp được và nằm mãi ở rổ "chưa thanh toán" — phải
+# đếm trước và cảnh báo, không được cắt im lặng.
+MAX_SI_INDEX_ROWS = 200000
+
+
 def _si_index(company, dates):
     """Chỉ mục hóa đơn bán ra để khớp với dòng bảng kê.
 
     Khoảng ngày nới rộng quanh dải ngày hóa đơn đọc được trong file: chuỗi trả
     tiền cho hóa đơn xuất từ nhiều tháng trước (Co.op trả 20/01/2026 cho hóa đơn
     19/02/2025), nên không được lọc theo tháng thanh toán.
+
+    CHỈ nạp hóa đơn của KHÁCH KÊNH MT và CHỈ hóa đơn bán ra (is_return = 0):
+      · Kênh: cả 5 chuỗi dùng chung dải ký hiệu (C26THG), và hóa đơn kênh NPP
+        cũng nằm trong dải đó. Không lọc kênh là để một dòng bảng kê siêu thị
+        đánh dấu "đã thu" cho hóa đơn của nhà phân phối.
+      · Trả hàng: ERPNext 'Create Return' COPY nguyên custom field sang credit
+        note, nên credit note mang ĐÚNG ký hiệu/số của hóa đơn gốc. Để nó trong
+        chỉ mục thì hoặc dòng thanh toán nối thẳng vào credit note (âm tiền),
+        hoặc có 2 ứng viên và hóa đơn gốc VĨNH VIỄN không khớp được.
     """
     if not (_has_si_field(SI_SERIES_FIELD) and _has_si_field(SI_NO_FIELD)):
         return None
@@ -799,27 +896,46 @@ def _si_index(company, dates):
 
     p = {"company": company, "fd": cstr(fd), "td": cstr(td)}
     mt = _mt_clause(p)
-    rows = frappe.db.sql(f"""
-        SELECT si.name, si.posting_date, si.grand_total, si.customer, si.customer_name,
-               si.is_return, c.customer_group,
-               si.{SI_SERIES_FIELD} AS inv_series, si.{SI_NO_FIELD} AS inv_no
+
+    # Hóa đơn bên MISA đã HỦY hoặc ĐÃ BỊ THAY THẾ vẫn còn docstatus=1 và vẫn giữ
+    # nguyên số hóa đơn cũ ở ERPNext -> vẫn khớp "Chắc chắn" vào một hóa đơn đã
+    # chết. Kéo trạng thái đó vào chỉ mục để hạ độ tin cậy (không loại hẳn: dòng
+    # tiền vẫn có thật, chỉ là phải có người nhìn).
+    snap_join, snap_cols = "", "0 AS snap_dead, 0 AS snap_deleted"
+    if frappe.db.exists("DocType", "MISA Invoice Snapshot"):
+        snap_cols = "IFNULL(s.dead, 0) AS snap_dead, IFNULL(s.is_deleted, 0) AS snap_deleted"
+        snap_join = """
+        LEFT JOIN (
+            SELECT sales_invoice,
+                   MAX(CASE WHEN match_status IN ('Đã hủy', 'Đã thay thế') THEN 1 ELSE 0 END) AS dead,
+                   MAX(IFNULL(is_deleted, 0)) AS is_deleted
+            FROM `tabMISA Invoice Snapshot`
+            WHERE IFNULL(sales_invoice, '') != ''
+            GROUP BY sales_invoice
+        ) s ON s.sales_invoice = si.name
+        """
+
+    base = f"""
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
+        {snap_join}
         WHERE si.docstatus = 1 AND si.company = %(company)s
+          AND si.is_return = 0
           AND si.posting_date BETWEEN %(fd)s AND %(td)s
           AND si.{SI_NO_FIELD} > ''
-        LIMIT 200000
-    """, p, as_dict=True)
+          AND {mt}
+    """
 
-    # Chỉ mục 2 là danh sách hóa đơn của KHÁCH KÊNH MT theo số hóa đơn — dùng
-    # cho Emart (không có ký hiệu). Thu hẹp về kênh MT để giảm khả năng vơ nhầm
-    # hóa đơn của kênh NPP trùng số.
-    mt_names = set(frappe.db.sql_list(f"""
-        SELECT si.name FROM `tabSales Invoice` si
-        INNER JOIN `tabCustomer` c ON c.name = si.customer
-        WHERE si.docstatus = 1 AND si.company = %(company)s
-          AND si.posting_date BETWEEN %(fd)s AND %(td)s AND {mt}
-    """, p))
+    total = cint(frappe.db.sql(f"SELECT COUNT(*) {base}", p)[0][0])
+    p["limit"] = MAX_SI_INDEX_ROWS
+    rows = frappe.db.sql(f"""
+        SELECT si.name, si.posting_date, si.grand_total, si.customer, si.customer_name,
+               si.is_return, c.customer_group, {snap_cols},
+               si.{SI_SERIES_FIELD} AS inv_series, si.{SI_NO_FIELD} AS inv_no
+        {base}
+        ORDER BY si.posting_date DESC, si.name DESC
+        LIMIT %(limit)s
+    """, p, as_dict=True)
 
     by_key, by_no = defaultdict(list), defaultdict(list)
     info = {}
@@ -828,12 +944,33 @@ def _si_index(company, dates):
         key = (norm_series_mt(r.inv_series), norm_inv_no(r.inv_no))
         if key[0] and key[1]:
             by_key[key].append(r.name)
-        if key[1] and r.name in mt_names:
+        if key[1]:
             by_no[key[1]].append(r.name)
-    return {"by_key": by_key, "by_no": by_no, "info": info, "from": cstr(fd), "to": cstr(td)}
+    return {"by_key": by_key, "by_no": by_no, "info": info,
+            "from": cstr(fd), "to": cstr(td),
+            "count": total, "truncated": total > MAX_SI_INDEX_ROWS}
 
 
-def _match_row(row, idx):
+def _invoice_objection(si, chain, cus_chain):
+    """Lý do KHÔNG được để một liên kết ở mức 'Chắc chắn'. Trả method ASCII hoặc None.
+
+    · Khác chuỗi: cả 5 chuỗi dùng chung dải ký hiệu C26THG, nên chỉ cần đọc lệch
+      một chữ số là tiền của chuỗi này được ghi vào hóa đơn của chuỗi khác — hai
+      chuỗi lệch công nợ ngược chiều nhau mà không có cảnh báo nào. Ánh xạ khách
+      hàng -> chuỗi lấy từ chính các bảng kê kế toán đã chốt (không đoán theo tên).
+      Khách chưa từng xuất hiện trên bảng kê nào thì KHÔNG kết luận gì.
+    · Hóa đơn bên MISA đã hủy / đã bị thay thế: tiền có thật nhưng hóa đơn đã chết.
+    """
+    if cus_chain and chain:
+        other = cus_chain.get(si.get("customer"))
+        if other and other != chain:
+            return "khac_chuoi"
+    if cint(si.get("snap_dead")) or cint(si.get("snap_deleted")):
+        return "hoa_don_da_huy_thay_the"
+    return None
+
+
+def _match_row(row, idx, chain_key=None, chain=None, cus_chain=None):
     """Khớp MỘT dòng thanh toán với Sales Invoice.
 
     Trả (sales_invoice, match_method, match_confidence, ghi_chú).
@@ -866,15 +1003,26 @@ def _match_row(row, idx):
             si = idx["info"][cands[0]]
             diff = abs(abs(flt(row.get("total_amount"))) - abs(flt(si.grand_total)))
             # Lệch tiền KHÔNG làm mất liên kết: chuỗi có quyền trả từng phần, và
-            # tổng nhiều kỳ mới đủ. Chỉ ghi lại chênh lệch cho người xem.
+            # tổng nhiều kỳ mới đủ. Chênh lệch được trả về để _summarize hiện ra.
+            bad = _invoice_objection(si, chain, cus_chain)
+            if bad:
+                return cands[0], bad, "Cần review", (flt(diff) or None)
             return cands[0], "ky_hieu_so", "Chắc chắn", (flt(diff) or None)
         if len(cands) > 1:
             return None, f"trung_{len(cands)}_hoa_don", "Cần review", None
         return None, "khong_tim_thay_ky_hieu_so", "Không khớp", None
 
-    # Không có ký hiệu (Emart). Thu hẹp bằng ngày hóa đơn VÀ số tiền, và chỉ nhận
-    # khi còn ĐÚNG MỘT ứng viên. Ba vế cùng khớp mà vẫn để 'Cần review' vì đây là
-    # suy đoán, không phải khóa tự nhiên.
+    # Không có ký hiệu. Nhánh này CHỈ dành cho Emart — chuỗi duy nhất không in ký
+    # hiệu (§A). Chuỗi khác mà bóc ký hiệu ra rỗng nghĩa là ĐỌC HỎNG (WinCommerce
+    # đổi dấu '#', Central Retail thiếu '|' trong Reference): khớp bằng số trần
+    # trên chỉ mục gộp cả 5 chuỗi là vơ nhầm hóa đơn của chuỗi khác. Thà không
+    # khớp và để người nối tay.
+    if cstr(chain_key) != "emart":
+        return None, "thieu_ky_hieu", "Không khớp", None
+
+    # Thu hẹp bằng ngày hóa đơn VÀ số tiền, và chỉ nhận khi còn ĐÚNG MỘT ứng viên.
+    # Ba vế cùng khớp mà vẫn để 'Cần review' vì đây là suy đoán, không phải khóa
+    # tự nhiên.
     cands = idx["by_no"].get(no) or []
     if not cands:
         return None, "khong_tim_thay_so", "Không khớp", None
@@ -883,6 +1031,11 @@ def _match_row(row, idx):
     narrowed = []
     for name in cands:
         si = idx["info"][name]
+        # Ứng viên thuộc chuỗi khác (hoặc hóa đơn đã hủy/thay thế) bị LOẠI khỏi
+        # danh sách chứ không chỉ hạ độ tin cậy: ở nhánh đoán này, giữ lại là
+        # mời hệ thống chọn nhầm hóa đơn của chuỗi khác.
+        if _invoice_objection(si, chain, cus_chain):
+            continue
         if inv_date and cstr(si.posting_date) != cstr(inv_date):
             continue
         if amount and abs(abs(flt(si.grand_total)) - amount) > PAID_TOLERANCE:
@@ -897,7 +1050,54 @@ def _match_row(row, idx):
 # Kế hoạch nạp
 # ─────────────────────────────────────────────────────────────────────────
 
-def _map_rows(raw_rows, company, idx):
+def _prior_paid(names):
+    """Mỗi hóa đơn ĐÃ được các bảng kê ghi nhận trả bao nhiêu (trước file này).
+
+    Dùng để phát hiện dòng làm hóa đơn bị trả VƯỢT giá trị: hai chuỗi cùng ghi
+    nhầm một số hóa đơn, hoặc một kỳ bị nạp lại dưới tên file khác. Cộng cả dòng
+    'Cần review' vào đây là cố ý — câu hỏi ở đây là "hóa đơn này đã bị phân bổ
+    bao nhiêu tiền rồi", không phải "tiền đã chắc chắn về chưa".
+    """
+    names = sorted(n for n in set(names or []) if n)
+    if not names:
+        return {}
+    rows = frappe.db.sql("""
+        SELECT l.sales_invoice AS si, IFNULL(SUM(ABS(l.total_amount)), 0) AS paid
+        FROM `tabMT Payment Advice Line` l
+        WHERE l.parenttype = 'MT Payment Advice'
+          AND l.row_kind = %(kind_payment)s
+          AND l.sales_invoice IN %(names)s
+        GROUP BY l.sales_invoice
+    """, {"names": tuple(names), "kind_payment": KIND_PAYMENT}, as_dict=True)
+    return {r.si: flt(r.paid) for r in rows}
+
+
+def _flag_overpaid(lines):
+    """Hạ độ tin cậy dòng làm tổng tiền phân bổ VƯỢT giá trị hóa đơn.
+
+    Trả nhiều đợt là bình thường (Co.op 8 kỳ, LOTTE 2 ngày) nên chỉ chặn khi
+    TỔNG đã vượt — vượt nghĩa là hoặc nối nhầm hóa đơn, hoặc bảng kê bị nạp hai
+    lần. Không xóa liên kết: kế toán phải nhìn thấy dòng đó và tự quyết.
+    """
+    matched = [ln for ln in lines if ln.get("sales_invoice")]
+    if not matched:
+        return
+    before = _prior_paid([ln["sales_invoice"] for ln in matched])
+    running = defaultdict(float)
+    for ln in matched:
+        si = ln["sales_invoice"]
+        gt = abs(flt(ln.get("_si_grand_total")))
+        running[si] += abs(flt(ln.get("total_amount")))
+        allocated = flt(before.get(si, 0.0)) + running[si]
+        if gt and allocated > gt + PAID_TOLERANCE:
+            ln["_overpaid"] = allocated - gt
+            ln["_paid_before"] = flt(before.get(si, 0.0))
+            if ln.get("match_confidence") == "Chắc chắn":
+                ln["match_confidence"] = "Cần review"
+                ln["match_method"] = "vuot_tien_hoa_don"
+
+
+def _map_rows(raw_rows, company, idx, chain=None, chain_key=None, cus_chain=None):
     """Dòng của tầng đọc file -> dòng của DocType, kèm kết quả khớp."""
     lines, dropped = [], 0
     for r in raw_rows or []:
@@ -939,7 +1139,8 @@ def _map_rows(raw_rows, company, idx):
             line["_unknown_kind"] = unknown_kind
 
         if kind == KIND_PAYMENT:
-            si, method, conf, diff = _match_row(r, idx)
+            si, method, conf, diff = _match_row(r, idx, chain_key=chain_key,
+                                                chain=chain, cus_chain=cus_chain)
             if si and r.get("needs_review") and conf == "Chắc chắn":
                 # Tầng đọc tự thấy dòng này đáng ngờ -> không được để 'Chắc chắn'
                 # dù ký hiệu + số khớp đúng một hóa đơn.
@@ -959,6 +1160,7 @@ def _map_rows(raw_rows, company, idx):
             line["match_method"] = None
             line["match_confidence"] = None
         lines.append(line)
+    _flag_overpaid(lines)
     return lines, dropped
 
 
@@ -971,15 +1173,74 @@ def _totals(lines):
     return t
 
 
-def _existing_advice(chain, payment_date, advice_no, file_name):
-    """Bảng kê đã nạp rồi hay chưa — nạp hai lần là nhân đôi tiền đã thu."""
-    filters = {"chain": chain, "payment_date": payment_date or None}
-    if norm_text(advice_no):
-        filters["advice_no"] = norm_text(advice_no)
-    else:
-        # Không có số chứng từ thì tên file là dấu hiệu nhận dạng còn lại.
-        filters["file_name"] = norm_text(file_name)
-    return frappe.db.get_value("MT Payment Advice", filters, "name")
+def _content_fingerprint(chain, payment_date, lines):
+    """Vân tay NỘI DUNG của một kỳ thanh toán — danh tính thật của bảng kê.
+
+    VÌ SAO không dùng tên file: LOTTE và Emart KHÔNG in số chứng từ (advice_no
+    luôn rỗng), nên tên file từng là khóa chống trùng duy nhất — mà tên file của
+    đúng hai chuỗi đó nhúng dấu thời gian xuất ('Payment_deduct_detail2026081408
+    5903_CTTT_LOTTE.xls', 'APT_20250915_15094_100968_emart.xls'). Xuất lại cùng
+    kỳ hôm sau, hoặc chỉ cần Save As tên khác, là nạp được lần hai và mọi hóa đơn
+    của kỳ đó có paid gấp đôi.
+
+    Vân tay lấy từ (số dòng nguồn, loại dòng, số hóa đơn, số tiền) của TOÀN BỘ
+    dòng trong kỳ + chuỗi + ngày thanh toán. Cùng nội dung thì cùng vân tay dù
+    tên file khác.
+    """
+    h = hashlib.sha1()
+    h.update("F|{}|{}\n".format(chain or "", cstr(payment_date or "")).encode())
+    for s in sorted(
+        "{}|{}|{}|{}".format(cint(ln.get("source_row")), cstr(ln.get("row_kind") or ""),
+                             norm_text(ln.get("inv_no")) or "",
+                             round(flt(ln.get("total_amount")), 2))
+        for ln in (lines or [])
+    ):
+        h.update((s + "\n").encode())
+    return h.hexdigest()
+
+
+def _existing_advice(chain, payment_date, advice_no, lines):
+    """Bảng kê đã nạp rồi hay chưa — nạp hai lần là nhân đôi tiền đã thu.
+
+    Hai lớp, cố ý theo thứ tự này:
+      1. Số chứng từ của chuỗi (Co.op / Central Retail / WinCommerce có) — khóa
+         tự nhiên, rẻ nhất.
+      2. Vân tay nội dung — lớp duy nhất bắt được LOTTE và Emart (không có số
+         chứng từ). KHÔNG lọc theo công ty: nạp cùng một file sang công ty khác
+         vẫn là nạp trùng, phải chặn.
+    """
+    advice_no = norm_text(advice_no)
+    pd = payment_date or None
+    if advice_no:
+        name = frappe.db.get_value(
+            "MT Payment Advice",
+            {"chain": chain, "payment_date": pd, "advice_no": advice_no}, "name")
+        if name:
+            return name
+
+    want = _content_fingerprint(chain, pd, lines)
+    cands = frappe.db.sql_list("""
+        SELECT a.name FROM `tabMT Payment Advice` a
+        WHERE a.chain = %(chain)s
+          AND ((%(pd)s IS NULL AND a.payment_date IS NULL) OR a.payment_date = %(pd)s)
+        ORDER BY a.creation DESC
+        LIMIT 50
+    """, {"chain": chain, "pd": cstr(pd) if pd else None})
+    if not cands:
+        return None
+
+    rows = frappe.db.sql("""
+        SELECT l.parent, l.source_row, l.row_kind, l.inv_no, l.total_amount
+        FROM `tabMT Payment Advice Line` l
+        WHERE l.parenttype = 'MT Payment Advice' AND l.parent IN %(names)s
+    """, {"names": tuple(cands)}, as_dict=True)
+    by_parent = defaultdict(list)
+    for r in rows:
+        by_parent[r.parent].append(r)
+    for name in cands:
+        if _content_fingerprint(chain, pd, by_parent.get(name) or []) == want:
+            return name
+    return None
 
 
 def _declared(group, parsed, single, group_keys, parsed_key):
@@ -1061,6 +1322,12 @@ def _plan(content, filename, chain, company):
                 pass
     idx = _si_index(company, dates)
 
+    # Ánh xạ khách hàng -> chuỗi, lấy từ các bảng kê kế toán đã chốt (§I: KHÔNG
+    # đoán chuỗi theo tên khách). Dùng để chặn tiền chuỗi này chạy sang hóa đơn
+    # của chuỗi khác — cả 5 chuỗi dùng chung dải ký hiệu.
+    cus_chain, _amb = _customer_chain_map()
+    chain_key = cstr(parsed.get("chain_key") or "")
+
     single = len(parts) == 1
     fallback_date = None
     pay_dates = parsed.get("payment_dates") or []
@@ -1069,7 +1336,8 @@ def _plan(content, filename, chain, company):
 
     plan = []
     for group, rows in parts:
-        lines, dropped = _map_rows(rows, company, idx)
+        lines, dropped = _map_rows(rows, company, idx, chain=chain,
+                                   chain_key=chain_key, cus_chain=cus_chain)
         totals = _totals(lines)
         payment_date = group.get("payment_date") or fallback_date or None
         advice_no = norm_text(group.get("advice_no")
@@ -1081,6 +1349,10 @@ def _plan(content, filename, chain, company):
         relation, matched = _declared_relation(reported, totals)
         plan.append({
             "chain": chain,
+            # company đi vào kế hoạch (và vào vân tay kế hoạch): người duyệt xem
+            # trước cho công ty A mà lúc nạp lại ghi vào công ty B thì vân tay
+            # phải lệch, nếu không bảng kê chui sang sổ công ty khác không dấu vết.
+            "company": company,
             "advice_no": advice_no,
             "payment_date": cstr(payment_date) if payment_date else None,
             "group_key": cstr(group.get("key")) or None,
@@ -1098,7 +1370,12 @@ def _plan(content, filename, chain, company):
             "lines": lines,
             "dropped_rows": dropped,
             "totals": totals,
-            "existing": _existing_advice(chain, payment_date, advice_no, filename),
+            "existing": _existing_advice(chain, payment_date, advice_no, lines),
+            # Chỉ mục hóa đơn bị cắt cụt -> có hóa đơn KHÔNG nằm trong chỉ mục,
+            # dòng thanh toán của nó sẽ báo "chưa nối được hóa đơn" như một lỗi
+            # khớp bình thường. Phải đi theo kế hoạch ra tới màn hình.
+            "index_truncated": bool(idx and idx.get("truncated")),
+            "index_count": cint(idx.get("count")) if idx else 0,
         })
     return chain, plan, parsed
 
@@ -1112,8 +1389,9 @@ def _plan_hash(plan):
     """
     h = hashlib.sha1()
     for a in plan:
-        h.update("A|{}|{}|{}|{}\n".format(
-            a["chain"], a["advice_no"], a["payment_date"], a["group_key"] or "").encode())
+        h.update("A|{}|{}|{}|{}|{}\n".format(
+            a["chain"], a["advice_no"], a["payment_date"], a["group_key"] or "",
+            a.get("company") or "").encode())
         for ln in a["lines"]:
             h.update("L|{}|{}|{}|{}|{}|{}|{}\n".format(
                 ln["source_row"], ln["row_kind"], ln["inv_series"], ln["inv_no"],
@@ -1145,6 +1423,31 @@ def _summarize(a):
     declared = a["declared_total_payment"]
     diff = None if declared is None else flt(declared) - flt(a["totals"]["total_payment"])
 
+    def _ref(ln, **extra):
+        d = {"source_row": ln.get("source_row"),
+             "inv_series": ln.get("inv_series"), "inv_no": ln.get("inv_no"),
+             "sales_invoice": ln.get("sales_invoice"),
+             "match_method": ln.get("match_method"),
+             "match_confidence": ln.get("match_confidence"),
+             "total_amount": flt(ln.get("total_amount")),
+             "si_customer": ln.get("_si_customer"),
+             "si_customer_name": ln.get("_si_customer_name"),
+             "si_grand_total": ln.get("_si_grand_total")}
+        d.update(extra)
+        return d
+
+    # LƯỚI AN TOÀN cho mọi lỗi nối nhầm hóa đơn: dòng khớp được nhưng số tiền
+    # LỆCH so với grand_total. Trước đây chênh lệch này được tính rồi vứt đi
+    # (_public_line lọc mọi khóa '_'), nên một dòng nối nhầm sang hóa đơn của
+    # chuỗi khác hiện ra như một dòng khớp hoàn hảo. Lệch KHÔNG chặn nạp (chuỗi
+    # được trả từng phần), nhưng phải nhìn thấy được.
+    mismatches = [_ref(ln, diff=flt(ln["_amount_diff"]))
+                  for ln in matched if flt(ln.get("_amount_diff")) > PAID_TOLERANCE]
+    # Dòng đẩy tổng tiền phân bổ vượt giá trị hóa đơn (nối nhầm, hoặc kỳ này đã
+    # được nạp ở đâu đó rồi).
+    overpaid = [_ref(ln, over=flt(ln["_overpaid"]), paid_before=flt(ln.get("_paid_before")))
+                for ln in matched if ln.get("_overpaid")]
+
     return {
         "chain": a["chain"],
         "advice_no": a["advice_no"],
@@ -1159,6 +1462,13 @@ def _summarize(a):
         "need_review": len(review),
         "unknown_kind": len(unknown),
         "repeated_invoices": repeated,
+        # Ba lưới an toàn của màn xem trước, cạnh 'problems' (dòng KHÔNG khớp):
+        "amount_mismatches": mismatches,
+        "overpaid_invoices": overpaid,
+        # Dòng bị hạ độ tin cậy vì hóa đơn thuộc chuỗi khác / đã hủy / đã thay thế.
+        "cross_chain": [_ref(ln) for ln in matched
+                        if ln.get("match_method") in ("khac_chuoi", "hoa_don_da_huy_thay_the")],
+        "index_truncated": a.get("index_truncated"),
         "totals": a["totals"],
         "declared_total_payment": declared,
         "declared_total_discount": a["declared_total_discount"],
@@ -1199,6 +1509,16 @@ def preview_advice(content, filename=None, chain=None, company=None):
     grand = {k: sum(a["totals"][k] for a in plan)
              for k in ("total_payment", "total_discount", "total_fee", "total_other")}
 
+    warnings = list(parsed.get("warnings") or [])
+    if any(a.get("index_truncated") for a in plan):
+        # Chỉ mục hóa đơn bị cắt cụt: hóa đơn ngoài chỉ mục sẽ báo "chưa nối được
+        # hóa đơn" y hệt một lỗi khớp thường -> công nợ bị thổi phồng mà không ai
+        # biết vì sao. Phải nói thẳng ra.
+        warnings.append(_(
+            "Chỉ mục hóa đơn bị cắt ở {0} dòng (khoảng ngày quá rộng). Kết quả khớp "
+            "có thể THIẾU hóa đơn — đừng coi 'chưa nối được hóa đơn' là kết luận."
+        ).format(MAX_SI_INDEX_ROWS))
+
     return {
         "chain": chain,
         "file_name": filename,
@@ -1206,7 +1526,7 @@ def preview_advice(content, filename=None, chain=None, company=None):
         "advice_count": len(plan),
         "advices": advices,
         "grand_totals": grand,
-        "warnings": parsed.get("warnings") or [],
+        "warnings": warnings,
         # Đối chiếu THẬT nằm ở đây: tầng đọc so tổng của nó với SỐ KIỂM TRA do
         # chính chuỗi in trong file. `reconciled=False` KHÔNG chặn nạp — nhưng
         # kế toán phải nhìn thấy trước khi bấm, và trạng thái 'Đã ghi nhận' vẫn
@@ -1285,6 +1605,33 @@ def _todo_for(doc, a):
         frappe.log_error(frappe.get_traceback(), "mt.commit_advice/todo %s" % doc.name)
 
 
+def _commit_lock():
+    """Khóa quanh KIỂM TRÙNG + GHI.
+
+    Kiểm trùng (SELECT) và insert nằm rời nhau là TOCTOU: file Co.op 8 kỳ chạy
+    vài chục giây, gateway trả 504, kế toán bấm "Thử lại" trong khi request đầu
+    còn đang chạy -> cả hai đều thấy "chưa có bản ghi nào" -> 16 bản ghi thay vì
+    8 -> tiền đã thu của chuỗi nhân đôi. Hai tab trình duyệt cũng đủ gây ra.
+
+    MỘT khóa duy nhất cho cả luồng nạp, KHÔNG khóa theo chuỗi/theo file: chuỗi
+    có thể chưa biết lúc lấy khóa (client để trống, tầng đọc tự nhận), và hai
+    file khác tên vẫn có thể là cùng một kỳ. Nạp bảng kê là việc thủ công, hiếm —
+    xếp hàng toàn cục không mất gì, còn khóa sai khóa thì mất tiền.
+
+    Đây là khóa cấp máy chủ — phòng thủ tầng DB (unique index trên MT Payment
+    Advice) vẫn phải bổ sung ở tầng DocType.
+    """
+    try:
+        from frappe.utils.synchronization import filelock
+    except ImportError:
+        from contextlib import nullcontext
+        frappe.log_error("frappe.utils.synchronization.filelock không có — "
+                         "nạp bảng kê chạy KHÔNG có khóa chống trùng song song",
+                         "mt.commit_advice")
+        return nullcontext()
+    return filelock("mt_advice_commit", timeout=180)
+
+
 @frappe.whitelist()
 def commit_advice(content, filename=None, chain=None, expected_hash=None,
                   company=None, customer=None, note=None):
@@ -1297,6 +1644,16 @@ def commit_advice(content, filename=None, chain=None, expected_hash=None,
     company = _company(company)
     _check_size(content)
     filename = norm_text(filename)
+    if customer and not frappe.db.exists("Customer", customer):
+        frappe.throw(_("Không tìm thấy khách hàng {0}").format(customer))
+    # Từ đây tới frappe.db.commit() nằm TRONG khóa: dựng lại kế hoạch, kiểm trùng
+    # và ghi phải là một khối không xen kẽ được (xem _commit_lock).
+    with _commit_lock():
+        return _commit_advice_locked(content, filename, chain, expected_hash,
+                                     company, customer, note)
+
+
+def _commit_advice_locked(content, filename, chain, expected_hash, company, customer, note):
     chain, plan, parsed = _plan(content, filename, chain, company)
 
     if not expected_hash:
@@ -1314,8 +1671,22 @@ def commit_advice(content, filename=None, chain=None, expected_hash=None,
         frappe.throw(_("Bảng kê đã được nạp rồi: {0}. Xóa bản cũ trước nếu muốn nạp lại.")
                      .format(", ".join(a["existing"] for a in dup)))
 
-    if customer and not frappe.db.exists("Customer", customer):
-        frappe.throw(_("Không tìm thấy khách hàng {0}").format(customer))
+    # Dòng khớp được nhưng hóa đơn thuộc KHÁCH KHÁC với khách của bảng kê. Không
+    # chặn (một chuỗi có thể có nhiều Customer: mỗi vùng/mỗi pháp nhân một mã),
+    # nhưng phải trả về cho người nạp nhìn — tiền chạy sang hóa đơn của khách
+    # khác là kiểu sai không tự lộ ra ở bất kỳ tổng nào.
+    other_customer = []
+    if customer:
+        for a in plan:
+            for ln in a["lines"]:
+                if ln.get("sales_invoice") and ln.get("_si_customer") \
+                        and ln["_si_customer"] != customer:
+                    other_customer.append({
+                        "advice_group": a["group_key"], "source_row": ln.get("source_row"),
+                        "sales_invoice": ln["sales_invoice"],
+                        "si_customer": ln["_si_customer"],
+                        "total_amount": flt(ln.get("total_amount")),
+                    })
 
     created = []
     for a in plan:
@@ -1351,10 +1722,19 @@ def commit_advice(content, filename=None, chain=None, expected_hash=None,
         })
     frappe.db.commit()
 
+    warnings = list(parsed.get("warnings") or [])
+    if other_customer:
+        warnings.append(_("{0} dòng nối vào hóa đơn của khách khác với khách đã chọn — soi lại.")
+                        .format(len(other_customer)))
+    if any(a.get("index_truncated") for a in plan):
+        warnings.append(_("Chỉ mục hóa đơn bị cắt cụt lúc khớp — có dòng 'chưa nối được "
+                          "hóa đơn' chỉ vì hóa đơn không nằm trong chỉ mục."))
+
     return {
         "created": created,
         "advice_count": len(created),
-        "warnings": parsed.get("warnings") or [],
+        "lines_on_other_customer": other_customer,
+        "warnings": warnings,
         "checks": parsed.get("checks") or [],
         "reconciled": bool(parsed.get("reconciled")),
         "message": _("Đã ghi nhận {0} bảng kê từ file {1}. "
@@ -1394,12 +1774,37 @@ def relink_line(line, sales_invoice=None, note=None):
     others = []
     if sales_invoice:
         si = frappe.db.get_value("Sales Invoice", sales_invoice,
-                                 ["name", "docstatus", "company", "customer_name", "grand_total"],
+                                 ["name", "docstatus", "company", "customer", "customer_name",
+                                  "grand_total", "is_return"],
                                  as_dict=True)
         if not si:
             frappe.throw(_("Không tìm thấy hóa đơn {0}").format(sales_invoice))
         if si.docstatus != 1:
             frappe.throw(_("Hóa đơn {0} chưa ghi sổ (docstatus={1})").format(sales_invoice, si.docstatus))
+
+        # Modal chọn hóa đơn dùng API tìm kiếm CHUNG của luồng MISA: nó trả hóa
+        # đơn của CẢ ba kênh và MỌI công ty. Không chặn ở đây thì một dòng LOTTE
+        # (kênh MT, công ty A) nối được vào hóa đơn khách NPP của công ty B —
+        # hóa đơn đó biến khỏi rổ nợ kênh NPP, còn tiền LOTTE thì không hiện ở
+        # màn hình MT nào (mọi truy vấn MT lọc customer_group='MT'). Tiền biến
+        # mất khỏi cả hai kênh, không cảnh báo.
+        adv = frappe.db.get_value("MT Payment Advice", row.parent,
+                                  ["company", "chain"], as_dict=True) or frappe._dict()
+        if adv.company and si.company and si.company != adv.company:
+            frappe.throw(_("Hóa đơn {0} thuộc công ty {1}, khác công ty {2} của bảng kê.")
+                         .format(sales_invoice, si.company, adv.company))
+        if si.is_return:
+            # Credit note được ERPNext copy nguyên ký hiệu/số của hóa đơn gốc nên
+            # rất dễ chọn nhầm; và dòng 'Thanh toán' không bao giờ trả cho một
+            # phiếu trả hàng.
+            frappe.throw(_("Hóa đơn {0} là phiếu trả hàng — dòng thanh toán không nối "
+                           "vào phiếu trả hàng.").format(sales_invoice))
+        mt_group = (get_settings().get("mt_customer_group") or "MT")
+        cg = frappe.db.get_value("Customer", si.customer, "customer_group")
+        if cstr(cg) != cstr(mt_group):
+            frappe.throw(_("Khách hàng {0} của hóa đơn {1} thuộc nhóm '{2}', không phải "
+                           "kênh MT ('{3}') — không nối bảng kê siêu thị vào hóa đơn này.")
+                         .format(si.customer, sales_invoice, cg or "", mt_group))
         others = frappe.db.sql("""
             SELECT l.name AS line, l.parent AS advice, l.total_amount,
                    IFNULL(l.payment_date, a.payment_date) AS payment_date, a.chain
@@ -1418,6 +1823,15 @@ def relink_line(line, sales_invoice=None, note=None):
     # document cha sẽ chạy lại validate và bắn msgprint lệch số kiểm tra mỗi lần
     # chốt một dòng — và không có gì trong tổng tiền thay đổi khi đổi liên kết.
     frappe.db.set_value("MT Payment Advice Line", line, values, update_modified=False)
+
+    # ĐẨY MỐC THỜI GIAN CỦA BẢN GHI CHA. Frappe kiểm xung đột ghi bằng
+    # check_if_latest() trên `modified` của CHA, còn bảng con thì bị xóa-và-chèn-
+    # lại nguyên khối khi ai đó Save form. Không đẩy mốc: một form Desk mở từ
+    # trước, bấm Save sau, sẽ qua được check_if_latest và ghi đè im lặng liên kết
+    # vừa chốt tay — hóa đơn quay lại rổ "chưa thanh toán" trong khi Comment vẫn
+    # ghi "đã chốt", dẫn người soi lại đi sai hướng.
+    frappe.db.set_value("MT Payment Advice", row.parent, "modified",
+                        frappe.utils.now(), update_modified=False)
 
     # Vết kiểm toán đi vào Comment của bảng kê, KHÔNG đè lên trường dữ liệu đọc
     # từ file (description là nguyên văn của chuỗi, đè là mất bằng chứng gốc).

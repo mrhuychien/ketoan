@@ -24,13 +24,33 @@ from ketoan.misa_integration.doctype.misa_invoice_snapshot.misa_invoice_snapshot
 ROW_KIND_PAYMENT = "Thanh toán"
 
 
-def norm_series_mt(s) -> str:
-    """Ký hiệu để SO KHỚP: chuẩn hóa như MISA rồi BỎ CHỮ SỐ DẠNG HÓA ĐƠN Ở ĐẦU.
+# Ký hiệu hóa đơn điện tử theo TT78/2021: <mẫu số 1 chữ số><C hoặc K><2 chữ số
+# năm><3 ký tự do người bán tự đặt>, ví dụ '1C26THG'. 'C' = có mã cơ quan thuế,
+# 'K' = không có mã. Chỉ chữ số ĐỨNG NGAY TRƯỚC 'C'/'K' mới là mẫu số.
+_MAU_SO_DAU = re.compile(r"^\d(?=[CK])")
 
-    VÌ SAO: §E của hợp đồng — ngay trong MỘT file của chuỗi đã có cả 'C26THG' và
-    '1C26THG' cho CÙNG một dải hóa đơn (đã gặp thật ở Central Retail, LOTTE,
-    Co.op). Không bỏ chữ số đầu thì coi là hai ký hiệu khác nhau và hóa đơn
-    không tìm được Sales Invoice.
+
+def norm_series_mt(s) -> str:
+    """Ký hiệu để SO KHỚP: chuẩn hóa như MISA rồi bỏ ĐÚNG MỘT chữ số mẫu số ở đầu.
+
+    VÌ SAO phải bỏ: §E của hợp đồng — ngay trong MỘT file của chuỗi đã có cả
+    'C26THG' và '1C26THG' cho CÙNG một dải hóa đơn (đã gặp thật ở Central Retail,
+    LOTTE, Co.op). Không bỏ thì coi là hai ký hiệu khác nhau và hóa đơn không tìm
+    được Sales Invoice.
+
+    VÌ SAO chỉ bỏ ĐÚNG MỘT chữ số, và chỉ khi phần còn lại vẫn là ký hiệu hợp lệ
+    (bắt đầu bằng 'C'/'K'): chữ số đầu là MẪU SỐ hóa đơn theo TT78 (1 = hóa đơn
+    GTGT, 2 = hóa đơn bán hàng...), MỖI MẪU SỐ ĐÁNH SỐ ĐỘC LẬP TỪ 1. Bản cũ dùng
+    `re.sub(r"^\\d+", ...)` nên nuốt sạch mọi chữ số đầu: '01C26THG' và '11C26THG'
+    bị gộp vào cùng một khóa với 'C26THG' dù là ba dải hóa đơn khác nhau — khớp
+    nhầm là ghi tiền của hóa đơn này sang hóa đơn kia.
+
+    ⚠ GIỚI HẠN CÒN LẠI (không sửa được ở tầng hàm này): '1C26THG' và '2C26THG'
+    vẫn cho cùng kết quả 'C26THG'. Hàm được dùng ĐỐI XỨNG cho cả chỉ mục Sales
+    Invoice lẫn dòng file (mt._si_index / mt._match_row) nên không thể phân biệt
+    "file thiếu mẫu số" với "file có mẫu số khác". Muốn khớp chặt phải đánh chỉ
+    mục HAI TẦNG ở mt.py: khóa exact (norm_series) thử trước, chỉ rơi xuống khóa
+    loose này khi ký hiệu trong file KHÔNG có mẫu số và loose cho đúng 1 ứng viên.
 
     Chỉ dùng ở TẦNG KHỚP. Trường inv_series vẫn lưu NGUYÊN VĂN của file để còn
     đối soát ngược với bản in của chuỗi.
@@ -38,9 +58,9 @@ def norm_series_mt(s) -> str:
     v = norm_series(s)
     if not v:
         return ""
-    stripped = re.sub(r"^\d+", "", v)
-    # Ký hiệu toàn chữ số là bất thường -> trả nguyên bản, không nuốt mất dữ liệu.
-    return stripped or v
+    # Ký hiệu toàn chữ số / không đúng dạng TT78 -> trả nguyên bản, không nuốt
+    # mất dữ liệu và không tự bịa ra một khóa khớp rộng hơn thực tế.
+    return _MAU_SO_DAU.sub("", v)
 
 
 class MTPaymentAdviceLine(Document):

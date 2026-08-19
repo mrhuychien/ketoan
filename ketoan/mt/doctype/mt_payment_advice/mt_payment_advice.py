@@ -82,9 +82,35 @@ class MTPaymentAdvice(Document):
             (self.declared_total_payment, self.total_payment, _("Tổng thanh toán")),
             (self.declared_total_discount, self.total_discount, _("Tổng chiết khấu")),
         )
+        # Tính lười — chỉ cần khi gặp số kiểm tra BẰNG 0 (xem lý do bên dưới).
+        first_save = None
         for declared, computed, label in checks:
-            if not declared:
-                continue  # không có số kiểm tra trong file -> không có gì để so
+            if declared is None:
+                # None = FILE KHÔNG IN số kiểm tra (mt._declared trả None, và
+                # commit_advice cũng để None khi số của chuỗi đo đại lượng khác)
+                # -> không có gì để so.
+                continue
+            if not flt(declared):
+                # SỐ 0 DO CHUỖI IN RA LÀ MỘT KHẲNG ĐỊNH ("kỳ này không có chiết
+                # khấu"), KHÔNG phải "thiếu số kiểm tra". Bản cũ dùng
+                # `if not declared: continue` nên nuốt luôn ca này: WinCommerce
+                # có declared_total_discount = 0 thật, mà nhánh sinh dòng chiết
+                # khấu của tầng đọc file thì CHƯA từng chạy trên dữ liệu thật —
+                # nếu nó đọc nhầm cột và đẻ ra chiết khấu ma thì đây là chốt duy
+                # nhất bắt được, mà chốt đó lại đang tắt.
+                #
+                # NHƯNG: cột Currency của MariaDB là NOT NULL DEFAULT 0, nên khi
+                # ĐỌC LẠI bản ghi cũ, None đã hóa 0 và không còn phân biệt được
+                # với "chuỗi in số 0". Chỉ tin số 0 ở LẦN LƯU ĐẦU (lúc None còn
+                # nguyên trong bộ nhớ). Không chặn ở đây thì mỗi lần Kế toán
+                # trưởng bấm Save một bảng kê Central Retail (declared để None vì
+                # 'Overall Result' đo NET chứ không đo tổng thanh toán) sẽ nổ
+                # cảnh báo lệch cả 721 triệu — kêu sai riết thì kế toán quen tay
+                # bấm bỏ qua, tới lúc lệch THẬT không ai còn nhìn.
+                if first_save is None:
+                    first_save = not frappe.db.exists(self.doctype, self.name) if self.name else True
+                if not first_save:
+                    continue
             diff = flt(declared) - flt(computed)
             if diff:
                 frappe.msgprint(

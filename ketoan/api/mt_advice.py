@@ -61,6 +61,7 @@ Kết quả trả về của `read_payment_advice()`:
 """
 
 import base64
+import binascii
 import datetime
 import io
 import re
@@ -72,12 +73,31 @@ from frappe import _
 from ketoan.api._guard import guard_mt
 from ketoan.misa_integration.doctype.misa_invoice_snapshot.misa_invoice_snapshot import (
     norm_inv_no,
-    norm_series,
 )
+from ketoan.mt.doctype.mt_payment_advice_line.mt_payment_advice_line import norm_series_mt
 
 # Giới hạn phòng file hỏng/khổng lồ làm treo worker.
 MAX_ROWS_PER_SHEET = 50000
 MAX_SHEETS = 200
+# Bảng kê rộng nhất trong 5 file là 15 cột (LOTTE). 200 đã dư rất xa; cao hơn nữa
+# nghĩa là file khai khống vùng dữ liệu để bơm bộ nhớ, không phải bảng kê thật.
+MAX_COLS_PER_SHEET = 200
+
+# TRẦN Ô CỦA CẢ WORKBOOK — thứ DUY NHẤT đo đúng cái tốn kém.
+#
+# Ba trần trên đều là trần THEO TỪNG SHEET, nhân với nhau ra ngân sách 2 tỉ ô
+# (50.000 x 200 x 200). Đo thật trên file dựng riêng để thử:
+#     1.426 byte,   1 sheet  khai 50.000 dòng x 100 cột -> 20,6 giây · 1.073 MB
+#     2.007 byte,   3 sheet  y hệt                      -> 83,9 giây · 3.171 MB
+#     3.997 byte,  10 sheet  y hệt                      -> quá 120 giây, phải kill
+#    58.342 byte, 200 sheet  y hệt (VẪN dưới MAX_SHEETS) -> ngoại suy ~70 GB
+# Tức là một file vài KB, hợp lệ dưới MỌI trần cũ, vẫn giết được worker — và chỉ
+# cần role 'Ke Toan MT' gọi được `preview`. Trần dung lượng 12MB vô nghĩa vì
+# .xlsx là file nén: khai khống vùng dữ liệu tốn vài chục byte.
+#
+# 5 file thật lớn nhất: Co.op 817 dòng x 13 cột x 9 sheet ~ 9.500 ô. Để 2 triệu
+# vẫn dư hơn 200 lần mà chặn đứng mọi ca bơm bộ nhớ.
+MAX_CELLS_TOTAL = 2_000_000
 
 # Khóa ASCII nội bộ -> nhãn đúng option của field `chain` trên MT Payment Advice.
 # Fieldname/khóa ASCII, label tiếng Việt — theo ràng buộc của dự án.
@@ -205,7 +225,9 @@ def to_number(v):
     return -x if neg else x
 
 
-_DATE_ISO_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})")
+# Năm 4 chữ số đứng TRƯỚC nên không mơ hồ ngày/tháng -> nhận cả '-', '/', '.'.
+# Không đụng tới _DATE_DMY_RE: ở đó năm đứng SAU, đổi thứ tự là sai mọi ngày <= 12.
+_DATE_ISO_RE = re.compile(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})")
 _DATE_DMY_RE = re.compile(r"^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$")
 _DATE_YMD8_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})$")
 
@@ -262,10 +284,15 @@ def norm_series_loose(s) -> str:
       * LOTTE: 35 dòng '1C26THG' + 10 dòng 'C26THG' cùng dải số hóa đơn
       * Co.op: 'K26TEK-80' thiếu hẳn chữ số đầu
     Không bỏ chữ số đầu là 10-14 hóa đơn không tìm được Sales Invoice.
-    Dùng `norm_series` của MISA Invoice Snapshot làm nền để hai bên khớp cùng
-    một chuẩn, rồi mới bỏ chữ số đầu.
+
+    DÙNG LẠI `norm_series_mt` của MT Payment Advice Line, KHÔNG cài lại logic:
+    bản cũ ở đây thiếu nhánh 'ký hiệu toàn chữ số thì trả nguyên bản', nên với ký
+    hiệu ghi nhầm thành '126' bản xem trước hiển thị 'không có ký hiệu' (rỗng)
+    trong khi tầng khớp lại thấy '126' và đi nhánh khớp theo khóa. Kế toán soi
+    preview rồi kết luận sai về việc dòng đó đã được khớp bằng cách nào. Chuẩn
+    hóa ký hiệu phải có ĐÚNG MỘT định nghĩa cho cả hai tầng.
     """
-    return re.sub(r"^\d+", "", norm_series(s))
+    return norm_series_mt(s)
 
 
 # Dấu phân cách ký hiệu|số đã gặp thật. Truyền `seps` tường minh theo từng chuỗi
@@ -365,11 +392,42 @@ def _line(**kw):
 _XLS_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"  # Composite Document File V2 (BIFF)
 
 
+def _check_sheet_count(n):
+    """Quá nhiều sheet thì DỪNG, không lặng lẽ cắt bớt.
+
+    `sheets[:MAX_SHEETS]` bỏ phần dôi ra mà không nói gì — mỗi sheet của các chuỗi
+    là MỘT TRANG bảng kê (§J.1), bỏ sót sheet là bỏ sót tiền trong khi số kiểm tra
+    ở sheet đầu vẫn khớp. Bảng kê thật nhiều sheet nhất mới có 9 sheet.
+    """
+    if n > MAX_SHEETS:
+        frappe.throw(_("File có {0} sheet (trần {1}) — không phải bảng kê thật.")
+                     .format(n, MAX_SHEETS))
+
+
 def decode_upload(content) -> bytes:
-    """base64 (có/không tiền tố data URI) -> bytes."""
-    raw = base64.b64decode((content or "").split(",")[-1])
+    """base64 (có/không tiền tố data URI) -> bytes.
+
+    VÌ SAO bọc try/except: `FileReader.readAsDataURL` bị cắt giữa chừng (mạng rớt
+    lúc tải file lớn) cho chuỗi sai padding; `b64decode` khi đó ném `binascii.Error`
+    TRẦN, chạy TRƯỚC mọi try/except của `read_sheets` nên kế toán nhận traceback 500
+    thay vì một câu tiếng Việt bảo chọn lại file.
+    """
+    try:
+        raw = base64.b64decode((content or "").split(",")[-1])
+    except (binascii.Error, ValueError):
+        frappe.throw(_("Nội dung file tải lên không hợp lệ, hãy chọn lại file"))
     if not raw:
         frappe.throw(_("File rỗng"))
+    # Trần dung lượng đặt ở ĐÂY, không ở từng whitelisted method: `preview()` và
+    # `detect()` của module này trước đó không hề gọi `_check_size`, nên bất kỳ ai
+    # có role 'Ke Toan MT' cũng nạp được file 100MB và giết worker của phòng kế
+    # toán. Đặt trong `decode_upload` thì MỌI đường vào đều đi qua đúng một chốt.
+    # Import trễ để không tạo vòng import với `ketoan.api.mt` (mt cũng nạp mt_advice).
+    from ketoan.api.mt import MAX_UPLOAD_BYTES
+
+    if len(raw) > MAX_UPLOAD_BYTES:
+        frappe.throw(_("File quá lớn ({0} MB). Tách bớt rồi tải lại.")
+                     .format(round(len(raw) / 1024 / 1024, 1)))
     return raw
 
 
@@ -381,12 +439,37 @@ def _sheets_xlsx(raw):
     công thức — nếu file do máy tạo mà chưa cache thì ô ra None và parser sẽ báo
     lệch số kiểm tra chứ không âm thầm đọc sai.
     """
+    from itertools import islice
+
     from openpyxl import load_workbook
 
     wb = load_workbook(io.BytesIO(raw), data_only=True)
+    _check_sheet_count(len(wb.worksheets))
+
+    # CỘNG DỒN Ô TOÀN WORKBOOK TRƯỚC KHI ĐỌC BẤT KỲ SHEET NÀO.
+    # Kiểm từng sheet rời không đủ: mỗi sheet lọt trần vẫn nhân lên 200 lần.
+    # `max_row`/`max_column` đọc từ khai báo dimension nên rẻ, chưa vật chất hóa ô nào.
+    total_cells = sum(min(ws.max_row or 0, MAX_ROWS_PER_SHEET + 1)
+                      * min(ws.max_column or 0, MAX_COLS_PER_SHEET + 1)
+                      for ws in wb.worksheets)
+    if total_cells > MAX_CELLS_TOTAL:
+        wb.close()
+        frappe.throw(_("File khai {0} ô trên {1} sheet — vượt trần {2}. Không phải bảng kê thật.")
+                     .format(f"{total_cells:,}", len(wb.worksheets), f"{MAX_CELLS_TOTAL:,}"))
+
     out = []
-    for ws in wb.worksheets[:MAX_SHEETS]:
-        grid = [list(r) for r in ws.iter_rows(values_only=True)][:MAX_ROWS_PER_SHEET]
+    for ws in wb.worksheets:
+        # CHẶN TRƯỚC KHI ĐỌC, không cắt sau khi đã đọc.
+        # VÌ SAO: một file .xlsx 1,4KB chỉ cần khai hai ô r="1" và r="1048576" là
+        # `ws.max_row` = 1.048.576; `[list(r) for r in ws.iter_rows()][:50000]` sẽ
+        # SINH ĐỦ hơn một triệu tuple (~26GB) rồi mới cắt còn 50.000 -> worker bị
+        # OOM-kill. Trần dung lượng 12MB không đỡ được vì file chỉ 1,4KB.
+        if (ws.max_row or 0) > MAX_ROWS_PER_SHEET or (ws.max_column or 0) > MAX_COLS_PER_SHEET:
+            frappe.throw(_("Sheet {0} quá lớn ({1} dòng x {2} cột) — không phải bảng kê thật.")
+                         .format(ws.title, ws.max_row, ws.max_column))
+        ncols = min(ws.max_column or 0, MAX_COLS_PER_SHEET)
+        grid = [list(r) for r in islice(
+            ws.iter_rows(values_only=True, max_col=ncols or None), MAX_ROWS_PER_SHEET)]
         out.append((ws.title, grid))
     return out
 
@@ -402,8 +485,24 @@ def _sheets_xls(raw):
 
     book = xlrd.open_workbook(file_contents=raw)
     dm = book.datemode
+    _check_sheet_count(book.nsheets)
+
+    # Trần ô toàn workbook, cùng lý do như nhánh .xlsx: trần theo từng sheet vẫn
+    # cho nhân lên 200 lần. Với .xls thì xlrd đã nạp sẵn nên chốt này không cứu
+    # được bộ nhớ lúc mở, nhưng vẫn chặn vòng lặp dựng lưới bên dưới — chỗ tốn kém.
+    total_cells = sum(sh.nrows * sh.ncols for sh in book.sheets())
+    if total_cells > MAX_CELLS_TOTAL:
+        frappe.throw(_("File khai {0} ô trên {1} sheet — vượt trần {2}. Không phải bảng kê thật.")
+                     .format(f"{total_cells:,}", book.nsheets, f"{MAX_CELLS_TOTAL:,}"))
+
     out = []
-    for sh in book.sheets()[:MAX_SHEETS]:
+    for sh in book.sheets():
+        # DỪNG thay vì cắt ngầm: cắt ở dòng 50.000 mà không nói gì thì phần tiền
+        # phía sau biến mất trong im lặng — đúng kiểu lỗi mà số kiểm tra ở đầu file
+        # vẫn khớp. Bảng kê thật lớn nhất mới 817 dòng.
+        if sh.nrows > MAX_ROWS_PER_SHEET or sh.ncols > MAX_COLS_PER_SHEET:
+            frappe.throw(_("Sheet {0} quá lớn ({1} dòng x {2} cột) — không phải bảng kê thật.")
+                         .format(sh.name, sh.nrows, sh.ncols))
         grid = []
         for r in range(min(sh.nrows, MAX_ROWS_PER_SHEET)):
             row = []
@@ -437,12 +536,18 @@ def read_sheets(content):
     if raw[:2] == b"PK":
         try:
             return _sheets_xlsx(raw)
+        except frappe.ValidationError:
+            # Đây là frappe.throw của chính tầng đọc (vd 'Sheet X quá lớn') — thông
+            # báo đã nói rõ hỏng ở đâu, nuốt nó thành câu chung là bịt mắt kế toán.
+            raise
         except Exception:
             frappe.log_error(frappe.get_traceback(), "mt_advice.read_sheets/xlsx")
             frappe.throw(_("Không đọc được file .xlsx. Hãy kiểm tra lại file gốc."))
     if raw[:8] == _XLS_MAGIC:
         try:
             return _sheets_xls(raw)
+        except frappe.ValidationError:
+            raise
         except Exception:
             frappe.log_error(frappe.get_traceback(), "mt_advice.read_sheets/xls")
             frappe.throw(_("Không đọc được file .xls. Hãy kiểm tra lại file gốc."))
@@ -463,6 +568,30 @@ def _row_texts(row):
 
 def _is_blank(row):
     return all(_txt(c) == "" for c in row)
+
+
+def _sheet_has_content(grid) -> bool:
+    """Sheet còn ô nào không rỗng không?
+
+    VÌ SAO cần: §J.1 — file của các chuỗi là bản in PDF convert sang Excel, mỗi
+    TRANG IN thành một sheet, nên bảng dữ liệu bị cắt rời. Bỏ qua một sheet còn
+    dữ liệu là BỎ SÓT TIỀN, mà số kiểm tra lại nằm ngay sheet đầu nên `reconciled`
+    vẫn báo khớp. Hàm này để phân biệt "sheet trống thật" (bỏ qua được) với
+    "sheet còn dữ liệu mà tầng đọc chưa hiểu" (phải dừng, không được đọc tiếp).
+    """
+    return any(not _is_blank(row) for row in grid)
+
+
+def _declared_sum(parts):
+    """Gộp số kiểm tra nhặt được từ NHIỀU sheet của cùng một file.
+
+    Trả None khi chưa gặp giá trị nào HOẶC có giá trị đọc không ra: "không đọc
+    được số kiểm tra" phải làm `reconciled=False`, TUYỆT ĐỐI không được coi là 0
+    — coi là 0 thì một file thiếu chốt kiểm tra sẽ trông y hệt một file khớp 0đ.
+    """
+    if not parts or any(p is None for p in parts):
+        return None
+    return sum(parts)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -578,13 +707,25 @@ def _wc_payment_meta(sheets):
                         if ln.startswith("Ngày thanh toán") and k + 1 < len(lines):
                             date_text = to_date(lines[k + 1])
                             break
+        # Bảng Table 9 đọc theo NHÃN, không theo chỉ số cột cứng (row[0]/[1]/[3]).
+        # VÌ SAO: §J.2 — Table 7 của chính file này đã có THÊM một cột A rỗng (merged
+        # A1:A42) làm mọi cột dịch phải 1 ô. Cùng khiếm khuyết đó rơi vào Table 9 thì
+        # `advice_no` về None; mất advice_no là mất KHÓA CHỐNG TRÙNG (`_existing_advice`
+        # phải quay sang lọc theo tên file), kế toán tải lại cùng bảng kê với tên file
+        # khác là tạo bản ghi thứ hai — 245.795.904đ bị đếm hai lần.
         for i, row in enumerate(grid):
-            if _txt(row[0] if row else "") == "Chứng từ thanh toán" and i + 1 < len(grid):
+            labels = {t: j for j, t in enumerate(_row_texts(row)) if t}
+            if "Chứng từ thanh toán" in labels and i + 1 < len(grid):
                 nxt = grid[i + 1]
-                pay_doc = _txt(nxt[0] if len(nxt) > 0 else "")
-                date_real = to_date(nxt[1] if len(nxt) > 1 else None) or date_real
+
+                def at(key, _labels=labels, _nxt=nxt):
+                    j = _labels.get(key)
+                    return _nxt[j] if j is not None and j < len(_nxt) else None
+
+                pay_doc = _txt(at("Chứng từ thanh toán"))
+                date_real = to_date(at("Ngày")) or date_real
                 # Ô này là CHUỖI '******245.795.904*' — to_number đã bóc sao + dấu chấm nghìn.
-                pay_amount = to_number(nxt[3] if len(nxt) > 3 else None)
+                pay_amount = to_number(at("Số tiền"))
     return (date_real or date_text), date_text, date_real, pay_doc, pay_amount
 
 
@@ -644,10 +785,18 @@ def parse_wincommerce(sheets):
 
             inv_raw = _txt(cell(row, "invoice_raw"))
             amount = to_number(cell(row, "amount"))
-            if not inv_raw or amount is None:
+            if not inv_raw:
                 # Ví dụ Table 7 r44: mảnh tiêu đề chân trang lặp lại, chỉ có chữ
                 # 'Chiết khấu' và 'Số tiền', không số chứng từ, không tiền. Nếu lọc
                 # 'dòng nào có chữ Chiết khấu thì là chiết khấu' sẽ đẻ ra dòng ma.
+                continue
+            if amount is None:
+                # CÓ số hóa đơn mà KHÔNG đọc được tiền là dòng tiền bị mất, không phải
+                # rác chân trang. Số kiểm tra sẽ báo lệch, nhưng nếu không nói rõ SHEET
+                # và DÒNG nào thì kế toán phải dò tay 1 dòng giữa 9 sheet.
+                warnings.append("Sheet %s dòng %d: có số hóa đơn %s nhưng KHÔNG đọc được cột "
+                                "'Số tiền' (%r) — dòng này đã bị bỏ, tổng sẽ lệch."
+                                % (name, rno, inv_raw, _txt(cell(row, "amount"))))
                 continue
 
             series, no = split_invoice_ref(inv_raw, REF_SEPS_WINCOMMERCE)
@@ -727,9 +876,16 @@ _CR_DOCTYPE_KIND = {
     "KS": "chiet_khau",   # chiết khấu (dương)
 }
 # Ký hiệu chứng từ do BÊN CHUỖI phát hành, không phải hóa đơn bán ra của mình.
-# Hai chuỗi này chỉ khác 1 ký tự và cùng tiền tố 'K26T' -> startswith('K26T') gộp nhầm.
-_CR_SERIES_RETURN = "K26TRT"    # phiếu trả hàng (Doc.Type vẫn K1 nhưng số DƯƠNG)
-_CR_SERIES_FEE = "K26TEB"       # hóa đơn phí Central Retail phát hành
+# Hai chuỗi này chỉ khác 1 ký tự và cùng tiền tố 'K..T' -> so 'K26T' là gộp nhầm.
+#
+# VÌ SAO là REGEX chứ không phải chuỗi 'K26TRT': hai số ở giữa là NĂM của ký hiệu
+# hóa đơn điện tử. Đóng cứng '26' thì sang 01/2027 ký hiệu thành 'K27TRT', dòng
+# TRẢ HÀNG rơi khỏi nhánh này và bị Doc.Type='K1' xếp thành 'thanh_toan' — sai
+# HAI chiều (mất ghi giảm + cộng khống tiền thu), trong khi CẢ BA số kiểm tra
+# (Overall Result và từng Result) vẫn khớp 0đ vì tổng NET không đổi. Không một
+# cảnh báo nào bật, đúng ngày 01/01/2027. `\d?` cho ký hiệu thiếu số mẫu đầu (§E).
+_CR_RETURN_RE = re.compile(r"^\d?K\d{2}TRT")   # phiếu trả hàng (Doc.Type vẫn K1 nhưng số DƯƠNG)
+_CR_FEE_RE = re.compile(r"^\d?K\d{2}TEB")      # hóa đơn phí Central Retail phát hành
 
 
 def parse_central_retail(sheets):
@@ -741,97 +897,127 @@ def parse_central_retail(sheets):
     chưa tới.
     """
     warnings = []
-    name, grid = sheets[0]
-    if len(sheets) > 1:
-        warnings.append("File có %d sheet; chỉ đọc sheet đầu '%s' theo mẫu đã xác minh."
-                        % (len(sheets), name))
-
-    hdr_idx, hdr = None, []
-    for i, row in enumerate(grid[:20]):
-        cells = _row_texts(row)
-        if "Reference" in cells and "Doc.Type" in cells and "Amount" in cells:
-            hdr_idx, hdr = i, cells
-            break
-    if hdr_idx is None:
-        frappe.throw(_("Không tìm thấy dòng tiêu đề Central Retail (cần Reference/Doc.Type/Amount)"))
-
-    col = {n: (hdr.index(n) if n in hdr else None) for n in (
-        "Account", "Clearing Doc.", "Terms of Pmnt", "Assignment", "Reference",
-        "Doc.Type", "Doc. Date", "Entry Date", "Pmnt Date", "Text", "Clearing Date", "Amount")}
-    for must in ("Reference", "Doc.Type", "Amount", "Clearing Date"):
-        if col[must] is None:
-            frappe.throw(_("File Central Retail thiếu cột bắt buộc: {0}").format(must))
-
-    def cell(row, nm):
-        i = col[nm]
-        return None if i is None else (row[i] if i < len(row) else None)
-
     rows = []
-    declared_overall = None
-    declared_by_doc = {}
+    # Số kiểm tra gom theo TỪNG SHEET rồi mới cộng: file có thể bị cắt thành nhiều
+    # trang in, mỗi trang một dòng tổng. `_declared_sum` trả None nếu có mảnh nào
+    # đọc không ra, để check báo lệch thay vì âm thầm coi mảnh đó bằng 0.
+    overall_parts = []
+    by_doc_parts = {}
+    n_table = 0
+    skipped_sheets = []
 
-    for n, row in enumerate(grid[hdr_idx + 1:], start=hdr_idx + 2):
-        if _is_blank(row):
+    # §J.1 — CHỐT CHẶN: quét MỌI sheet, dò header TRÊN TỪNG SHEET.
+    # VÌ SAO không đọc `sheets[0]`: file các chuỗi gửi là bản in PDF convert sang
+    # Excel, mỗi TRANG IN thành một sheet nên bảng bị cắt rời (WinCommerce 9 sheet,
+    # Co.op 9 sheet). Bỏ sót sheet là bỏ sót TIỀN, mà dòng tổng lại nằm ngay sheet
+    # đầu nên `reconciled` vẫn báo True — sai tiền mà màn hình báo khớp 100%.
+    # Dò header lại trên từng sheet (không tái dùng map cột của sheet trước) vì
+    # các trang có thể LỆCH CỘT — §J.2, Table 7 của WinCommerce thừa một cột A.
+    for name, grid in sheets:
+        hdr_idx, hdr = None, []
+        for i, row in enumerate(grid[:20]):
+            cells = _row_texts(row)
+            if "Reference" in cells and "Doc.Type" in cells and "Amount" in cells:
+                hdr_idx, hdr = i, cells
+                break
+        if hdr_idx is None:
+            # Sheet không có bảng: trống thật thì bỏ qua, còn dữ liệu thì KHÔNG
+            # được đọc tiếp (xử lý sau vòng lặp) — đọc thiếu là mất tiền.
+            if _sheet_has_content(grid):
+                skipped_sheets.append(name)
             continue
-        account = _txt(cell(row, "Account"))
-        terms = _txt(cell(row, "Terms of Pmnt"))
-        doctype = _txt(cell(row, "Doc.Type"))
-        amount = to_number(cell(row, "Amount"))
-        ref = _txt(cell(row, "Reference"))
-        assignment = _txt(cell(row, "Assignment"))
-        text = re.sub(r"\s+", " ", _txt(cell(row, "Text")))  # Text phí có HAI dấu cách liền
+        n_table += 1
 
-        # --- DÒNG TỔNG: tách ra làm số kiểm tra, KHÔNG nạp ---
-        if account == "Overall Result":
-            declared_overall = amount
-            continue
-        if terms == "Result":
-            # MỖI Clearing Doc. có MỘT dòng Result — file thật có HAI, không phải một.
-            # Bỏ theo vị trí dòng cứng (r3) sẽ cộng nhầm -94.485.536 vào chi tiết.
-            declared_by_doc[_txt(cell(row, "Clearing Doc."))] = amount
-            continue
+        col = {n: (hdr.index(n) if n in hdr else None) for n in (
+            "Account", "Clearing Doc.", "Terms of Pmnt", "Assignment", "Reference",
+            "Doc.Type", "Doc. Date", "Entry Date", "Pmnt Date", "Text", "Clearing Date", "Amount")}
+        for must in ("Reference", "Doc.Type", "Amount", "Clearing Date"):
+            if col[must] is None:
+                frappe.throw(_("Sheet {0}: file Central Retail thiếu cột bắt buộc: {1}")
+                             .format(name, must))
 
-        series, no = split_invoice_ref(ref, REF_SEPS_CENTRAL_RETAIL)
-        kind = _CR_DOCTYPE_KIND.get(doctype)
-        needs_review = False
+        def cell(row, nm, _col=col):
+            i = _col[nm]
+            return None if i is None else (row[i] if i < len(row) else None)
 
-        if kind is None:
-            # Doc.Type lạ: KHÔNG đoán và cũng KHÔNG nuốt. Đưa vào 'Khác' để người
-            # thấy tiền, kèm cảnh báo — chôn nó đi là lệch tổng mà không ai biết vì sao.
-            kind, sub, needs_review = "khac", "doctype_la:%s" % (doctype or "rong"), True
-            warnings.append("Dòng %d: Doc.Type lạ %r, đã xếp vào 'Khác' để người xử lý."
-                            % (n, doctype))
-        elif kind == "thanh_toan" and series.upper().startswith(_CR_SERIES_RETURN):
-            # Trả hàng: Doc.Type vẫn K1 nhưng là GHI GIẢM và số DƯƠNG. Phân loại chỉ
-            # bằng Doc.Type sẽ cộng 5.119.605 vào tiền hàng (sai 2 lần con số này).
-            kind, sub = "ghi_giam", "tra_hang"
-        elif kind == "phi":
-            sub = "phi_dich_vu" if series.upper().startswith(_CR_SERIES_FEE) else "phi"
-        elif kind == "chiet_khau":
-            # CẢNH BÁO: dòng KS có thể mang ký hiệu hóa đơn bán ra của MÌNH
-            # ('1C26THG|5656') mà KHÔNG phải thanh toán hóa đơn đó. Chỉ dòng
-            # row_kind='thanh_toan' mới được phép khớp sang Sales Invoice.
-            sub = "chiet_khau"
-        else:
-            sub = "hang_hoa"
+        for n, row in enumerate(grid[hdr_idx + 1:], start=hdr_idx + 2):
+            if _is_blank(row):
+                continue
+            account = _txt(cell(row, "Account"))
+            terms = _txt(cell(row, "Terms of Pmnt"))
+            doctype = _txt(cell(row, "Doc.Type"))
+            amount = to_number(cell(row, "Amount"))
+            ref = _txt(cell(row, "Reference"))
+            assignment = _txt(cell(row, "Assignment"))
+            text = re.sub(r"\s+", " ", _txt(cell(row, "Text")))  # Text phí có HAI dấu cách liền
 
-        rows.append(_line(
-            row_kind=kind, row_subtype=sub,
-            inv_series=series, inv_no=no,
-            inv_date=to_date(cell(row, "Doc. Date")),
-            # File KHÔNG có mã siêu thị. Assignment chỉ là TÊN siêu thị ở dòng K1;
-            # ở dòng D1/KS nó là mã tài khoản ('3003172.9999.') -> không phải cửa hàng.
-            store_code=None,
-            store_name=assignment if kind in ("thanh_toan", "ghi_giam") else None,
-            doc_no=_txt(cell(row, "Clearing Doc.")),
-            amount_before_vat=None, vat_amount=None,   # file KHÔNG tách VAT
-            signed_amount=amount,
-            # 'Clearing Date' mới là ngày chuỗi thực trả. KHÔNG dùng 'Pmnt Date'.
-            payment_date=to_date(cell(row, "Clearing Date")),
-            description=text or None,
-            needs_review=needs_review or not series,
-            source_sheet=name, source_row=n,
-        ))
+            # --- DÒNG TỔNG: tách ra làm số kiểm tra, KHÔNG nạp ---
+            if account == "Overall Result":
+                overall_parts.append(amount)
+                continue
+            if terms == "Result":
+                # MỖI Clearing Doc. có MỘT dòng Result — file thật có HAI, không phải một.
+                # Bỏ theo vị trí dòng cứng (r3) sẽ cộng nhầm -94.485.536 vào chi tiết.
+                by_doc_parts.setdefault(_txt(cell(row, "Clearing Doc.")), []).append(amount)
+                continue
+
+            series, no = split_invoice_ref(ref, REF_SEPS_CENTRAL_RETAIL)
+            kind = _CR_DOCTYPE_KIND.get(doctype)
+            needs_review = False
+
+            if kind is None:
+                # Doc.Type lạ: KHÔNG đoán và cũng KHÔNG nuốt. Đưa vào 'Khác' để người
+                # thấy tiền, kèm cảnh báo — chôn nó đi là lệch tổng mà không ai biết vì sao.
+                kind, sub, needs_review = "khac", "doctype_la:%s" % (doctype or "rong"), True
+                warnings.append("Sheet %s dòng %d: Doc.Type lạ %r, đã xếp vào 'Khác' để người xử lý."
+                                % (name, n, doctype))
+            elif kind == "thanh_toan" and _CR_RETURN_RE.match(series.upper()):
+                # Trả hàng: Doc.Type vẫn K1 nhưng là GHI GIẢM và số DƯƠNG. Phân loại chỉ
+                # bằng Doc.Type sẽ cộng 5.119.605 vào tiền hàng (sai 2 lần con số này).
+                kind, sub = "ghi_giam", "tra_hang"
+            elif kind == "phi":
+                sub = "phi_dich_vu" if _CR_FEE_RE.match(series.upper()) else "phi"
+            elif kind == "chiet_khau":
+                # CẢNH BÁO: dòng KS có thể mang ký hiệu hóa đơn bán ra của MÌNH
+                # ('1C26THG|5656') mà KHÔNG phải thanh toán hóa đơn đó. Chỉ dòng
+                # row_kind='thanh_toan' mới được phép khớp sang Sales Invoice.
+                sub = "chiet_khau"
+            else:
+                sub = "hang_hoa"
+
+            rows.append(_line(
+                row_kind=kind, row_subtype=sub,
+                inv_series=series, inv_no=no,
+                inv_date=to_date(cell(row, "Doc. Date")),
+                # File KHÔNG có mã siêu thị. Assignment chỉ là TÊN siêu thị ở dòng K1;
+                # ở dòng D1/KS nó là mã tài khoản ('3003172.9999.') -> không phải cửa hàng.
+                store_code=None,
+                store_name=assignment if kind in ("thanh_toan", "ghi_giam") else None,
+                doc_no=_txt(cell(row, "Clearing Doc.")),
+                amount_before_vat=None, vat_amount=None,   # file KHÔNG tách VAT
+                signed_amount=amount,
+                # 'Clearing Date' mới là ngày chuỗi thực trả. KHÔNG dùng 'Pmnt Date'.
+                payment_date=to_date(cell(row, "Clearing Date")),
+                description=text or None,
+                needs_review=needs_review or not series,
+                source_sheet=name, source_row=n,
+            ))
+
+    if not n_table:
+        frappe.throw(_("Không tìm thấy dòng tiêu đề Central Retail (cần Reference/Doc.Type/Amount)"))
+    if skipped_sheets:
+        # THROW chứ không warning: khuôn đã xác minh của Central Retail là MỘT bảng.
+        # Sheet lạ còn dữ liệu nghĩa là tầng đọc chưa hiểu hết file — ghi nhận tiếp
+        # là ghi nhận thiếu tiền trong khi mọi số kiểm tra vẫn khớp.
+        frappe.throw(_("File Central Retail còn sheet có dữ liệu mà không nhận ra bảng: {0}. "
+                       "Tầng đọc chưa xác minh khuôn này — KHÔNG ghi nhận để tránh bỏ sót tiền.")
+                     .format(", ".join(skipped_sheets)))
+    if n_table > 1:
+        warnings.append("File Central Retail có %d sheet chứa bảng dữ liệu; đã đọc GỘP cả %d sheet. "
+                        "Khuôn đã xác minh là 1 sheet — hãy soi kỹ số kiểm tra." % (n_table, n_table))
+
+    declared_overall = _declared_sum(overall_parts)
+    declared_by_doc = {k: _declared_sum(v) for k, v in by_doc_parts.items()}
 
     computed_all = _sum(rows, "signed_amount")
     checks = [_check("Overall Result", declared_overall, computed_all)]
@@ -908,32 +1094,12 @@ def parse_lotte(sheets):
     số âm (-5.529.739). Điều kiện đúng là: Tax No VÀ Invoice No đều khác rỗng.
     """
     warnings = []
-    name, grid = sheets[0]
-
-    hdr_idx = None
-    for r, row in enumerate(grid[:20]):
-        cells = _row_texts(row)
-        if "Tax No" in cells and "Invoice No" in cells and "Total Amt" in cells:
-            hdr_idx = r
-            break
-    if hdr_idx is None:
-        frappe.throw(_("Không tìm thấy dòng tiêu đề LOTTE (cần Tax No/Invoice No/Total Amt)"))
-
-    idx = {}
-    for c, label in enumerate(_row_texts(grid[hdr_idx])):
-        if label and label not in idx:
-            idx[label] = c
-    missing = [c for c in _LT_REQUIRED if c not in idx]
-    if missing:
-        frappe.throw(_("File LOTTE thiếu cột bắt buộc: {0}").format(", ".join(missing)))
-
-    def cell(row, label):
-        i = idx.get(label)
-        return None if i is None else (row[i] if i < len(row) else None)
-
     rows = []
-    declared_sum = {}
+    sum_parts = {"pay": [], "vat": [], "total": []}
     n_subsum = 0
+    n_table = 0
+    skipped_sheets = []
+    n_bad_date = 0
     # Cộng Pay/Vat theo ĐÚNG DẤU GỐC đọc từ file, ngay trong vòng lặp.
     # VÌ SAO không tái tạo dấu từ cột Total ở cuối: `_line()` lưu Pay/Vat dưới dạng
     # TRỊ TUYỆT ĐỐI, nên muốn cộng lại phải đoán dấu theo dấu của Total. Ở file này
@@ -942,66 +1108,151 @@ def parse_lotte(sheets):
     # báo lệch trong khi dữ liệu đọc hoàn toàn đúng — báo động giả cho kế toán.
     tot_pay = tot_vat = 0.0
 
-    for r in range(hdr_idx + 1, len(grid)):
-        row = grid[r]
-        if _is_blank(row):
+    # §J.1 — quét MỌI sheet. Tên sheet của file thật là 'Payment deduct detail(1)':
+    # hậu tố '(1)' cho thấy bản xuất có PHÂN TRANG, kỳ thanh toán lớn sẽ ra thêm
+    # '(2)', '(3)'. Đọc mỗi sheets[0] là bỏ nửa số tiền trong khi dòng SUM nằm ở
+    # sheet đầu vẫn khớp -> `reconciled=True` trên một bảng kê thiếu tiền.
+    for name, grid in sheets:
+        hdr_idx = None
+        for r, row in enumerate(grid[:20]):
+            cells = _row_texts(row)
+            if "Tax No" in cells and "Invoice No" in cells and "Total Amt" in cells:
+                hdr_idx = r
+                break
+        if hdr_idx is None:
+            if _sheet_has_content(grid):
+                skipped_sheets.append(name)
             continue
-        rno = r + 1
-        cause = _txt(cell(row, "Deduct Cause"))
-        dname = _txt(cell(row, "Deduct Name"))
-        series = _txt(cell(row, "Tax No"))
-        inv_no = _txt(cell(row, "Invoice No"))
-        pay = to_number(cell(row, "Pay Amt"))
-        vat = to_number(cell(row, "Vat Amt"))
-        total = to_number(cell(row, "Total Amt"))
+        n_table += 1
 
-        if cause in _LT_TOTAL_CAUSES:
-            if cause == "SUM":
-                declared_sum = {"pay": pay, "vat": vat, "total": total}
+        idx = {}
+        for c, label in enumerate(_row_texts(grid[hdr_idx])):
+            if label and label not in idx:
+                idx[label] = c
+        missing = [c for c in _LT_REQUIRED if c not in idx]
+        if missing:
+            frappe.throw(_("Sheet {0}: file LOTTE thiếu cột bắt buộc: {1}")
+                         .format(name, ", ".join(missing)))
+
+        def cell(row, label, _idx=idx):
+            i = _idx.get(label)
+            return None if i is None else (row[i] if i < len(row) else None)
+
+        for r in range(hdr_idx + 1, len(grid)):
+            row = grid[r]
+            if _is_blank(row):
+                continue
+            rno = r + 1
+            cause = _txt(cell(row, "Deduct Cause"))
+            dname = _txt(cell(row, "Deduct Name"))
+            series = _txt(cell(row, "Tax No"))
+            inv_no = _txt(cell(row, "Invoice No"))
+            pay = to_number(cell(row, "Pay Amt"))
+            vat = to_number(cell(row, "Vat Amt"))
+            total = to_number(cell(row, "Total Amt"))
+
+            if cause in _LT_TOTAL_CAUSES:
+                if cause == "SUM":
+                    sum_parts["pay"].append(pay)
+                    sum_parts["vat"].append(vat)
+                    sum_parts["total"].append(total)
+                else:
+                    n_subsum += 1
+                continue
+
+            # --- phân loại: TUYỆT ĐỐI không dùng dấu của số tiền ---
+            needs_review = False
+            doc_no = None
+            if dname in _LT_DEDUCT_KIND:
+                kind, label = _LT_DEDUCT_KIND[dname]
+            elif dname:
+                # Deduct Name có giá trị nhưng không thuộc 3 danh mục -> đó là SỐ CHỨNG TỪ
+                # ghi giảm của LOTTE (quan sát thật: Deduct Cause='Hang tra lai').
+                #
+                # VÌ SAO nhánh này phải đứng TRƯỚC nhánh 'có Tax No + Invoice No':
+                # trả hàng luôn quy về một hóa đơn cụ thể, nên LOTTE hoàn toàn có thể
+                # điền Tax No/Invoice No cho dòng trả hàng. Xét hóa đơn trước thì dòng
+                # đó thành 'thanh_toan' mang số ÂM, rồi `_paid_subquery` lấy SUM(ABS())
+                # lật thành TIỀN ĐÃ THU — một khoản trả hàng 809.335đ biến thành
+                # 809.335đ đã thu, sai 1.618.670đ trên đúng hóa đơn đó, và cả 3 số
+                # kiểm tra SUM vẫn khớp 0đ nên không có cảnh báo nào.
+                kind, label, doc_no = "ghi_giam", (cause or "Ghi giảm theo chứng từ"), dname
+            elif inv_no and series:
+                # THAM CHIẾU HÓA ĐƠN LÀ DẤU HIỆU MẠNH NHẤT của dòng thanh toán, nên
+                # nhánh này phải đứng TRƯỚC nhánh 'chỉ có Deduct Cause'.
+                #
+                # Đặt sau là một lỗi câm: chỉ cần LOTTE điền thêm Deduct Cause cho
+                # dòng hàng hóa (ví dụ 'THANH TOAN HD 202607') là cả 45 dòng thật
+                # rơi hết sang ghi_giam — total_payment về 0, 45 hóa đơn đã thu tiền
+                # vẫn nằm rổ "chưa thanh toán", công nợ LOTTE bị thổi lên
+                # 276.933.600đ. Mà vì tiền chỉ đổi NHÓM chứ không đổi TỔNG nên cả ba
+                # số kiểm tra SUM vẫn khớp 0đ và `reconciled` vẫn báo True.
+                kind, label = "thanh_toan", "Hóa đơn hàng hóa"
+                if cause:
+                    # Tổ hợp này CHƯA từng gặp trong dữ liệu thật (45/45 dòng hàng
+                    # hóa đều trống Deduct Cause). Không tự quyết hộ: vẫn tính là
+                    # thanh toán nhưng bắt người xem lại.
+                    needs_review = True
+                    label = cause
+                    warnings.append(
+                        "Sheet %s dòng %d: dòng có hóa đơn %s|%s NHƯNG kèm Deduct Cause %r "
+                        "— chưa gặp bao giờ, đã xếp là thanh toán, cần người xác nhận"
+                        % (name, rno, series, inv_no, cause))
+            elif cause:
+                # Còn Deduct Cause mà KHÔNG có hóa đơn thì đây là khoản cấn trừ có
+                # lý do — không thể là dòng thanh toán vì không biết trả cho hóa đơn nào.
+                kind, label, needs_review = "ghi_giam", cause, True
             else:
-                n_subsum += 1
-            continue
+                # Không hóa đơn, không Deduct Name, không Deduct Cause, không phải dòng
+                # tổng. Không có hóa đơn ⇒ không thể tự khớp, bắt buộc con người quyết.
+                kind, label, needs_review = "ghi_giam", "Không rõ", True
 
-        # --- phân loại: TUYỆT ĐỐI không dùng dấu của số tiền ---
-        needs_review = False
-        doc_no = None
-        if dname in _LT_DEDUCT_KIND:
-            kind, label = _LT_DEDUCT_KIND[dname]
-        elif inv_no and series:
-            kind, label = "thanh_toan", "Hóa đơn hàng hóa"
-        elif dname:
-            # Deduct Name có giá trị nhưng không thuộc 3 danh mục -> đó là SỐ CHỨNG TỪ
-            # ghi giảm của LOTTE (quan sát thật: Deduct Cause='Hang tra lai').
-            kind, label, doc_no = "ghi_giam", (cause or "Ghi giảm theo chứng từ"), dname
-        else:
-            # Không hóa đơn, không Deduct Name, không phải dòng tổng: khoản cấn trừ
-            # tự do ('NET OFF REGULAR ...'). Không có hóa đơn ⇒ không thể tự khớp,
-            # bắt buộc con người quyết định.
-            kind, label, needs_review = "ghi_giam", (cause or "Không rõ"), True
+            # Bất biến nội tại: Pay + Vat phải bằng Total. Lệch = đọc sai cột.
+            # Không raise cả file vì một dòng lạ; nhưng phải nêu ra và đánh dấu dòng đó,
+            # và dù sao dòng SUM ở dưới cũng sẽ tố cáo nếu cả cột bị đọc lệch.
+            if pay is not None and vat is not None and total is not None and abs(pay + vat - total) > MONEY_EPS:
+                needs_review = True
+                warnings.append("Sheet %s dòng %d: Pay+Vat != Total (%s + %s != %s)"
+                                % (name, rno, pay, vat, total))
 
-        # Bất biến nội tại: Pay + Vat phải bằng Total. Lệch = đọc sai cột.
-        # Không raise cả file vì một dòng lạ; nhưng phải nêu ra và đánh dấu dòng đó,
-        # và dù sao dòng SUM ở dưới cũng sẽ tố cáo nếu cả cột bị đọc lệch.
-        if pay is not None and vat is not None and total is not None and abs(pay + vat - total) > MONEY_EPS:
-            needs_review = True
-            warnings.append("Dòng %d: Pay+Vat != Total (%s + %s != %s)" % (rno, pay, vat, total))
+            # Payment Date đọc không ra = SAI KỲ CÔNG NỢ. Phải đếm và báo, vì dòng
+            # payment_date=NULL sẽ vô hình trên mọi màn hình (mọi truy vấn đều lọc
+            # BETWEEN, mà NULL không bao giờ thỏa BETWEEN).
+            pay_date_raw = cell(row, "Payment Date")
+            pay_date = to_date(pay_date_raw)
+            if pay_date is None:
+                n_bad_date += 1
+                if n_bad_date <= 5:
+                    warnings.append("Sheet %s dòng %d: không đọc được Payment Date %r."
+                                    % (name, rno, _txt(pay_date_raw)))
 
-        tot_pay += pay or 0.0
-        tot_vat += vat or 0.0
-        rows.append(_line(
-            row_kind=kind, row_subtype=label,
-            inv_series=series, inv_no=inv_no,
-            inv_date=to_date(cell(row, "Invoice Date")),
-            # Store CD là TEXT '01019' — ép số là mất số 0 đầu và hỏng khớp siêu thị.
-            store_code=_txt(cell(row, "Store CD")),
-            store_name=_txt(cell(row, "Store Name")),
-            doc_no=doc_no,
-            amount_before_vat=pay, vat_amount=vat, signed_amount=total,
-            payment_date=to_date(cell(row, "Payment Date")),
-            description=(cause or label) if kind != "thanh_toan" else label,
-            needs_review=needs_review,
-            source_sheet=name, source_row=rno,
-        ))
+            tot_pay += pay or 0.0
+            tot_vat += vat or 0.0
+            rows.append(_line(
+                row_kind=kind, row_subtype=label,
+                inv_series=series, inv_no=inv_no,
+                inv_date=to_date(cell(row, "Invoice Date")),
+                # Store CD là TEXT '01019' — ép số là mất số 0 đầu và hỏng khớp siêu thị.
+                store_code=_txt(cell(row, "Store CD")),
+                store_name=_txt(cell(row, "Store Name")),
+                doc_no=doc_no,
+                amount_before_vat=pay, vat_amount=vat, signed_amount=total,
+                payment_date=pay_date,
+                description=(cause or label) if kind != "thanh_toan" else label,
+                needs_review=needs_review,
+                source_sheet=name, source_row=rno,
+            ))
+
+    if not n_table:
+        frappe.throw(_("Không tìm thấy dòng tiêu đề LOTTE (cần Tax No/Invoice No/Total Amt)"))
+    if skipped_sheets:
+        frappe.throw(_("File LOTTE còn sheet có dữ liệu mà không nhận ra bảng: {0}. "
+                       "Tầng đọc chưa xác minh khuôn này — KHÔNG ghi nhận để tránh bỏ sót tiền.")
+                     .format(", ".join(skipped_sheets)))
+    if n_bad_date > 5:
+        warnings.append("... và %d dòng nữa không đọc được Payment Date." % (n_bad_date - 5))
+
+    declared_sum = {k: _declared_sum(v) for k, v in sum_parts.items()}
 
     # Cộng theo DẤU GỐC của file để so với dòng SUM (LOTTE in cả 3 cột ở dòng SUM).
     tot_total = _sum(rows, "signed_amount")
@@ -1014,6 +1265,15 @@ def parse_lotte(sheets):
     ]
 
     dates = sorted({r["payment_date"] for r in rows if r["payment_date"]})
+    if rows and not dates:
+        # BÁO ĐỘNG, không được lặng lẽ trả reconciled=True. Không có ngày nào thì
+        # `groups` rỗng -> `mt._split_advices` gộp CẢ FILE (2 kỳ) vào MỘT bản ghi
+        # payment_date=NULL; bản ghi đó vô hình trên mọi màn hình MT (mọi truy vấn
+        # lọc `payment_date BETWEEN`, NULL không bao giờ thỏa) nên kế toán tưởng
+        # chưa nạp và nạp lại -> nhân đôi tiền. Dừng ở đây rẻ hơn nhiều.
+        frappe.throw(_("Không đọc được Payment Date nào của LOTTE ({0} dòng) — KHÔNG ghi nhận. "
+                       "Kiểm tra lại định dạng cột 'Payment Date' trong file gốc.")
+                     .format(len(rows)))
     if len(dates) > 1:
         # §H: cùng file có 20260710 và 20260730 — không được coi là MỘT lần thanh toán.
         warnings.append("File có %d ngày thanh toán (%s) — phải tách thành nhiều lần thanh toán."
@@ -1072,85 +1332,116 @@ def parse_emart(sheets):
     có Document Type thuộc danh sách đã biết.
     """
     warnings = []
-    name, grid = sheets[0]
-
-    hrow, cols = None, {}
-    for r, row in enumerate(grid):
-        c = {t: j for j, t in enumerate(_row_texts(row)) if t}
-        if _EM_H_DOC_NO in c and _EM_H_DOC_TYPE in c and _EM_H_AMOUNT in c:
-            hrow, cols = r, c
-            break
-    if hrow is None:
-        frappe.throw(_("Không tìm thấy dòng tiêu đề Emart (cần Document Number/Type/Amount)"))
-
-    # --- ngày thanh toán nằm ở KHỐI HEADER, không nằm trong bảng ---
-    # BẪY: cột 'Net due date' của các dòng RE tình cờ trùng ngày thanh toán
-    # (15-09-2025) nhưng các dòng I0/I1 lại là 31-08-2025. Lấy 'Net due date' làm
-    # ngày thanh toán là gán sai kỳ cho toàn bộ chiết khấu và phí.
+    rows = []
+    declared_parts = {}
     pay_date, vendor_code, vendor_name = None, None, None
-    for row in grid[:hrow]:
-        texts = _row_texts(row)
-        for j, t in enumerate(texts):
-            up = t.upper()
-            nxt = next((x for x in texts[j + 1:] if x), None)
-            if up.startswith("PAYMENT DATE") and pay_date is None:
-                pay_date = to_date(nxt)
-            elif up.startswith("VENDOR CODE") and vendor_code is None:
-                vendor_code = nxt
-            elif up.startswith("VENDOR NAME") and vendor_name is None:
-                vendor_name = nxt
+    n_table = 0
+    skipped_sheets = []
+
+    # §J.1 — quét MỌI sheet. Emart in 'Page: 1/1' ở khối header: kỳ nhiều dòng sẽ
+    # thành '1/2', '2/2' và bản xuất tách thành nhiều sheet. Đọc mỗi sheets[0] là
+    # bỏ nửa số tiền, mà 4 dòng cộng của Emart nằm ở sheet đầu nên vẫn khớp 0đ.
+    for name, grid in sheets:
+        hrow, cols = None, {}
+        for r, row in enumerate(grid):
+            c = {t: j for j, t in enumerate(_row_texts(row)) if t}
+            if _EM_H_DOC_NO in c and _EM_H_DOC_TYPE in c and _EM_H_AMOUNT in c:
+                hrow, cols = r, c
+                break
+        if hrow is None:
+            if _sheet_has_content(grid):
+                skipped_sheets.append(name)
+            continue
+        n_table += 1
+
+        # --- ngày thanh toán nằm ở KHỐI HEADER, không nằm trong bảng ---
+        # BẪY: cột 'Net due date' của các dòng RE tình cờ trùng ngày thanh toán
+        # (15-09-2025) nhưng các dòng I0/I1 lại là 31-08-2025. Lấy 'Net due date' làm
+        # ngày thanh toán là gán sai kỳ cho toàn bộ chiết khấu và phí.
+        for row in grid[:hrow]:
+            texts = _row_texts(row)
+            for j, t in enumerate(texts):
+                up = t.upper()
+                nxt = next((x for x in texts[j + 1:] if x), None)
+                if up.startswith("PAYMENT DATE") and pay_date is None:
+                    pay_date = to_date(nxt)
+                elif up.startswith("VENDOR CODE") and vendor_code is None:
+                    vendor_code = nxt
+                elif up.startswith("VENDOR NAME") and vendor_name is None:
+                    vendor_name = nxt
+
+        def cell(row, key, _cols=cols):
+            j = _cols.get(key)
+            return row[j] if j is not None and j < len(row) else None
+
+        for r in range(hrow + 1, len(grid)):
+            row = grid[r]
+            doc_type = _txt(cell(row, _EM_H_DOC_TYPE)).upper()
+            amount = to_number(cell(row, _EM_H_AMOUNT))
+            label = _txt(cell(row, _EM_H_DOC_NO))
+
+            if not doc_type:
+                # Dòng cộng nhóm ('chiết khấu', 'phí hỗ trợ', 'phải trả tiền mua hàng')
+                # và dòng 'TOTAL'. File có BỐN dòng tổng chứ không phải hai — bỏ sót
+                # dòng 'phải trả tiền mua hàng' là cộng dư -191.554.740 (nhân đôi hàng hóa).
+                if label and amount is not None:
+                    declared_parts.setdefault(label, []).append(amount)
+                continue
+
+            kind = _EM_DOCTYPE_KIND.get(doc_type)
+            if kind is None:
+                kind = "khac"
+                warnings.append("Sheet %s dòng %d: Document Type lạ %r, đã xếp vào 'Khác' để người xử lý."
+                                % (name, r + 1, doc_type))
+            if amount is None:
+                warnings.append("Sheet %s dòng %d: có Document Type %r nhưng không đọc được số tiền."
+                                % (name, r + 1, doc_type))
+                continue
+
+            inv_no = _txt(cell(row, _EM_H_INV_NO))
+            rows.append(_line(
+                row_kind=kind, row_subtype=doc_type,
+                # Emart KHÔNG CẤP KÝ HIỆU hóa đơn -> để rỗng, và LUÔN cần review khi
+                # khớp (khớp bằng số + ngày + tiền theo §F). Đoán ký hiệu = gán nhầm HĐ.
+                inv_series="", inv_no=inv_no,
+                # 'Document Date' là ngày hóa đơn NCC; 'Posting Date' là ngày Emart ghi
+                # sổ — hai ngày khác nhau ở hầu hết dòng RE.
+                inv_date=to_date(cell(row, _EM_H_DOC_DATE)),
+                # VENDOR CODE là mã NHÀ CUNG CẤP trong hệ thống Emart, KHÔNG phải mã
+                # cửa hàng. Nhồi vào store_code là sai nghĩa. File không tách theo siêu thị.
+                store_code=None, store_name=None,
+                doc_no=_txt(cell(row, _EM_H_DOC_NO)),
+                amount_before_vat=None, vat_amount=None,   # file chỉ có MỘT cột tiền
+                signed_amount=amount,
+                payment_date=pay_date,
+                description=_txt(cell(row, _EM_H_TEXT)) or None,
+                needs_review=True,
+                source_sheet=name, source_row=r + 1,
+            ))
+
+    if not n_table:
+        frappe.throw(_("Không tìm thấy dòng tiêu đề Emart (cần Document Number/Type/Amount)"))
+    if skipped_sheets:
+        frappe.throw(_("File Emart còn sheet có dữ liệu mà không nhận ra bảng: {0}. "
+                       "Tầng đọc chưa xác minh khuôn này — KHÔNG ghi nhận để tránh bỏ sót tiền.")
+                     .format(", ".join(skipped_sheets)))
     if not pay_date:
-        warnings.append("Không đọc được 'PAYMENT DATE' ở khối header Emart — phải nhập tay.")
+        # THROW chứ không warning: `payment_date=None` chảy thẳng vào MT Payment Advice
+        # (field không reqd), và MỌI màn hình MT lọc `payment_date BETWEEN` — NULL không
+        # bao giờ thỏa BETWEEN, nên cả phiếu lẫn 48 dòng tiền BIẾN MẤT khỏi giao diện.
+        # Kế toán tưởng chưa nạp, nạp lại -> nhân đôi tiền. Không có ngày thì không ghi.
+        frappe.throw(_("Không đọc được 'PAYMENT DATE' ở khối header Emart — KHÔNG ghi nhận. "
+                       "Kiểm tra lại khối tiêu đề của file gốc."))
+    # Gán lại cho MỌI dòng: nếu file bị cắt thành nhiều sheet, khối tiêu đề chỉ in
+    # ở sheet có PAYMENT DATE, các sheet còn lại sẽ nhận None ngay lúc dựng dòng.
+    # Emart chỉ có MỘT ngày thanh toán cho cả bảng kê nên gán đồng loạt là đúng;
+    # để sót dòng payment_date=None là để dòng đó vô hình trên mọi màn hình MT.
+    for r in rows:
+        r["payment_date"] = pay_date
 
-    def cell(row, key):
-        j = cols.get(key)
-        return row[j] if j is not None and j < len(row) else None
-
-    rows, declared_groups = [], {}
-    for r in range(hrow + 1, len(grid)):
-        row = grid[r]
-        doc_type = _txt(cell(row, _EM_H_DOC_TYPE)).upper()
-        amount = to_number(cell(row, _EM_H_AMOUNT))
-        label = _txt(cell(row, _EM_H_DOC_NO))
-
-        if not doc_type:
-            # Dòng cộng nhóm ('chiết khấu', 'phí hỗ trợ', 'phải trả tiền mua hàng')
-            # và dòng 'TOTAL'. File có BỐN dòng tổng chứ không phải hai — bỏ sót
-            # dòng 'phải trả tiền mua hàng' là cộng dư -191.554.740 (nhân đôi hàng hóa).
-            if label and amount is not None:
-                declared_groups[label] = amount
-            continue
-
-        kind = _EM_DOCTYPE_KIND.get(doc_type)
-        if kind is None:
-            kind = "khac"
-            warnings.append("Dòng %d: Document Type lạ %r, đã xếp vào 'Khác' để người xử lý."
-                            % (r + 1, doc_type))
-        if amount is None:
-            warnings.append("Dòng %d: có Document Type %r nhưng không đọc được số tiền."
-                            % (r + 1, doc_type))
-            continue
-
-        inv_no = _txt(cell(row, _EM_H_INV_NO))
-        rows.append(_line(
-            row_kind=kind, row_subtype=doc_type,
-            # Emart KHÔNG CẤP KÝ HIỆU hóa đơn -> để rỗng, và LUÔN cần review khi
-            # khớp (khớp bằng số + ngày + tiền theo §F). Đoán ký hiệu = gán nhầm HĐ.
-            inv_series="", inv_no=inv_no,
-            # 'Document Date' là ngày hóa đơn NCC; 'Posting Date' là ngày Emart ghi
-            # sổ — hai ngày khác nhau ở hầu hết dòng RE.
-            inv_date=to_date(cell(row, _EM_H_DOC_DATE)),
-            # VENDOR CODE là mã NHÀ CUNG CẤP trong hệ thống Emart, KHÔNG phải mã
-            # cửa hàng. Nhồi vào store_code là sai nghĩa. File không tách theo siêu thị.
-            store_code=None, store_name=None,
-            doc_no=_txt(cell(row, _EM_H_DOC_NO)),
-            amount_before_vat=None, vat_amount=None,   # file chỉ có MỘT cột tiền
-            signed_amount=amount,
-            payment_date=pay_date,
-            description=_txt(cell(row, _EM_H_TEXT)) or None,
-            needs_review=True,
-            source_sheet=name, source_row=r + 1,
-        ))
+    # Gộp các dòng cộng của mọi sheet. `_declared_sum` trả None nếu có mảnh đọc
+    # không ra, để check báo lệch thay vì coi mảnh đó bằng 0.
+    declared_groups = {k: _declared_sum(v) for k, v in declared_parts.items()}
 
     # Đối chiếu với các dòng cộng do chính Emart in ra. Ghép nhãn -> loại dòng
     # bằng chuỗi đã bỏ dấu để không phụ thuộc 'phí' hay 'phi'.
@@ -1325,6 +1616,15 @@ def parse_coop(sheets):
                 # chuyển sang cột SỐ HÓA ĐƠN LH của CHÍNH DÒNG đó.
                 inv_no = _coop_clean_inv_no(raw_doc)
                 needs_review = True
+            if inv_no and not inv_no.isdigit():
+                # Sau khi bóc nháy + tiền tố quyển, số hóa đơn NCC của Co.op phải là
+                # SỐ THUẦN. Còn ký tự lạ nghĩa là ô ghi kiểu khác — có thật: Sheet6
+                # r139 ô C = "'26-A532" (1.541.700đ), r96 ra '1K26TCH-106' vốn là KÝ
+                # HIỆU chứ không phải số. `_coop_clean_inv_no` chỉ bóc tiền tố KHÔNG
+                # PHẢI CHỮ SỐ ở đầu nên chuỗi bắt đầu bằng chữ số đi qua nguyên vẹn,
+                # rồi `by_key` không tra được và dòng tiền im lặng không khớp. Bật cờ
+                # để nó vào danh sách 'n dòng cần người xem lại' thay vì biến mất.
+                needs_review = True
 
             base = dict(
                 inv_series=series or "", inv_no=inv_no or "",
@@ -1373,6 +1673,41 @@ def parse_coop(sheets):
             "computed_gross": got_gross, "computed_discount": got_disc,
             "declared_gross": chk_gross, "declared_discount": chk_disc,
         })
+
+    # --- Co.op ĐÒI LẠI tiền của một hóa đơn đã trả ---
+    # Có thật trong file mẫu: Sheet6 r75 là dòng thanh toán +3.121.200đ cho hóa đơn
+    # 3176 (kỳ 25/05), Sheet7 r21 là dòng ghi giảm −3.121.200đ CŨNG hóa đơn 3176
+    # (kỳ 22/06, 'DCHINH DO NCC THAY BANG HD 3542'). Dòng ghi_giam KHÔNG được phép
+    # nối Sales Invoice, nên cột `paid` chỉ thấy vế +3.121.200 và hóa đơn hiện 'đã
+    # thanh toán đủ' dù tiền đã bị lấy lại — mà mọi số kiểm tra của Co.op vẫn khớp
+    # 0đ nên không có tín hiệu nào. Ở đây chỉ ĐÁNH DẤU + BÀY RA cho người xử lý;
+    # việc trừ ngược vào công nợ là quyết định của con người, không tự làm.
+    paid_by_no = {}
+    for r in rows:
+        if r["row_kind"] == "thanh_toan" and r["inv_no_norm"]:
+            paid_by_no.setdefault(r["inv_no_norm"], []).append(r)
+    reversals = []
+    for r in rows:
+        if r["row_kind"] != "ghi_giam" or not r["inv_no_norm"]:
+            continue
+        # Chỉ đối chiếu khi dòng ghi giảm KHÔNG có ký hiệu riêng (số ở cột HÓA ĐƠN
+        # NCC chính là hóa đơn gốc), hoặc trùng luôn ký hiệu. Dòng ghi giảm mang ký
+        # hiệu 'K...' riêng là MỘT CHỨNG TỪ KHÁC có dãy số riêng — trùng số với một
+        # hóa đơn bán là ngẫu nhiên, gắn cờ ở đó chỉ tạo báo động giả.
+        hits = [p for p in paid_by_no.get(r["inv_no_norm"], [])
+                if not r["inv_series_norm"] or p["inv_series_norm"] == r["inv_series_norm"]]
+        if not hits:
+            continue
+        r["needs_review"] = True
+        reversals.append("HĐ %s (%s dòng %s, %s: %s)" % (
+            r["inv_no"], r["source_sheet"], r["source_row"], r["payment_date"] or "?",
+            "{:,.0f}đ".format(r["signed_amount"] or 0)))
+    if reversals:
+        warnings.append(
+            "%d khoản ghi giảm TRÙNG SỐ HÓA ĐƠN với dòng đã ghi nhận thanh toán trong "
+            "cùng file — Co.op đòi lại tiền đã trả, hóa đơn đó vẫn đang hiện 'đã thanh "
+            "toán đủ'. Phải xử lý tay: %s" % (len(reversals), "; ".join(reversals[:10])
+                                              + (" ..." if len(reversals) > 10 else "")))
 
     dates = sorted({g["payment_date"] for g in groups if g["payment_date"]})
     # BẮT BUỘC nói rõ: Co.op ghi chiết khấu CÙNG DẤU với trị giá (cả hai đều dương ở
@@ -1437,6 +1772,49 @@ def parse_sheets(sheets, chain_key):
         bad = [c["label"] for c in checks if not c["ok"]]
         warnings.append("CHƯA khớp số kiểm tra của file: %s. KHÔNG ghi nhận cho tới khi làm rõ."
                         % (", ".join(bad) if bad else "file không có số kiểm tra nào"))
+
+    # LƯỚI AN TOÀN — BẢNG KÊ THANH TOÁN MÀ KHÔNG CÓ DÒNG THANH TOÁN NÀO.
+    #
+    # VÌ SAO cần riêng chốt này: khi một dòng bị xếp nhầm loại, tiền chỉ đổi NHÓM
+    # chứ TỔNG không đổi, nên mọi số kiểm tra SUM vẫn khớp 0đ và `reconciled` vẫn
+    # True. Đây là chiều hỏng câm nhất của cả module.
+    #
+    # Dấu hiệu chắc chắn: file CÓ dòng mang tham chiếu hóa đơn mà KHÔNG dòng nào
+    # được xếp là thanh toán. Bảng kê nào cũng phải trả tiền cho ít nhất một hóa
+    # đơn — không thì nó đâu còn là bảng kê thanh toán.
+    has_inv_ref = any(r.get("inv_no") and r.get("inv_series") for r in rows)
+    if has_inv_ref and not any(r["row_kind"] == "thanh_toan" for r in rows):
+        n_ref = sum(1 for r in rows if r.get("inv_no") and r.get("inv_series"))
+        warnings.append(
+            "NGHI ĐỌC SAI LOẠI DÒNG: file có %d dòng mang số hóa đơn nhưng KHÔNG dòng nào "
+            "được xếp là thanh toán. Rất có thể chuỗi đã đổi nhãn cột phân loại. "
+            "Số kiểm tra vẫn khớp vì tiền chỉ đổi nhóm — ĐỪNG tin `reconciled` ở ca này."
+            % n_ref)
+        reconciled = False
+
+    # LƯỚI AN TOÀN CHUNG CHO CẢ 5 CHUỖI — dòng thanh toán NGƯỢC DẤU với đa số.
+    # VÌ SAO: mọi lá chắn phân loại đều dựa vào nhãn trong file (Doc.Type, ký hiệu
+    # chứng từ, Deduct Name). Khi chuỗi đổi ký hiệu (ví dụ năm mới) hay đổi nhãn,
+    # một dòng GHI GIẢM lặng lẽ trôi sang 'thanh_toan' mà MỌI số kiểm tra vẫn khớp
+    # 0đ vì tổng NET không đổi. Dấu ngược chiều là dấu hiệu còn lại duy nhất, và
+    # nó nguy hiểm gấp đôi vì `_paid_subquery` lấy SUM(ABS(...)) — một khoản trả
+    # hàng bị lật thành TIỀN ĐÃ THU trên đúng hóa đơn đó.
+    # Đây CHỈ là cờ 'cần người xem lại', KHÔNG tự đổi loại dòng — phân loại bằng
+    # dấu là điều cấm của hợp đồng (§B). Trên cả 5 file thật, số dòng bị gắn cờ = 0.
+    pay_rows = [r for r in rows if r["row_kind"] == "thanh_toan" and r.get("signed_amount")]
+    n_pos = sum(1 for r in pay_rows if r["signed_amount"] > 0)
+    n_neg = len(pay_rows) - n_pos
+    if n_pos and n_neg:
+        minority = 1 if n_pos < n_neg else (-1 if n_neg < n_pos else 0)
+        odd = [r for r in pay_rows
+               if minority and (1 if r["signed_amount"] > 0 else -1) == minority]
+        for r in odd:
+            r["needs_review"] = True
+        warnings.append(
+            "%d/%d dòng 'Thanh toán' NGƯỢC DẤU với đa số (%d dương / %d âm) — nghi bị "
+            "xếp nhầm loại (trả hàng/điều chỉnh đọc thành tiền thu). Số kiểm tra KHÔNG "
+            "phát hiện được lỗi này vì tổng không đổi. Phải xem tay trước khi khớp hóa đơn."
+            % (len(odd) or min(n_pos, n_neg), len(pay_rows), n_pos, n_neg))
 
     n_review = sum(1 for r in rows if r["needs_review"])
     if n_review:
