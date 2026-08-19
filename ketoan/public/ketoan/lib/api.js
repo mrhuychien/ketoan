@@ -137,6 +137,18 @@ export const api = {
   vatLegacyCommit: (a) => callMethod(NS + "misa_legacy.commit", withCompany(a)),
   // `expected_hash` đi kèm trong `a` — backend từ chối nạp nếu thiếu.
 
+  // Công nợ MT (siêu thị hiện đại) + bảng kê thanh toán của chuỗi
+  // LƯU Ý: mọi con số "đã thu / còn lại" ở kênh này tính từ BẢNG KÊ CHUỖI, không
+  // phải outstanding_amount của ERPNext — hệ thống cố ý không tự tạo Payment Entry.
+  mtOverview: (a) => callMethod(NS + "mt.get_overview", withCompany(a)),
+  mtInvoices: (bucket, a) => callMethod(NS + "mt.get_invoices", withCompany({ bucket, ...a })),
+  mtChainSummary: (a) => callMethod(NS + "mt.get_chain_summary", withCompany(a)),
+  // Xem trước BẮT BUỘC chạy trước khi nạp — nó trả `plan_hash` mà commit đòi.
+  mtAdvicePreview: (a) => callMethod(NS + "mt.preview_advice", withCompany(a)),
+  mtAdviceCommit: (a) => callMethod(NS + "mt.commit_advice", withCompany(a)),
+  // `expected_hash` đi kèm trong `a` — backend từ chối nạp nếu thiếu hoặc lệch.
+  mtRelinkLine: (line, sales_invoice, note) => callMethod(NS + "mt.relink_line", { line, sales_invoice, note }),
+
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
 

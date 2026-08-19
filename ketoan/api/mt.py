@@ -42,43 +42,43 @@ HỢP ĐỒNG VỚI `ketoan.api.mt_advice` (tầng đọc file)
 Module này KHÔNG đọc Excel. Toàn bộ việc đọc 5 định dạng file nằm ở
 `ketoan.api.mt_advice`, dùng theo hợp đồng sau:
 
-    mt_advice.CHAINS -> tuple[str]      # tên chuỗi, trùng options của DocType
-    mt_advice.detect_chain(filename, raw) -> str | None
-    mt_advice.parse(raw: bytes, filename: str, chain: str) -> dict
+    mt_advice.CHAIN_LABEL -> {khóa ASCII: nhãn}   # trùng options field `chain`
+    mt_advice.read_payment_advice(content: str, chain=None) -> dict
 
-`parse` trả về:
+`content` là base64 (có/không tiền tố data URI) — tầng đọc tự nhận .xlsx/.xls
+theo CHỮ KÝ BYTE, không theo đuôi tên file. Trả về MỘT dict cho CẢ FILE:
 
     {
-      "chain": "LOTTE",
-      "advices": [                # MỖI KỲ THANH TOÁN LÀ MỘT PHẦN TỬ RIÊNG
-        {
-          "advice_no": str | None,        # số chứng từ thanh toán của chuỗi
-          "payment_date": "YYYY-MM-DD" | None,
-          "declared_total_payment": float | None,   # SỐ KIỂM TRA in trong file
-          "declared_total_discount": float | None,
-          "source_sheet": str | None,
-          "rows": [ {...12 khóa chuẩn + source_row...} ],
-        },
-      ],
-      "warnings": [str],          # điều tầng đọc thấy đáng ngờ, không tự quyết
-      "skipped": int,             # số dòng rác đã bỏ (tiêu đề, dòng tổng...)
+      "chain": "LOTTE", "chain_key": "lotte",
+      "advice_no": str | None,          # nếu file chỉ có một số chứng từ
+      "payment_dates": ["2026-07-10", "2026-07-30"],
+      "declared_totals": {...},         # SỐ KIỂM TRA đọc từ chính file
+      "computed_totals": {...},
+      "checks": [{label, declared, computed, diff, ok}, ...],
+      "reconciled": bool,               # MỌI số kiểm tra đều khớp?
+      "groups": [ {key, advice_no, payment_date, n_rows, ...}, ... ],
+      "rows": [ {...bộ khóa chuẩn...} ],   # CHỈ dòng tiền, không có dòng tổng
+      "warnings": [str],
     }
 
-Mỗi phần tử `rows` dùng bộ khóa chuẩn của hợp đồng đọc file:
-    row_kind, inv_series, inv_no, inv_date, store_code, store_name, doc_no,
-    amount_before_vat, vat_amount, total_amount, payment_date, description,
-    source_row
+Mỗi phần tử `rows`:
+    row_kind (ASCII: thanh_toan/chiet_khau/phi/ghi_giam/khac), row_kind_label,
+    row_subtype, inv_series, inv_series_norm, inv_no, inv_no_norm, inv_date,
+    store_code, store_name, doc_no, description, amount_before_vat, vat_amount,
+    total_amount (ĐỘ LỚN), signed_amount (GIỮ DẤU), payment_date, needs_review,
+    source_sheet, source_row
 
-VÌ SAO "advices" là DANH SÁCH chứ không phải một: một FILE có thể chứa NHIỀU kỳ
-thanh toán (LOTTE có 2 Payment Date trong cùng file; Co.op có 8 sheet = 8 lần
-thanh toán riêng, mỗi sheet một số chứng từ và một bộ số kiểm tra). Gộp cả file
-thành một bản ghi là cộng nhầm tiền của hai kỳ vào nhau.
+MỘT FILE ≠ MỘT BẢN GHI. `groups` là các LẦN THANH TOÁN riêng nằm trong cùng một
+file: Co.op 8 sheet = 8 kỳ (mỗi kỳ một số chứng từ + một bộ số kiểm tra), LOTTE
+2 Payment Date, Central Retail 2 Clearing Doc. Gộp lại thành một bản ghi là cộng
+nhầm tiền của hai kỳ vào nhau (§J.3 của hợp đồng). Tầng đọc KHÔNG chia sẵn dòng
+theo nhóm, nên `_split_advices()` ở dưới phải chia lại — và chia xong PHẢI đối
+chiếu với `n_rows` mà tầng đọc công bố, chia sai là chia sai tiền.
 
-`total_amount` GIỮ NGUYÊN DẤU của file. Mỗi chuỗi một quy ước dấu khác nhau
-(Central Retail/Emart để hàng hóa ÂM, LOTTE để hàng hóa DƯƠNG), và dấu chính là
-chốt để đối chiếu với dòng tổng do chuỗi in trong file. Ở đây khi CỘNG TIỀN ĐÃ
-THU thì dùng ABS() — nhưng chỉ trên dòng 'Thanh toán', nơi đã biết chắc bản
-chất nhờ cột loại chứng từ, chứ không suy bản chất từ dấu.
+DẤU: lưu `signed_amount` vào `total_amount` của dòng DocType (field ghi rõ "giữ
+nguyên DẤU đọc được từ file") — dấu là chốt đối chiếu với dòng tổng do chuỗi in
+ra. Khi CỘNG TIỀN ĐÃ THU thì dùng ABS(), nhưng chỉ trên dòng 'Thanh toán', nơi
+bản chất đã biết chắc nhờ cột loại chứng từ, chứ không suy bản chất từ dấu.
 """
 
 import base64
@@ -684,14 +684,19 @@ def get_chain_summary(company=None, from_date=None, to_date=None):
 # Đọc file bảng kê + khớp hóa đơn
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _decode(content):
+def _check_size(content):
+    """Chặn file khổng lồ TRƯỚC khi đưa vào openpyxl/xlrd.
+
+    Tầng đọc file tự giải base64; ở đây chỉ giải để đo kích thước và bắt file
+    rỗng sớm, vì một file hỏng vài chục MB đủ làm treo worker của kế toán.
+    """
     raw = base64.b64decode((content or "").split(",")[-1])
     if not raw:
         frappe.throw(_("File rỗng"))
     if len(raw) > MAX_UPLOAD_BYTES:
         frappe.throw(_("File quá lớn ({0} MB). Tách bớt rồi tải lại.")
                      .format(round(len(raw) / 1024 / 1024, 1)))
-    return raw
+    return len(raw)
 
 
 def _advice_module():
@@ -703,32 +708,72 @@ def _advice_module():
     return mt_advice
 
 
-def _call_parse(mod, raw, filename, chain):
-    """Gọi hàm đọc file theo hợp đồng ở đầu module.
+def _read_file(content, chain):
+    """Gọi tầng đọc file theo đúng hợp đồng ở đầu module.
 
-    Tên chính thức là `parse`. Vẫn thử vài tên thay thế để nếu hai bên đặt tên
-    lệch nhau thì lỗi hiện ra dưới dạng thông báo đọc được, chứ không phải
-    AttributeError giữa lúc kế toán đang nạp file.
+    `chain` để trống thì tầng đọc TỰ NHẬN theo dấu hiệu trong file và THROW nếu
+    không nhận ra — cố ý không đoán bừa: chọn nhầm parser vẫn ra một con số
+    trông hợp lý nhưng đọc sai cột tiền.
     """
-    for fn_name in ("parse", "parse_file", "read_advice"):
-        fn = getattr(mod, fn_name, None)
-        if callable(fn):
-            return fn(raw, filename=filename, chain=chain)
-    frappe.throw(_("Module ketoan.api.mt_advice thiếu hàm parse(raw, filename, chain)."))
-
-
-def _detect_chain(mod, filename, raw, chain):
+    mod = _advice_module()
     if chain:
-        chains = getattr(mod, "CHAINS", None)
-        if chains and chain not in chains:
+        labels = getattr(mod, "CHAIN_LABEL", {}) or {}
+        if chain not in labels and chain not in labels.values():
             frappe.throw(_("Chuỗi không hợp lệ: {0}").format(chain))
-        return chain
-    fn = getattr(mod, "detect_chain", None)
-    detected = fn(filename, raw) if callable(fn) else None
-    if not detected:
-        # Không đoán. Mỗi chuỗi một parser, chọn nhầm parser là đọc sai cột tiền.
-        frappe.throw(_("Không nhận ra file này của chuỗi nào. Hãy chọn chuỗi rồi tải lại."))
-    return detected
+    fn = getattr(mod, "read_payment_advice", None)
+    if not callable(fn):
+        frappe.throw(_("Module ketoan.api.mt_advice thiếu hàm read_payment_advice(content, chain)."))
+    parsed = fn(content, chain=chain or None) or {}
+    if not parsed.get("chain"):
+        frappe.throw(_("Tầng đọc file không trả về tên chuỗi — không ghi nhận."))
+    return parsed
+
+
+# Các trường có thể dùng để chia dòng về đúng LẦN THANH TOÁN của nó. Thứ tự này
+# đã đối chiếu trên cả 5 file thật:
+#   · Co.op         -> source_sheet (8 sheet = 8 kỳ)
+#   · Central Retail-> doc_no       (2 Clearing Doc. trong 1 file)
+#   · LOTTE         -> payment_date (2 Payment Date trong 1 file)
+#   · WinCommerce, Emart -> chỉ 1 nhóm, không phải chia
+_GROUP_FIELDS = ("source_sheet", "doc_no", "payment_date")
+
+
+def _split_advices(parsed):
+    """Chia `rows` về đúng từng nhóm trong `groups`. Trả [(group, rows)].
+
+    Tầng đọc công bố nhóm (kèm `n_rows`) nhưng KHÔNG gắn số hiệu nhóm lên từng
+    dòng, nên ở đây phải chia lại. Cách chia: thử lần lượt từng trường ứng viên,
+    chỉ chấp nhận trường nào dựng lại ĐÚNG bộ khóa nhóm VÀ ĐÚNG số dòng của mỗi
+    nhóm mà tầng đọc đã đếm.
+
+    VÌ SAO khắt khe tới mức đó: chia sai là chia sai TIỀN — dồn 8 kỳ Co.op vào
+    một phiếu, hoặc đẩy nhầm 21 dòng của Clearing Doc. này sang Clearing Doc.
+    kia. Không trường nào dựng lại đúng thì DỪNG và bắt người xử lý, tuyệt đối
+    không gộp tạm cho xong (gộp tạm chính là lỗi §J.3 của hợp đồng).
+    """
+    rows = parsed.get("rows") or []
+    groups = parsed.get("groups") or []
+
+    if len(groups) <= 1:
+        g = dict(groups[0]) if groups else {}
+        return [(g, rows)]
+
+    keys = [cstr(g.get("key")) for g in groups]
+    if len(set(keys)) == len(keys):
+        for field in _GROUP_FIELDS:
+            buckets = defaultdict(list)
+            for r in rows:
+                buckets[cstr(r.get(field) or "")].append(r)
+            if set(buckets) != set(keys):
+                continue
+            if any(len(buckets[k]) != cint(g.get("n_rows")) for g, k in zip(groups, keys)):
+                continue
+            return [(dict(g), buckets[k]) for g, k in zip(groups, keys)]
+
+    frappe.throw(_(
+        "File có {0} lần thanh toán nhưng không chia được dòng về từng lần một cách "
+        "chắc chắn. KHÔNG ghi nhận — gộp chung là cộng nhầm tiền của các kỳ vào nhau."
+    ).format(len(groups)))
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -801,6 +846,11 @@ def _match_row(row, idx):
       · Nhiều ứng viên thì KHÔNG nối. Nối bừa là đánh dấu đã trả cho hóa đơn của
         khách khác.
       · Emart không cấp ký hiệu -> khớp bằng SỐ + NGÀY + TIỀN và LUÔN 'Cần review'.
+
+    Cờ `needs_review` của tầng đọc file luôn HẠ độ tin cậy xuống 'Cần review',
+    kể cả khi ký hiệu + số khớp đúng một hóa đơn: tầng đọc bật cờ đó khi CHÍNH
+    NÓ không chắc đã hiểu đúng dòng (Emart không có ký hiệu, Co.op có dòng trả
+    hàng không đọc ra ký hiệu, LOTTE có dòng NET OFF không gắn hóa đơn).
     """
     no = norm_inv_no(row.get("inv_no") or "")
     if not no:
@@ -876,8 +926,12 @@ def _map_rows(raw_rows, company, idx):
             # chia 1.1 hay 1.08 để ra số là bịa tiền.
             "amount_before_vat": flt(r.get("amount_before_vat")) if r.get("amount_before_vat") is not None else None,
             "vat_amount": flt(r.get("vat_amount")) if r.get("vat_amount") is not None else None,
-            # Giữ nguyên DẤU của file — dấu là chốt đối chiếu với dòng tổng.
-            "total_amount": flt(r.get("total_amount")),
+            # `signed_amount` GIỮ NGUYÊN DẤU của file, `total_amount` của tầng đọc
+            # là ĐỘ LỚN. Field DocType ghi rõ "giữ nguyên DẤU đọc được từ file" —
+            # dấu là chốt đối chiếu với dòng tổng do chuỗi in ra. Lấy nhầm bản độ
+            # lớn là mọi khoản chuỗi TRỪ LẠI biến thành khoản CỘNG THÊM.
+            "total_amount": flt(r["signed_amount"] if r.get("signed_amount") is not None
+                                else r.get("total_amount")),
             "payment_date": r.get("payment_date") or None,
             "source_row": cint(r.get("source_row")),
         }
@@ -886,6 +940,10 @@ def _map_rows(raw_rows, company, idx):
 
         if kind == KIND_PAYMENT:
             si, method, conf, diff = _match_row(r, idx)
+            if si and r.get("needs_review") and conf == "Chắc chắn":
+                # Tầng đọc tự thấy dòng này đáng ngờ -> không được để 'Chắc chắn'
+                # dù ký hiệu + số khớp đúng một hóa đơn.
+                conf = "Cần review"
             line["sales_invoice"] = si
             line["match_method"] = method
             line["match_confidence"] = conf
@@ -924,45 +982,123 @@ def _existing_advice(chain, payment_date, advice_no, file_name):
     return frappe.db.get_value("MT Payment Advice", filters, "name")
 
 
-def _plan(raw, filename, chain, company):
-    """Dựng kế hoạch nạp. KHÔNG ghi gì — dùng chung cho xem trước và nạp thật."""
-    mod = _advice_module()
-    chain = _detect_chain(mod, filename, raw, chain)
-    parsed = _call_parse(mod, raw, filename, chain) or {}
-    advices_raw = parsed.get("advices") or []
-    if not advices_raw:
-        frappe.throw(_("Không đọc được kỳ thanh toán nào trong file"))
+def _declared(group, parsed, single, group_keys, parsed_key):
+    """Số kiểm tra của MỘT kỳ, lấy theo thứ tự ưu tiên `group_keys`.
 
-    # Dải ngày hóa đơn của cả file -> khoảng nạp chỉ mục Sales Invoice.
+    Số tổng của CẢ FILE chỉ được dùng khi file có ĐÚNG MỘT kỳ. Dùng cho file
+    nhiều kỳ là gán tổng của 8 kỳ Co.op cho từng kỳ — kỳ nào cũng "lệch" và cảnh
+    báo lệch số kiểm tra trở thành vô nghĩa.
+    """
+    for k in group_keys:
+        v = group.get(k)
+        if v is not None:
+            return flt(v)
+    if single:
+        v = (parsed.get("declared_totals") or {}).get(parsed_key)
+        if v is not None:
+            return flt(v)
+    return None
+
+
+# Sai số khi đối chiếu số kiểm tra. Tiền VND nguyên đồng nên về nguyên tắc phải
+# lệch ĐÚNG 0; nới 3đ vì Co.op làm tròn chiết khấu ở cấp DÒNG và tiền thanh toán
+# ở cấp NHÓM độc lập nhau (đã đo thật: lệch ±1đ ở 17/374 nhóm, ±3đ mỗi sheet).
+DECLARED_TOLERANCE = 3.0
+
+
+def _declared_relation(declared, totals):
+    """Số kiểm tra do chuỗi in ra đang đo ĐẠI LƯỢNG NÀO của kỳ này?
+
+    VÌ SAO phải hỏi câu này: mỗi chuỗi in một loại tổng khác nhau, và chúng
+    KHÔNG cùng đơn vị đo với "tổng các dòng Thanh toán":
+      · WinCommerce 'Tổng cộng'      = đúng tổng dòng thanh toán.
+      · Emart 'phải trả tiền mua hàng' = đúng tổng dòng thanh toán.
+      · Central Retail 'Result <doc>' = NET của cả kỳ (hàng − phí − chiết khấu
+        − trả hàng). Đã kiểm trên file thật: −601.476.840 + 108.674.534 +
+        27.240.347 + 5.119.605 = −460.442.354, khớp tuyệt đối.
+      · Co.op 'Tổng Tiền'            = trị giá hàng + hàng trả lại (không trừ
+        chiết khấu): 2.737.170.738 − 24.727.032 = 2.712.443.706, khớp tuyệt đối.
+
+    Nhét thẳng con số đó vào `declared_total_payment` thì DocType so nó với tổng
+    dòng thanh toán và kỳ nào cũng kêu lệch — kế toán quen tay bấm bỏ qua, tới
+    lúc lệch THẬT thì không ai thấy nữa. Nên chỉ nhận vào field khi hai vế đo
+    CÙNG một đại lượng; các quan hệ còn lại đưa ra màn xem trước và ghi chú.
+    """
+    if declared is None:
+        return None, None
+    tp = flt(totals["total_payment"])
+    ck = flt(totals["total_discount"])
+    fee = flt(totals["total_fee"])
+    other = flt(totals["total_other"])
+    for label, value in (
+        ("total_payment", tp),
+        ("total_payment+total_other", tp + other),
+        ("net", tp + ck + fee + other),
+    ):
+        if abs(flt(declared) - value) <= DECLARED_TOLERANCE:
+            return label, value
+    # Không khớp đại lượng nào -> có thể là LỆCH THẬT (đọc sót dòng, sai cột
+    # tiền). Phải để cảnh báo của DocType nổ.
+    return None, None
+
+
+def _plan(content, filename, chain, company):
+    """Dựng kế hoạch nạp. KHÔNG ghi gì — dùng chung cho xem trước và nạp thật."""
+    parsed = _read_file(content, chain)
+    chain = parsed.get("chain")
+    parts = _split_advices(parsed)
+    if not parts or not any(rows for _g, rows in parts):
+        frappe.throw(_("Không đọc được dòng tiền nào trong file"))
+
+    # Dải ngày hóa đơn của CẢ file -> khoảng nạp chỉ mục Sales Invoice một lần
+    # duy nhất, dùng chung cho mọi kỳ (Co.op 8 kỳ mà quét lại 8 lần là quá tốn).
     dates = []
-    for a in advices_raw:
-        for r in a.get("rows") or []:
-            if r.get("inv_date"):
-                try:
-                    dates.append(getdate(r["inv_date"]))
-                except Exception:
-                    pass
+    for r in parsed.get("rows") or []:
+        if r.get("inv_date"):
+            try:
+                dates.append(getdate(r["inv_date"]))
+            except Exception:
+                pass
     idx = _si_index(company, dates)
 
+    single = len(parts) == 1
+    fallback_date = None
+    pay_dates = parsed.get("payment_dates") or []
+    if single and len(pay_dates) == 1:
+        fallback_date = pay_dates[0]
+
     plan = []
-    for a in advices_raw:
-        lines, dropped = _map_rows(a.get("rows"), company, idx)
+    for group, rows in parts:
+        lines, dropped = _map_rows(rows, company, idx)
         totals = _totals(lines)
-        payment_date = a.get("payment_date") or None
+        payment_date = group.get("payment_date") or fallback_date or None
+        advice_no = norm_text(group.get("advice_no")
+                              or (parsed.get("advice_no") if single else None))
+        # Co.op in cả 'Tổng Tiền' (trị giá hàng) lẫn 'Tổng Tiền Thanh Toán' (thực
+        # trả sau chiết khấu); `declared_gross` mới là số so được với các DÒNG.
+        reported = _declared(group, parsed, single,
+                             ("declared_gross", "declared_payment"), "total_payment")
+        relation, matched = _declared_relation(reported, totals)
         plan.append({
-            "chain": parsed.get("chain") or chain,
-            "advice_no": norm_text(a.get("advice_no")),
+            "chain": chain,
+            "advice_no": advice_no,
             "payment_date": cstr(payment_date) if payment_date else None,
-            "source_sheet": a.get("source_sheet"),
-            "declared_total_payment": (flt(a["declared_total_payment"])
-                                       if a.get("declared_total_payment") is not None else None),
-            "declared_total_discount": (flt(a["declared_total_discount"])
-                                        if a.get("declared_total_discount") is not None else None),
+            "group_key": cstr(group.get("key")) or None,
+            "source_sheet": rows[0].get("source_sheet") if rows else None,
+            # Chỉ đưa vào field khi số của file đo ĐÚNG "tổng dòng thanh toán",
+            # hoặc khi nó không khớp đại lượng nào (để cảnh báo của DocType nổ).
+            "declared_total_payment": reported if relation in (None, "total_payment") else None,
+            "declared_total_discount": _declared(group, parsed, single,
+                                                 ("declared_discount",), "total_discount"),
+            # Giữ nguyên số chuỗi in ra + đại lượng nó đo, để màn xem trước và
+            # ghi chú nói được "khớp cái gì", không mất bằng chứng.
+            "declared_reported": reported,
+            "declared_relation": relation,
+            "declared_matched_value": matched,
             "lines": lines,
             "dropped_rows": dropped,
             "totals": totals,
-            "existing": _existing_advice(parsed.get("chain") or chain, payment_date,
-                                         a.get("advice_no"), filename),
+            "existing": _existing_advice(chain, payment_date, advice_no, filename),
         })
     return chain, plan, parsed
 
@@ -977,7 +1113,7 @@ def _plan_hash(plan):
     h = hashlib.sha1()
     for a in plan:
         h.update("A|{}|{}|{}|{}\n".format(
-            a["chain"], a["advice_no"], a["payment_date"], a["source_sheet"] or "").encode())
+            a["chain"], a["advice_no"], a["payment_date"], a["group_key"] or "").encode())
         for ln in a["lines"]:
             h.update("L|{}|{}|{}|{}|{}|{}|{}\n".format(
                 ln["source_row"], ln["row_kind"], ln["inv_series"], ln["inv_no"],
@@ -1013,6 +1149,7 @@ def _summarize(a):
         "chain": a["chain"],
         "advice_no": a["advice_no"],
         "payment_date": a["payment_date"],
+        "group_key": a["group_key"],
         "source_sheet": a["source_sheet"],
         "line_count": len(lines),
         "dropped_rows": a["dropped_rows"],
@@ -1025,6 +1162,12 @@ def _summarize(a):
         "totals": a["totals"],
         "declared_total_payment": declared,
         "declared_total_discount": a["declared_total_discount"],
+        # Số chuỗi in ra + đại lượng nó đo (total_payment / +ghi giảm / net).
+        # 'declared_relation' = None nghĩa là KHÔNG khớp đại lượng nào — nghi
+        # đọc sót dòng hoặc sai cột tiền, phải soi trước khi nạp.
+        "declared_reported": a["declared_reported"],
+        "declared_relation": a["declared_relation"],
+        "declared_matched_value": a["declared_matched_value"],
         # Lệch số kiểm tra: cảnh báo, KHÔNG chặn. Co.op làm tròn ở cấp dòng và
         # cấp nhóm độc lập nhau nên lệch ±1..3đ là bình thường và đã đo trên file
         # thật; lệch lớn thì kế toán phải thấy ngay.
@@ -1041,9 +1184,9 @@ def preview_advice(content, filename=None, chain=None, company=None):
     """
     guard_mt()
     company = _company(company)
-    raw = _decode(content)
+    _check_size(content)
     filename = norm_text(filename)
-    chain, plan, parsed = _plan(raw, filename, chain, company)
+    chain, plan, parsed = _plan(content, filename, chain, company)
 
     advices = []
     for a in plan:
@@ -1064,7 +1207,14 @@ def preview_advice(content, filename=None, chain=None, company=None):
         "advices": advices,
         "grand_totals": grand,
         "warnings": parsed.get("warnings") or [],
-        "skipped_rows": cint(parsed.get("skipped")),
+        # Đối chiếu THẬT nằm ở đây: tầng đọc so tổng của nó với SỐ KIỂM TRA do
+        # chính chuỗi in trong file. `reconciled=False` KHÔNG chặn nạp — nhưng
+        # kế toán phải nhìn thấy trước khi bấm, và trạng thái 'Đã ghi nhận' vẫn
+        # đòi người tự tick 'Đã đối chiếu khớp'.
+        "checks": parsed.get("checks") or [],
+        "reconciled": bool(parsed.get("reconciled")),
+        "declared_totals": parsed.get("declared_totals") or {},
+        "computed_totals": parsed.get("computed_totals") or {},
         # Có bản ghi cũ cùng chuỗi + ngày + số chứng từ: nạp đè là nhân đôi tiền.
         "duplicates": [a["existing"] for a in plan if a["existing"]],
         "plan_hash": _plan_hash(plan),
@@ -1072,6 +1222,67 @@ def preview_advice(content, filename=None, chain=None, company=None):
         "customer_required": _("Chọn Khách hàng của chuỗi — hệ thống KHÔNG tự đoán "
                                "ánh xạ mã nhà cung cấp sang Customer."),
     }
+
+
+def _note_text(note, a, parsed):
+    """Ghi chú của kế toán + dấu vết đối chiếu của tầng đọc file.
+
+    Kết quả đối chiếu số kiểm tra được ĐÓNG luôn vào bản ghi: sáu tháng sau,
+    người soi lại phải thấy được lúc nạp file có khớp hay không mà không cần
+    tìm lại file gốc.
+    """
+    parts = [cstr(note).strip()] if note else []
+    if not parsed.get("reconciled"):
+        bad = [c.get("label") for c in (parsed.get("checks") or []) if not c.get("ok")]
+        parts.append(_("[Tự động] Lúc nạp: CHƯA khớp số kiểm tra của file{0}.")
+                     .format((": " + ", ".join(cstr(b) for b in bad)) if bad else ""))
+    else:
+        parts.append(_("[Tự động] Lúc nạp: khớp toàn bộ số kiểm tra in trong file."))
+    if a.get("declared_reported") is not None:
+        rel = {
+            "total_payment": _("tổng dòng thanh toán"),
+            "total_payment+total_other": _("tổng dòng thanh toán + ghi giảm"),
+            "net": _("tổng thuần cả kỳ (hàng − chiết khấu − phí − ghi giảm)"),
+        }.get(a.get("declared_relation"))
+        parts.append(
+            _("[Tự động] Số chuỗi in trong file: {0} — {1}.").format(
+                flt(a["declared_reported"]),
+                _("khớp {0}").format(rel) if rel
+                else _("KHÔNG khớp đại lượng nào cộng được từ các dòng, cần soi lại")))
+    pay = [ln for ln in a["lines"] if ln["row_kind"] == KIND_PAYMENT]
+    miss = [ln for ln in pay if not ln.get("sales_invoice")]
+    if miss:
+        parts.append(_("[Tự động] {0}/{1} dòng thanh toán chưa nối được hóa đơn.")
+                     .format(len(miss), len(pay)))
+    return "\n".join(p for p in parts if p) or None
+
+
+def _todo_for(doc, a):
+    """Giao việc cho người, KHÔNG tự hạch toán.
+
+    Ràng buộc của dự án: file nhập chỉ được GHI NHẬN + đánh dấu + tạo ToDo. Mọi
+    Payment Entry / Journal Entry do con người lập. ToDo hỏng không được làm
+    hỏng việc nạp bảng kê — nên nuốt lỗi và ghi log.
+    """
+    pay = [ln for ln in a["lines"] if ln["row_kind"] == KIND_PAYMENT]
+    miss = [ln for ln in pay if not ln.get("sales_invoice")]
+    review = [ln for ln in a["lines"] if ln.get("match_confidence") == "Cần review"]
+    if not miss and not review:
+        return
+    try:
+        frappe.get_doc({
+            "doctype": "ToDo",
+            "description": _(
+                "Bảng kê {0} ({1}, ngày {2}): {3} dòng thanh toán chưa nối hóa đơn, "
+                "{4} dòng cần xem lại. Đối chiếu rồi lập chứng từ hạch toán bằng tay — "
+                "hệ thống KHÔNG tự tạo Payment Entry."
+            ).format(doc.name, doc.chain, cstr(doc.payment_date), len(miss), len(review)),
+            "reference_type": "MT Payment Advice",
+            "reference_name": doc.name,
+            "priority": "Medium",
+        }).insert(ignore_permissions=True)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "mt.commit_advice/todo %s" % doc.name)
 
 
 @frappe.whitelist()
@@ -1084,9 +1295,9 @@ def commit_advice(content, filename=None, chain=None, expected_hash=None,
     """
     guard_manager()
     company = _company(company)
-    raw = _decode(content)
+    _check_size(content)
     filename = norm_text(filename)
-    chain, plan, parsed = _plan(raw, filename, chain, company)
+    chain, plan, parsed = _plan(content, filename, chain, company)
 
     if not expected_hash:
         frappe.throw(_("Phải xem trước rồi mới nạp được"))
@@ -1119,10 +1330,13 @@ def commit_advice(content, filename=None, chain=None, expected_hash=None,
             "status": "Nháp",
             "declared_total_payment": a["declared_total_payment"],
             "declared_total_discount": a["declared_total_discount"],
-            "note": note or None,
+            "note": _note_text(note, a, parsed),
+            # KHÔNG tự tick 'reconciled': DocType ghi rõ kế toán tự tick sau khi
+            # soi lệch. Kết quả đối chiếu của tầng đọc chỉ đi vào ghi chú.
             "lines": [_public_line(ln) for ln in a["lines"]],
         })
         doc.insert()
+        _todo_for(doc, a)
         created.append({
             "name": doc.name,
             "chain": doc.chain,
@@ -1141,6 +1355,8 @@ def commit_advice(content, filename=None, chain=None, expected_hash=None,
         "created": created,
         "advice_count": len(created),
         "warnings": parsed.get("warnings") or [],
+        "checks": parsed.get("checks") or [],
+        "reconciled": bool(parsed.get("reconciled")),
         "message": _("Đã ghi nhận {0} bảng kê từ file {1}. "
                      "Hệ thống KHÔNG tự hạch toán — kiểm tra rồi lập chứng từ tay.")
         .format(len(created), filename),

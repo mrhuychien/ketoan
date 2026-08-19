@@ -471,11 +471,20 @@ def _is_blank(row):
 
 # Mỗi chuỗi: danh sách "bộ dấu hiệu"; khớp khi CHỨA ĐỦ mọi từ trong một bộ.
 # Dấu hiệu lấy từ NHÃN CỘT thật của file, đã bỏ dấu tiếng Việt.
+# Dấu hiệu phải ĐẶC TRƯNG cho đúng một chuỗi, không được là nhãn phổ thông.
+# Đã đo thật: bộ ('so chung tu','so hoa don','chiet khau') từng dùng cho
+# WinCommerce cũng khớp luôn file Co.op (Co.op có 'Số chứng từ : 26303039' ở meta,
+# 'SỐ HÓA ĐƠN LH' và 'CHIẾT KHẤU' ở header) ⇒ hai chuỗi cùng khớp ⇒ trả None ⇒
+# file Co.op không nhận diện được. Nay chỉ giữ nhãn CHỈ WinCommerce mới có.
 _CHAIN_SIGNS = {
     "lotte": [("deduct name", "deduct cause")],
     "emart": [("amount in doc. curr", "document type")],
     "central_retail": [("clearing doc", "doc.type", "reference")],
-    "wincommerce": [("so doi soat", "so hoa don"), ("so chung tu", "so hoa don", "chiet khau")],
+    "wincommerce": [
+        ("so doi soat", "so hoa don"),          # cột 'Số đối soát' — chỉ WinCommerce có
+        ("chung tu thanh toan", "so hoa don"),  # bảng Table 9
+        ("so du mang sang trang sau",),         # chân trang bản in
+    ],
     "coop": [("so hoa don lh",), ("dien giai", "tri gia")],
 }
 
@@ -842,8 +851,16 @@ def parse_central_retail(sheets):
             "key": doc, "advice_no": doc,
             "payment_date": (sub[0]["payment_date"] if sub else None),
             "n_rows": len(sub),
-            "computed_payment": _sum(sub, "signed_amount", {"thanh_toan"}),
+            # `computed_payment` phải CÙNG NGHĨA với `declared_payment` thì người đọc
+            # mới so được. Dòng 'Result' của Central Retail là SỐ RÒNG của cả Clearing
+            # Doc. (hàng hóa − phí − chiết khấu − trả hàng), nên ở đây cộng MỌI loại
+            # dòng. Nếu chỉ cộng 'thanh_toan' thì bảng nhóm bày ra một khoản lệch
+            # 141 triệu không có thật, trong khi đối chiếu ở `checks` vẫn khớp 0đ —
+            # kế toán sẽ đi truy một cảnh báo giả.
+            "computed_payment": _sum(sub, "signed_amount"),
             "declared_payment": declared_by_doc.get(doc),
+            # Tiền hàng hóa thuần của Clearing Doc. này, để người xem đối chiếu công nợ.
+            "computed_goods": _sum(sub, "signed_amount", {"thanh_toan"}),
         })
 
     return {
@@ -917,6 +934,13 @@ def parse_lotte(sheets):
     rows = []
     declared_sum = {}
     n_subsum = 0
+    # Cộng Pay/Vat theo ĐÚNG DẤU GỐC đọc từ file, ngay trong vòng lặp.
+    # VÌ SAO không tái tạo dấu từ cột Total ở cuối: `_line()` lưu Pay/Vat dưới dạng
+    # TRỊ TUYỆT ĐỐI, nên muốn cộng lại phải đoán dấu theo dấu của Total. Ở file này
+    # ba cột luôn cùng dấu nên đoán đúng, nhưng chỉ cần một dòng LOTTE có Pay và Vat
+    # ngược dấu nhau (điều chỉnh thuế) là hai số kiểm tra SUM — Pay Amt / Vat Amt
+    # báo lệch trong khi dữ liệu đọc hoàn toàn đúng — báo động giả cho kế toán.
+    tot_pay = tot_vat = 0.0
 
     for r in range(hdr_idx + 1, len(grid)):
         row = grid[r]
@@ -962,6 +986,8 @@ def parse_lotte(sheets):
             needs_review = True
             warnings.append("Dòng %d: Pay+Vat != Total (%s + %s != %s)" % (rno, pay, vat, total))
 
+        tot_pay += pay or 0.0
+        tot_vat += vat or 0.0
         rows.append(_line(
             row_kind=kind, row_subtype=label,
             inv_series=series, inv_no=inv_no,
@@ -977,13 +1003,8 @@ def parse_lotte(sheets):
             source_sheet=name, source_row=rno,
         ))
 
-    computed = {
-        "pay": _sum(rows, "signed_amount"),  # thay bằng tổng có dấu bên dưới
-    }
-    # Cộng theo DẤU GỐC của file để so với dòng SUM.
+    # Cộng theo DẤU GỐC của file để so với dòng SUM (LOTTE in cả 3 cột ở dòng SUM).
     tot_total = _sum(rows, "signed_amount")
-    tot_pay = sum((r["amount_before_vat"] or 0) * (1 if (r["signed_amount"] or 0) >= 0 else -1) for r in rows)
-    tot_vat = sum((r["vat_amount"] or 0) * (1 if (r["signed_amount"] or 0) >= 0 else -1) for r in rows)
     computed = {"pay": tot_pay, "vat": tot_vat, "total": tot_total}
 
     checks = [
@@ -1148,10 +1169,17 @@ def parse_emart(sheets):
                                  _sum(rows, "signed_amount", {"thanh_toan"})))
 
     total_row = declared_groups.get("TOTAL")
+    # Dòng cộng 'phải trả tiền mua hàng' chính là tổng các dòng RE do Emart in ra —
+    # dùng làm số kiểm tra của nhóm thay vì để None. Ghép nhãn bằng chuỗi đã bỏ dấu
+    # vì Emart viết lẫn có dấu / không dấu.
+    declared_goods = next((v for k, v in declared_groups.items()
+                           if "phai tra tien mua hang" in strip_tones(k)), None)
     groups = [{
         "key": pay_date, "advice_no": None, "payment_date": pay_date, "n_rows": len(rows),
         "computed_payment": _sum(rows, "signed_amount", {"thanh_toan"}),
-        "declared_payment": None,
+        "declared_payment": declared_goods,
+        "computed_net": _sum(rows, "signed_amount"),
+        "declared_net": total_row,
     }]
 
     return {
@@ -1335,13 +1363,27 @@ def parse_coop(sheets):
         groups.append({
             "key": name, "advice_no": payment_doc, "payment_date": pay_date,
             "n_rows": len(sub), "n_store_groups": g_key,
-            "computed_payment": got_gross,
+            # `computed_payment` = tổng ô TIỀN ở DÒNG ĐẦU mỗi nhóm siêu thị — cùng
+            # nghĩa với `declared_payment` (ô M15 'Tổng Tiền Thanh Toán') nên so được.
+            # KHÔNG lấy `got_gross` (tổng TRỊ GIÁ) đặt cạnh chk_pay: hai số đó lệch
+            # nhau đúng bằng chiết khấu, bày ra như một sai lệch là báo động giả.
+            "computed_payment": g_pay_sum,
             # Số Co.op THỰC TRẢ cho nhóm — đọc từ file, không tự tính lại.
             "declared_payment": chk_pay,
+            "computed_gross": got_gross, "computed_discount": got_disc,
             "declared_gross": chk_gross, "declared_discount": chk_disc,
         })
 
     dates = sorted({g["payment_date"] for g in groups if g["payment_date"]})
+    # BẮT BUỘC nói rõ: Co.op ghi chiết khấu CÙNG DẤU với trị giá (cả hai đều dương ở
+    # dòng bán), nên `computed_totals.net` của chuỗi này = trị giá + chiết khấu, KHÔNG
+    # phải tiền thực trả. Số thực trả là 'Tổng Tiền Thanh Toán' do Co.op in ra. Không
+    # cảnh báo thì rất dễ có người lấy nhầm 8,88 tỷ thay cho 6,20 tỷ.
+    if declared_pay:
+        warnings.append(
+            "Với Co.op, tiền THỰC TRẢ là 'Tổng Tiền Thanh Toán' = {:,.0f}đ (đọc từ file). "
+            "Tổng có dấu của các dòng KHÔNG phải tiền thực trả vì chiết khấu ghi cùng dấu "
+            "với trị giá.".format(declared_pay))
     if n_sheet > 1:
         warnings.append("File Co.op có %d sheet = %d LẦN THANH TOÁN riêng (số chứng từ + ngày riêng). "
                         "Không gộp thành một phiếu." % (n_sheet, n_sheet))
