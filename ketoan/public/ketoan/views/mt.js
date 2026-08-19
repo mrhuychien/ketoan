@@ -518,8 +518,9 @@ async function loadChains(container, state) {
               <th>Chuỗi</th><th class="num">Hóa đơn</th>
               <th class="num">Đã xuất</th><th class="num">Trả hàng</th>
               <th class="num">Đã thu</th><th class="num">Còn lại</th>
-              <th class="num">Nhận trong kỳ</th><th class="num">Chiết khấu</th>
-              <th class="num">Phí</th><th class="num">Khác</th><th class="num">Dòng bảng kê</th>
+              <th class="num">Tiền hàng trong kỳ</th><th class="num">Chiết khấu</th>
+              <th class="num">Phí</th><th class="num">Khác</th>
+              <th class="num">Thực nhận</th><th class="num">Dòng bảng kê</th>
             </tr></thead>
             <tbody>
               ${chains.map((c) => html`<tr>
@@ -538,6 +539,7 @@ async function loadChains(container, state) {
                 <td class="num">${formatVND(c.discount)}</td>
                 <td class="num">${formatVND(c.fee)}</td>
                 <td class="num">${formatVND(c.other)}</td>
+                <td class="num"><b>${formatVND(c.net_received_est)}</b></td>
                 <td class="num">${c.advice_lines}</td>
               </tr>`)}
               <tr>
@@ -551,6 +553,7 @@ async function loadChains(container, state) {
                 <td class="num"><b>${formatVND(t.discount)}</b></td>
                 <td class="num"><b>${formatVND(t.fee)}</b></td>
                 <td class="num"><b>${formatVND(t.other)}</b></td>
+                <td class="num"><b>${formatVND(t.net_received_est)}</b></td>
                 <td class="num"><b>${t.advice_lines || 0}</b></td>
               </tr>
             </tbody>
@@ -558,8 +561,12 @@ async function loadChains(container, state) {
           <div class="kt-sub" style="margin-top:8px">
             <b>Hai trục thời gian khác nhau, cố ý không gộp:</b>
             "Đã xuất / Đã thu / Còn lại" tính theo hóa đơn <b>ghi sổ trong kỳ</b> (tiền của chúng thu lúc nào cũng tính) —
-            đó là công nợ. "Nhận trong kỳ / Chiết khấu / Phí / Khác" tính theo <b>ngày thanh toán của bảng kê</b> —
-            đó là dòng tiền. Cộng hai cột đó vào nhau sẽ ra con số không có nghĩa kế toán nào.
+            đó là công nợ. Bốn cột sau tính theo <b>ngày thanh toán của bảng kê</b> — đó là dòng tiền.
+            Cộng hai nhóm vào nhau sẽ ra con số không có nghĩa kế toán nào.
+            <br><b>"Tiền hàng trong kỳ" là tổng GỘP các dòng hóa đơn, chưa trừ gì.</b>
+            Cột <b>"Thực nhận"</b> mới là số xấp xỉ khớp được với sao kê ngân hàng:
+            tiền hàng trừ chiết khấu, phí và các khoản ghi giảm. Đọc nhầm hai cột này là
+            lệch đúng bằng phần chuỗi đã trừ lại (với Co.op tháng mẫu là hơn 2,2 tỉ đồng).
           </div>`}
     </div></div>`);
 }
@@ -750,6 +757,8 @@ async function showAdvicePreview(container, state, modal, content, filename, cha
         </div></div>`
       : ""}
 
+    ${riskBlocks(advices)}
+
     <div class="kt-stats kt-mb">
       <div class="kt-stat"><div class="kt-stat-label">Dòng đọc được</div>
         <div class="kt-stat-value">${totalLines}</div>
@@ -879,13 +888,132 @@ async function showAdvicePreview(container, state, modal, content, filename, cha
         customer: modal.body.querySelector("#ma-customer").value.trim() || undefined,
         note: modal.body.querySelector("#ma-note").value.trim() || undefined,
       });
-      toast(r.message || `Đã ghi nhận ${r.advice_count} bảng kê`, "success");
-      modal.close();
-      location.reload();
+      // Cảnh báo SAU KHI GHI là kênh duy nhất báo cho người nạp biết tiền vừa
+      // được ghi vào hóa đơn của khách khác, hoặc chỉ mục hóa đơn bị cắt cụt.
+      // Trước đây chúng bị vứt ngay: `toast(r.message)` rồi `location.reload()`
+      // xóa sạch màn hình — kế toán chỉ thấy một dòng xanh "đã ghi nhận".
+      const post = [...(r.warnings || []),
+        ...(r.lines_on_other_customer || []).map(
+          (x) => `Dòng ${x.source_row || "?"} · HĐ ${x.inv_series || ""} ${x.inv_no || ""} `
+               + `đã nối vào ${x.sales_invoice || "?"} của khách ${x.si_customer_name || x.si_customer || "?"}`)];
+      if (!post.length) {
+        toast(r.message || `Đã ghi nhận ${r.advice_count} bảng kê`, "success");
+        modal.close();
+        location.reload();
+        return;
+      }
+      // Có cảnh báo thì KHÔNG tự đóng và KHÔNG reload — bắt người đọc rồi tự đóng.
+      setHTML(modal.body, html`
+        <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-success)"><div class="kt-card-body">
+          <b><i class="fas fa-circle-check"></i> ${r.message || `Đã ghi nhận ${r.advice_count} bảng kê`}</b>
+        </div></div>
+        <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)">Đã ghi nhận NHƯNG có ${post.length} điểm cần kiểm ngay</b>
+          <div class="kt-sub" style="margin:6px 0">
+            Dữ liệu đã được ghi. Những dòng dưới đây có thể đã gán tiền sang hóa đơn của khách
+            khác — mở bảng kê trên Desk để sửa liên kết nếu sai.
+          </div>
+          <ul class="kt-sub" style="margin:6px 0 0 18px">${post.map((w) => html`<li>${w}</li>`)}</ul>
+        </div></div>
+        <div style="display:flex;gap:10px;justify-content:flex-end">
+          <a class="kt-btn kt-btn--outline" target="_blank" href="/desk/mt-payment-advice">Mở trên Desk</a>
+          <button class="kt-btn" id="ma-done">Tôi đã đọc</button>
+        </div>`);
+      modal.body.querySelector("#ma-done").addEventListener("click", () => {
+        modal.close();
+        location.reload();
+      });
     } catch (e) {
       toast(e.message, "error");
       go.disabled = false;
       go.innerHTML = "Thử lại";
     }
   });
+}
+
+
+// ── Ba lưới an toàn của màn xem trước ───────────────────────────────────────
+// Backend dựng sẵn amount_mismatches / overpaid_invoices / cross_chain nhưng
+// trước đây màn xem trước KHÔNG đọc tới, nên cảnh báo sinh ra rồi vứt ngay
+// trong cùng một tick — kế toán chỉ thấy một dòng "khớp N/N" màu xanh.
+//
+// Đây đúng là ba chiều nối nhầm hóa đơn nguy hiểm nhất, và cả ba đều KHÔNG làm
+// số kiểm tra của file lệch một đồng nào, nên không có lưới nào khác bắt được.
+function riskRows(list, cols) {
+  return html`<div class="kt-table-wrap" style="max-height:240px;overflow:auto;margin-top:6px">
+    <table class="kt-table"><thead><tr>
+      <th>Dòng</th><th>Hóa đơn trên bảng kê</th><th>Nối vào</th><th>Khách</th>
+      ${cols.map((c) => html`<th class="num">${c.label}</th>`)}
+    </tr></thead><tbody>
+      ${list.map((x) => html`<tr>
+        <td>${x.source_row || "—"}</td>
+        <td>${x.inv_series || ""} <b>${x.inv_no || "—"}</b></td>
+        <td>${x.sales_invoice
+          ? html`<a target="_blank" href="/desk/sales-invoice/${encodeURIComponent(x.sales_invoice)}">${x.sales_invoice}</a>`
+          : html`<span class="kt-sub">chưa nối</span>`}</td>
+        <td class="kt-cell-wrap">${x.si_customer_name || x.si_customer || "—"}</td>
+        ${cols.map((c) => html`<td class="num">${c.get(x)}</td>`)}
+      </tr>`)}
+    </tbody></table></div>`;
+}
+
+function riskBlocks(advices) {
+  const gather = (k) => (advices || []).flatMap((a) => a[k] || []);
+  const mism = gather("amount_mismatches");
+  const over = gather("overpaid_invoices");
+  const cross = gather("cross_chain");
+  const trunc = (advices || []).some((a) => a.index_truncated);
+
+  return html`
+    ${trunc
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)"><i class="fas fa-scissors"></i> Chỉ mục hóa đơn bị cắt cụt</b>
+          <div class="kt-sub" style="margin-top:6px">
+            Số hóa đơn trong khoảng vượt trần tra cứu, nên một số dòng có thể KHÔNG khớp được
+            dù hóa đơn có thật. Thu hẹp khoảng ngày rồi nạp lại — đừng kết luận "chưa xuất hóa đơn".
+          </div>
+        </div></div>`
+      : ""}
+
+    ${cross.length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)"><i class="fas fa-shuffle"></i>
+            ${cross.length} dòng nối vào hóa đơn của CHUỖI KHÁC hoặc hóa đơn đã hủy/đã thay thế</b>
+          <div class="kt-sub" style="margin:6px 0">
+            Cả 5 chuỗi dùng chung dải ký hiệu, nên đọc lệch một chữ số là tiền của chuỗi này
+            được ghi vào hóa đơn của chuỗi kia — hai bên lệch công nợ ngược chiều nhau.
+            Những dòng này đã bị hạ xuống <b>Cần review</b>, kiểm trước khi nạp.
+          </div>
+          ${riskRows(cross, [{ label: "Tiền", get: (x) => formatVND(x.total_amount) }])}
+        </div></div>`
+      : ""}
+
+    ${over.length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)"><i class="fas fa-arrow-up-right-dots"></i>
+            ${over.length} hóa đơn bị trả VƯỢT giá trị</b>
+          <div class="kt-sub" style="margin:6px 0">
+            Tổng tiền phân bổ vào hóa đơn đã vượt giá trị của nó. Thường là nối nhầm, hoặc kỳ
+            này đã được nạp ở một bản ghi khác rồi.
+          </div>
+          ${riskRows(over, [
+            { label: "Đã trả trước", get: (x) => formatVND(x.paid_before) },
+            { label: "Vượt", get: (x) => formatVND(x.over) }])}
+        </div></div>`
+      : ""}
+
+    ${mism.length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body">
+          <b><i class="fas fa-scale-unbalanced"></i> ${mism.length} dòng khớp được nhưng LỆCH tiền</b>
+          <div class="kt-sub" style="margin:6px 0">
+            Không chặn nạp — chuỗi có quyền trả từng phần, nhiều kỳ mới đủ. Nhưng lệch cũng là
+            dấu hiệu nối nhầm hóa đơn, nên phải nhìn thấy.
+          </div>
+          ${riskRows(mism, [
+            { label: "Bảng kê", get: (x) => formatVND(x.total_amount) },
+            { label: "Hóa đơn", get: (x) => formatVND(x.si_grand_total) },
+            { label: "Lệch", get: (x) => formatVND(x.diff) }])}
+        </div></div>`
+      : ""}
+  `;
 }
