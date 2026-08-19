@@ -244,6 +244,19 @@ def _paid_subquery():
 
     Lọc company NGAY TRONG JOIN: bảng kê của công ty khác không được phép làm
     hóa đơn của công ty này thành "đã thanh toán".
+
+    `clawed_back` — TIỀN CHUỖI ĐÒI LẠI trên đúng hóa đơn đó (dòng 'Ghi giảm' có
+    nối Sales Invoice). Quan sát thật: Co.op đòi lại tiền một hóa đơn đã trả
+    bằng một dòng ghi giảm mang CÙNG số hóa đơn (HĐ 3176, −3.121.200đ). Không
+    trừ ra thì hóa đơn vẫn hiện "đã thu đủ" trong khi tiền đã bị lấy lại — sai
+    đúng hai lần số đó khi đối chiếu với sao kê.
+
+    ⚠ CHƯA ĐỦ: tầng khớp tự động hiện chỉ nối Sales Invoice cho dòng 'Thanh
+    toán' (xem `_match_row`), nên `clawed_back` chỉ có số khi người chốt tay
+    liên kết cho dòng ghi giảm. Cột này vì vậy là bước đúng nhưng chưa khép kín
+    — mở rộng khớp tự động cho dòng ghi giảm phải kiểm được trên database thật
+    trước, vì dòng chiết khấu của Central Retail cũng mang ký hiệu hóa đơn bán
+    ra của chính mình mà KHÔNG hề trả cho hóa đơn đó.
     """
     return """
         LEFT JOIN (
@@ -252,13 +265,15 @@ def _paid_subquery():
                             THEN ABS(l.total_amount) ELSE 0 END) AS paid,
                    SUM(CASE WHEN IFNULL(l.match_confidence, '') != 'Chắc chắn'
                             THEN ABS(l.total_amount) ELSE 0 END) AS paid_review,
-                   COUNT(*) AS pay_lines,
+                   SUM(CASE WHEN l.row_kind = %(kind_deduct)s
+                            THEN ABS(l.total_amount) ELSE 0 END) AS clawed_back,
+                   SUM(CASE WHEN l.row_kind = %(kind_payment)s THEN 1 ELSE 0 END) AS pay_lines,
                    MAX(IFNULL(l.payment_date, a.payment_date)) AS last_payment_date
             FROM `tabMT Payment Advice Line` l
             INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent
                    AND a.company = %(company)s
             WHERE l.parenttype = 'MT Payment Advice'
-              AND l.row_kind = %(kind_payment)s
+              AND l.row_kind IN (%(kind_payment)s, %(kind_deduct)s)
               AND IFNULL(l.sales_invoice, '') != ''
             GROUP BY l.sales_invoice
         ) p ON p.si_name = si.name
@@ -270,9 +285,15 @@ def _paid_subquery():
 # `is_return = 0` ở rổ "chưa thanh toán": hóa đơn trả hàng là khoản GHI GIẢM
 # công nợ, không phải khoản phải thu. Để nó nằm trong rổ nợ thì rổ đó lúc nào
 # cũng đầy phiếu trả hàng không bao giờ "được thanh toán" — báo động giả.
+#
+# Dùng TIỀN RÒNG (đã trả trừ đã đòi lại), không dùng `p.paid` trần: chuỗi đòi
+# lại tiền của một hóa đơn đã trả thì hóa đơn đó phải quay về rổ nợ, không thì
+# nó nằm mãi ở "đã thu đủ" trong khi tiền đã bị lấy đi.
+_NET_PAID = "(IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0))"
+
 _BUCKET_WHERE = {
-    "chua_thanh_toan": "si.is_return = 0 AND IFNULL(p.paid, 0) < ABS(si.grand_total) - %(tol)s",
-    "da_thanh_toan": "IFNULL(p.paid, 0) > 0 AND IFNULL(p.paid, 0) >= ABS(si.grand_total) - %(tol)s",
+    "chua_thanh_toan": f"si.is_return = 0 AND {_NET_PAID} < ABS(si.grand_total) - %(tol)s",
+    "da_thanh_toan": f"{_NET_PAID} > 0 AND {_NET_PAID} >= ABS(si.grand_total) - %(tol)s",
     "tat_ca": "1 = 1",
 }
 
@@ -293,7 +314,7 @@ def get_overview(company=None, from_date=None, to_date=None):
     company = _company(company)
 
     p = {"company": company, "fd": from_date, "td": to_date,
-         "tol": PAID_TOLERANCE, "kind_payment": KIND_PAYMENT}
+         "tol": PAID_TOLERANCE, "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}
     mt = _mt_clause(p)
     join = _paid_subquery()
 
@@ -301,8 +322,8 @@ def get_overview(company=None, from_date=None, to_date=None):
         return frappe.db.sql(f"""
             SELECT COUNT(*) AS cnt,
                    IFNULL(SUM(ABS(si.grand_total)), 0) AS amount,
-                   IFNULL(SUM(GREATEST(ABS(si.grand_total) - IFNULL(p.paid, 0), 0)), 0) AS remaining,
-                   IFNULL(SUM(LEAST(IFNULL(p.paid, 0), ABS(si.grand_total))), 0) AS collected,
+                   IFNULL(SUM(GREATEST(ABS(si.grand_total) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0)), 0) AS remaining,
+                   IFNULL(SUM(LEAST((IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), ABS(si.grand_total))), 0) AS collected,
                    IFNULL(SUM(IFNULL(p.paid_review, 0)), 0) AS pending_review
             FROM `tabSales Invoice` si
             INNER JOIN `tabCustomer` c ON c.name = si.customer
@@ -354,10 +375,10 @@ def get_overview(company=None, from_date=None, to_date=None):
     debt = frappe.db.sql(f"""
         SELECT
             IFNULL(SUM(CASE WHEN si.is_return = 0
-                            THEN GREATEST(ABS(si.grand_total) - IFNULL(p.paid, 0), 0) ELSE 0 END), 0) AS unpaid,
+                            THEN GREATEST(ABS(si.grand_total) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) ELSE 0 END), 0) AS unpaid,
             IFNULL(SUM(CASE WHEN si.is_return = 1 THEN ABS(si.grand_total) ELSE 0 END), 0) AS credit_notes,
             SUM(CASE WHEN si.is_return = 0
-                     AND IFNULL(p.paid, 0) < ABS(si.grand_total) - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
+                     AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < ABS(si.grand_total) - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
         {join}
@@ -456,7 +477,7 @@ def get_overview(company=None, from_date=None, to_date=None):
 
 def _invoice_page(company, from_date, to_date, where, search, page_size, offset, sort=None):
     p = {"company": company, "fd": from_date, "td": to_date, "tol": PAID_TOLERANCE,
-         "kind_payment": KIND_PAYMENT, "limit": page_size, "offset": offset}
+         "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT, "limit": page_size, "offset": offset}
     mt = _mt_clause(p)
     join = _paid_subquery()
     if search:
@@ -484,10 +505,11 @@ def _invoice_page(company, from_date, to_date, where, search, page_size, offset,
                si.net_total, si.total_taxes_and_charges, si.grand_total,
                {series_col} AS inv_series, {no_col} AS inv_no,
                IFNULL(p.paid, 0) AS paid,
+               IFNULL(p.clawed_back, 0) AS clawed_back,
                IFNULL(p.paid_review, 0) AS paid_review,
                IFNULL(p.pay_lines, 0) AS pay_lines,
                p.last_payment_date,
-               GREATEST(ABS(si.grand_total) - IFNULL(p.paid, 0), 0) AS remaining
+               GREATEST(ABS(si.grand_total) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) AS remaining
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
         {join}
@@ -524,7 +546,7 @@ def _attach_payment_lines(rows):
           AND l.row_kind = %(kind_payment)s
           AND l.sales_invoice IN %(names)s
         ORDER BY payment_date, l.idx
-    """, {"names": tuple(names), "kind_payment": KIND_PAYMENT}, as_dict=True)
+    """, {"names": tuple(names), "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}, as_dict=True)
     grouped = defaultdict(list)
     for ln in lines:
         grouped[ln.sales_invoice].append(ln)
@@ -668,7 +690,7 @@ def get_chain_summary(company=None, from_date=None, to_date=None):
     mapping, ambiguous = _customer_chain_map()
 
     p = {"company": company, "fd": from_date, "td": to_date,
-         "tol": PAID_TOLERANCE, "kind_payment": KIND_PAYMENT}
+         "tol": PAID_TOLERANCE, "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}
     mt = _mt_clause(p)
     join = _paid_subquery()
 
@@ -679,11 +701,11 @@ def get_chain_summary(company=None, from_date=None, to_date=None):
                COUNT(*) AS cnt,
                IFNULL(SUM(CASE WHEN si.is_return = 0 THEN ABS(si.grand_total) ELSE 0 END), 0) AS invoiced,
                IFNULL(SUM(CASE WHEN si.is_return = 1 THEN ABS(si.grand_total) ELSE 0 END), 0) AS returns_amt,
-               IFNULL(SUM(LEAST(IFNULL(p.paid, 0), ABS(si.grand_total))), 0) AS collected,
+               IFNULL(SUM(LEAST((IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), ABS(si.grand_total))), 0) AS collected,
                IFNULL(SUM(CASE WHEN si.is_return = 0
-                          THEN GREATEST(ABS(si.grand_total) - IFNULL(p.paid, 0), 0) ELSE 0 END), 0) AS outstanding,
+                          THEN GREATEST(ABS(si.grand_total) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) ELSE 0 END), 0) AS outstanding,
                SUM(CASE WHEN si.is_return = 0
-                        AND IFNULL(p.paid, 0) < ABS(si.grand_total) - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
+                        AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < ABS(si.grand_total) - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
         {join}
@@ -1118,7 +1140,7 @@ def _prior_paid(names):
           AND l.row_kind = %(kind_payment)s
           AND l.sales_invoice IN %(names)s
         GROUP BY l.sales_invoice
-    """, {"names": tuple(names), "kind_payment": KIND_PAYMENT}, as_dict=True)
+    """, {"names": tuple(names), "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}, as_dict=True)
     return {r.si: flt(r.paid) for r in rows}
 
 
@@ -1862,7 +1884,7 @@ def relink_line(line, sales_invoice=None, note=None):
             INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent
             WHERE l.parenttype = 'MT Payment Advice' AND l.sales_invoice = %(si)s
               AND l.name != %(line)s AND l.row_kind = %(kind_payment)s
-        """, {"si": sales_invoice, "line": line, "kind_payment": KIND_PAYMENT}, as_dict=True)
+        """, {"si": sales_invoice, "line": line, "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}, as_dict=True)
 
     values = {
         "sales_invoice": sales_invoice or None,
