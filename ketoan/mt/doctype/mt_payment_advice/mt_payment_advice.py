@@ -36,6 +36,17 @@ class MTPaymentAdvice(Document):
         if not self.status:
             self.status = "Nháp"
 
+        # Công ty rỗng = bản ghi VÔ HÌNH. Sáu truy vấn của màn hình MT đều lọc
+        # `a.company = %(company)s`, kể cả `_paid_subquery`, nên một bảng kê
+        # thiếu công ty sẽ không hiện ở đâu cả VÀ tiền của nó không được tính là
+        # đã thu — hóa đơn đã trả vẫn nằm rổ "chưa thanh toán". Không báo gì.
+        #
+        # reqd=1 lo đường Desk; nhánh này lo đường code gọi thẳng.
+        if not self.company:
+            self.company = frappe.defaults.get_user_default("Company")
+        if not self.company:
+            frappe.throw(_("Bảng kê phải thuộc một công ty"))
+
         self._validate_lines()
         self._compute_totals()
         self._warn_declared_mismatch()

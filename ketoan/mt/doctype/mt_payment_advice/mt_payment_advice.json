@@ -60,7 +60,9 @@
    "fieldname": "company",
    "fieldtype": "Link",
    "label": "Công ty",
-   "options": "Company"
+   "options": "Company",
+   "reqd": 1,
+   "description": "Bắt buộc: 6 truy vấn của màn hình MT đều lọc theo công ty, bản ghi thiếu công ty sẽ biến mất khỏi mọi màn hình mà không báo gì."
   },
   {
    "fieldname": "column_break_head",
@@ -178,23 +180,47 @@
  "owner": "Administrator",
  "permissions": [
   {
-   "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1,
    "role": "System Manager"
   },
   {
-   "create": 1, "delete": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "share": 1,
+   "write": 1,
    "role": "Ke Toan Truong"
   },
   {
-   "create": 1, "delete": 1, "export": 1, "print": 1, "read": 1, "report": 1, "write": 1,
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "write": 1,
    "role": "Accounts Manager"
   },
   {
-   "print": 1, "read": 1, "report": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
    "role": "Ke Toan MT"
   },
   {
-   "read": 1, "report": 1,
+   "read": 1,
+   "report": 1,
    "role": "Accounts User"
   }
  ],

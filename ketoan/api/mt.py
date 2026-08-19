@@ -182,9 +182,25 @@ def _company(company=None):
     company = resolve_company(company)
     if not company:
         frappe.throw(_("Chưa xác định được công ty"))
-    if not frappe.has_permission("Company", doc=company, ptype="read"):
-        frappe.throw(_("Bạn không có quyền trên công ty {0}").format(company),
-                     frappe.PermissionError)
+
+    # Kiểm bằng USER PERMISSION, KHÔNG bằng has_permission("Company").
+    #
+    # has_permission đòi role phải có quyền đọc DocType `Company`, mà ma trận
+    # quyền của app (install._SALES_CHANNEL_PERMS) không hề cấp Company cho vai
+    # trò nào. User portal chỉ mang role của app này sẽ bị chặn ngay dòng đầu
+    # của MỌI method — khóa sạch màn hình MT của người dùng hợp lệ để đổi lấy
+    # một lớp bảo vệ mà lớp dưới đây đã lo rồi.
+    #
+    # User Permission mới đúng là thứ khai "user này được đụng công ty nào".
+    # Không khai gì = không bị giới hạn — đúng ngữ nghĩa của Frappe.
+    from frappe.permissions import get_user_permissions
+
+    allowed = get_user_permissions().get("Company") or []
+    if allowed:
+        names = {d.get("doc") for d in allowed if d.get("doc")}
+        if names and company not in names:
+            frappe.throw(_("Bạn không có quyền trên công ty {0}").format(company),
+                         frappe.PermissionError)
     return company
 
 
@@ -937,16 +953,33 @@ def _si_index(company, dates):
         LIMIT %(limit)s
     """, p, as_dict=True)
 
-    by_key, by_no = defaultdict(list), defaultdict(list)
+    # CHỈ MỤC HAI TẦNG.
+    #
+    # `by_exact` giữ ký hiệu NGUYÊN VĂN, `by_key` giữ ký hiệu đã cắt mẫu số.
+    # VÌ SAO cần cả hai: `norm_series_mt` cắt chữ số mẫu số ở đầu để 'C26THG' và
+    # '1C26THG' gặp được nhau (§E — lẫn lộn ngay trong một file). Nhưng cắt xong
+    # thì '1C26THG' và '2C26THG' cũng chung một khóa, mà theo TT78 đó là HAI mẫu
+    # số khác nhau (1 = hóa đơn GTGT, 2 = hóa đơn bán hàng), MỖI MẪU SỐ ĐÁNH SỐ
+    # ĐỘC LẬP TỪ 1 — tức là số 4675 của mẫu 1 và số 4675 của mẫu 2 là hai hóa đơn
+    # hoàn toàn khác nhau, của hai khách khác nhau.
+    #
+    # Chỉ có một tầng thì buộc phải chọn: hoặc khớp hụt, hoặc ghi tiền sang hóa
+    # đơn khác. Hai tầng thì thử đúng trước, nới sau, và nới thì hạ độ tin cậy.
+    by_exact, by_key, by_no = defaultdict(list), defaultdict(list), defaultdict(list)
     info = {}
     for r in rows:
         info[r.name] = r
-        key = (norm_series_mt(r.inv_series), norm_inv_no(r.inv_no))
-        if key[0] and key[1]:
-            by_key[key].append(r.name)
-        if key[1]:
-            by_no[key[1]].append(r.name)
-    return {"by_key": by_key, "by_no": by_no, "info": info,
+        no = norm_inv_no(r.inv_no)
+        if not no:
+            continue
+        exact = norm_series(r.inv_series)
+        if exact:
+            by_exact[(exact, no)].append(r.name)
+        loose = norm_series_mt(r.inv_series)
+        if loose:
+            by_key[(loose, no)].append(r.name)
+        by_no[no].append(r.name)
+    return {"by_exact": by_exact, "by_key": by_key, "by_no": by_no, "info": info,
             "from": cstr(fd), "to": cstr(td),
             "count": total, "truncated": total > MAX_SI_INDEX_ROWS}
 
@@ -995,10 +1028,27 @@ def _match_row(row, idx, chain_key=None, chain=None, cus_chain=None):
     if idx is None:
         return None, "site_thieu_field_so_hoa_don", "Không khớp", None
 
+    raw_series = norm_series(row.get("inv_series") or "")
     series = norm_series_mt(row.get("inv_series") or "")
 
     if series:
-        cands = idx["by_key"].get((series, no)) or []
+        # TẦNG 1 — ký hiệu nguyên văn. Khớp ở đây là chắc chắn nhất: cùng mẫu số,
+        # cùng dải hóa đơn, không phải suy luận gì.
+        cands = idx["by_exact"].get((raw_series, no)) or []
+        method, downgrade = "ky_hieu_so", None
+
+        if not cands:
+            # TẦNG 2 — nới bằng cách cắt mẫu số. CHỈ được nới khi ký hiệu trong
+            # FILE không có mẫu số (vd 'C26THG'): đó đúng là ca §E mà chuỗi in
+            # thiếu chữ số đầu. Nếu file CÓ mẫu số mà tầng 1 trượt thì tuyệt đối
+            # không nới — nới là gán số 4675 của mẫu 1 vào hóa đơn mẫu 2.
+            if raw_series and raw_series == series:
+                cands = idx["by_key"].get((series, no)) or []
+                method = "ky_hieu_thieu_mau_so"
+                # Nới thì hạ độ tin cậy: ta đang ĐOÁN rằng ký hiệu thiếu mẫu số
+                # ứng với đúng mẫu số của hóa đơn tìm được.
+                downgrade = "Cần review"
+
         if len(cands) == 1:
             si = idx["info"][cands[0]]
             diff = abs(abs(flt(row.get("total_amount"))) - abs(flt(si.grand_total)))
@@ -1007,7 +1057,7 @@ def _match_row(row, idx, chain_key=None, chain=None, cus_chain=None):
             bad = _invoice_objection(si, chain, cus_chain)
             if bad:
                 return cands[0], bad, "Cần review", (flt(diff) or None)
-            return cands[0], "ky_hieu_so", "Chắc chắn", (flt(diff) or None)
+            return cands[0], method, (downgrade or "Chắc chắn"), (flt(diff) or None)
         if len(cands) > 1:
             return None, f"trung_{len(cands)}_hoa_don", "Cần review", None
         return None, "khong_tim_thay_ky_hieu_so", "Không khớp", None
