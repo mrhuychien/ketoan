@@ -179,6 +179,7 @@ def _company(company=None):
     và `commit_advice` còn GHI bảng kê vào công ty do client chỉ định. Nên chốt
     chặn duy nhất phải nằm ở đây.
     """
+    asked = company                       # giá trị client gửi lên, có thể rỗng
     company = resolve_company(company)
     if not company:
         frappe.throw(_("Chưa xác định được công ty"))
@@ -188,16 +189,31 @@ def _company(company=None):
     # has_permission đòi role phải có quyền đọc DocType `Company`, mà ma trận
     # quyền của app (install._SALES_CHANNEL_PERMS) không hề cấp Company cho vai
     # trò nào. User portal chỉ mang role của app này sẽ bị chặn ngay dòng đầu
-    # của MỌI method — khóa sạch màn hình MT của người dùng hợp lệ để đổi lấy
-    # một lớp bảo vệ mà lớp dưới đây đã lo rồi.
+    # của MỌI method — khóa sạch màn hình MT của người dùng hợp lệ.
     #
     # User Permission mới đúng là thứ khai "user này được đụng công ty nào".
     # Không khai gì = không bị giới hạn — đúng ngữ nghĩa của Frappe.
-    from frappe.permissions import get_user_permissions
+    try:
+        from frappe.permissions import get_user_permissions
 
-    allowed = get_user_permissions().get("Company") or []
+        # Truyền user TƯỜNG MINH: ở Frappe v16 tham số này BẮT BUỘC. Gọi thiếu
+        # thì mọi method của màn hình MT ném "missing 1 required positional
+        # argument: 'user'" — đã xảy ra thật.
+        allowed = get_user_permissions(frappe.session.user).get("Company") or []
+    except Exception:
+        # Chữ ký/vị trí hàm này đã đổi giữa các bản Frappe. Không đoán tiếp, và
+        # cũng KHÔNG bỏ qua chốt chặn — lùi về quy tắc chặt hơn: chỉ chấp nhận
+        # đúng công ty mặc định của user, tức là client không được tự chọn công
+        # ty khác. Hỏng thì hỏng theo hướng KHÓA, không theo hướng MỞ.
+        frappe.log_error(frappe.get_traceback(), "mt._company/user_permissions")
+        default = resolve_company(None)
+        if asked and default and company != default:
+            frappe.throw(_("Bạn không có quyền trên công ty {0}").format(company),
+                         frappe.PermissionError)
+        return company
+
     if allowed:
-        names = {d.get("doc") for d in allowed if d.get("doc")}
+        names = {d.get("doc") for d in allowed if isinstance(d, dict) and d.get("doc")}
         if names and company not in names:
             frappe.throw(_("Bạn không có quyền trên công ty {0}").format(company),
                          frappe.PermissionError)
