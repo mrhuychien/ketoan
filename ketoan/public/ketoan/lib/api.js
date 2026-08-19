@@ -148,6 +148,7 @@ export const api = {
   mtCustomerSummary: (a) => callMethod(NS + "mt.get_customer_summary", withCompany(a)),
   // Gán chuỗi cho khách — chỗ gán CHÍNH THỨC. Suy từ bảng kê đã nạp là vòng
   // luẩn quẩn: khách mới ký hợp đồng chưa có bảng kê nào thì không gán được.
+  mtCustomers: (a) => callMethod(NS + "mt.get_mt_customers", withCompany(a)),
   mtChainAssignment: (a) => callMethod(NS + "mt.get_chain_assignment", withCompany(a)),
   mtSetCustomerChain: (customer, chain) => callMethod(NS + "mt.set_customer_chain", { customer, chain }),
   // Xem trước BẮT BUỘC chạy trước khi nạp — nó trả `plan_hash` mà commit đòi.

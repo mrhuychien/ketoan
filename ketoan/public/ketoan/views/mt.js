@@ -854,12 +854,15 @@ async function showAdvicePreview(container, state, modal, content, filename, cha
     ${customerBlock(advices)}
 
     <div class="kt-card kt-mb"><div class="kt-card-body">
-      <label class="kt-label">Ghi đè khách hàng cho MỌI kỳ (để trống = dùng kết quả nhận diện ở trên)</label>
-      <input class="kt-input" id="ma-customer" placeholder="Mã Customer trong ERPNext, vd CUS-0001">
+      <label class="kt-label">Khách hàng (áp cho MỌI kỳ trong file)</label>
+      <select class="kt-input" id="ma-customer">
+        <option value="">— dùng kết quả nhận diện ở trên —</option>
+      </select>
       <div class="kt-sub" style="margin-top:6px">
-        Chỉ điền khi muốn <b>đè</b> kết quả tự nhận diện — giá trị này áp cho <b>tất cả</b> các kỳ
-        trong file. File nhiều kỳ thuộc nhiều pháp nhân (Co.op) thì <b>đừng</b> điền: để máy nhận
-        diện theo từng kỳ, kỳ nào máy không chắc thì sửa sau trên Desk.
+        Chọn ở đây là <b>đè</b> kết quả tự nhận diện, áp cho <b>tất cả</b> các kỳ trong file.
+        File nhiều kỳ thuộc nhiều pháp nhân (Co.op) thì <b>đừng</b> chọn: để máy nhận diện
+        theo từng kỳ. Chọn xong thì <b>chuỗi của khách tự gán luôn</b> theo chuỗi của file —
+        không phải vào đâu gán lại.
       </div>
       <label class="kt-label" style="margin-top:12px">Ghi chú</label>
       <input class="kt-input" id="ma-note" placeholder="vd: bảng kê chuỗi gửi qua email ngày…">
@@ -881,6 +884,7 @@ async function showAdvicePreview(container, state, modal, content, filename, cha
   `);
 
   modal.body.querySelector("#ma-cancel").addEventListener("click", () => modal.close());
+  fillCustomerSelect(modal, p);
 
   const go = modal.body.querySelector("#ma-go");
   if (go) go.addEventListener("click", async () => {
@@ -1136,7 +1140,7 @@ async function loadCustomers(container, state) {
         ${(res.chains || []).map((c) => html`<option value="${c}" ${state.chain === c ? "selected" : ""}>${c}</option>`)}
       </select>
       <button class="kt-btn kt-btn--outline kt-btn--sm" id="mt-assign-chain">
-        <i class="fas fa-diagram-project"></i> Gán chuỗi cho khách
+        <i class="fas fa-diagram-project"></i> Sửa chuỗi của khách
       </button>
       <input class="kt-input kt-input--sm" id="mt-cus-search" placeholder="Tìm khách hàng…"
              value="${state.search}" style="margin-left:auto;min-width:220px">
@@ -1312,8 +1316,9 @@ async function renderChainAssign(container, state, modal, onlyUnassigned) {
       : ""}
 
     <p class="kt-sub">
-      Gán ở đây thì <b>không cần chờ có bảng kê</b>. Khách đã gán tường minh sẽ được ưu tiên
-      hơn kết quả máy suy từ bảng kê — kể cả khi khách từng xuất hiện trên bảng kê của chuỗi khác.
+      <b>Bình thường không cần vào đây.</b> Nạp bảng kê và chọn khách là chuỗi tự gán theo
+      chuỗi của file. Màn này chỉ để <b>sửa</b> khi gán sai, khi khách đổi chuỗi, hoặc khi
+      muốn gán trước cho khách mới ký hợp đồng mà chưa có bảng kê nào.
     </p>
 
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
@@ -1381,4 +1386,37 @@ async function renderChainAssign(container, state, modal, onlyUnassigned) {
       sel.disabled = false;
     });
   });
+}
+
+
+// Đổ danh sách khách kênh MT vào ô chọn của màn nạp bảng kê.
+//
+// Trước đây chỗ này là ô gõ mã trần ("CUS-0001") — bắt kế toán thuộc lòng mã
+// khách, mà không ai thuộc. Danh sách nạp sau khi khung đã hiện: chậm mạng thì
+// cùng lắm ô chọn trống một nhịp, không chặn cả màn xem trước.
+async function fillCustomerSelect(modal, p) {
+  const sel = modal.body.querySelector("#ma-customer");
+  if (!sel) return;
+  let res;
+  try {
+    res = await api.mtCustomers({ chain: p.chain || undefined });
+  } catch (_) {
+    return;   // giữ nguyên "dùng kết quả nhận diện" — vẫn nạp được
+  }
+  const rows = res.rows || [];
+  if (!rows.length) return;
+
+  // Khách đã thuộc đúng chuỗi của file lên nhóm trên, còn lại nhóm dưới — chọn
+  // nhầm sang khách của chuỗi khác là ghi tiền sai chỗ.
+  const same = rows.filter((r) => r.same_chain);
+  const other = rows.filter((r) => !r.same_chain);
+  const opt = (r) => html`<option value="${r.customer}">${r.customer_name || r.customer}${
+    r.chain ? ` · ${r.chain}` : " · chưa gán chuỗi"}</option>`;
+
+  setHTML(sel, html`
+    <option value="">— dùng kết quả nhận diện ở trên —</option>
+    ${same.length ? html`<optgroup label="Thuộc chuỗi ${p.chain}">${same.map(opt)}</optgroup>` : ""}
+    ${other.length ? html`<optgroup label="${same.length ? "Khách khác của kênh MT" : "Khách kênh MT"}">
+      ${other.map(opt)}</optgroup>` : ""}
+  `);
 }

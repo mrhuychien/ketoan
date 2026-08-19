@@ -1928,6 +1928,7 @@ def _commit_advice_locked(content, filename, chain, expected_hash, company, cust
 
     created = []
     auto_customer = []
+    chain_assigned = []
     for a in plan:
         # Khách hàng: người chọn tay ĐÈ máy. Không chọn thì lấy máy nhận diện,
         # nhưng CHỈ khi máy chắc chắn — tự điền một phỏng đoán vào field công nợ
@@ -1960,6 +1961,22 @@ def _commit_advice_locked(content, filename, chain, expected_hash, company, cust
             "lines": [_public_line(ln) for ln in a["lines"]],
         })
         doc.insert()
+
+        # CHỌN KHÁCH XONG THÌ CHUỖI TỰ GÁN LUÔN.
+        #
+        # Chuỗi của bảng kê do CHÍNH FILE khai (mỗi chuỗi một định dạng, parser
+        # nào đọc được thì đó là chuỗi đó) — không phải thứ cần hỏi lại người
+        # dùng. Nên khi kế toán chọn khách, ta đã biết đủ cặp (khách, chuỗi):
+        # ghi luôn vào Customer thay vì bắt họ vào một màn hình khác gán lại.
+        #
+        # Chỉ ghi khi đang TRỐNG: khách đã được chốt chuỗi rồi thì một file nạp
+        # nhầm không được phép đổi chuỗi của họ.
+        if row_customer and a["chain"] and frappe.db.has_column("Customer", "custom_mt_chain"):
+            if not frappe.db.get_value("Customer", row_customer, "custom_mt_chain"):
+                frappe.db.set_value("Customer", row_customer, "custom_mt_chain",
+                                    a["chain"], update_modified=False)
+                chain_assigned.append({"customer": row_customer, "chain": a["chain"]})
+
         _todo_for(doc, a)
         created.append({
             "name": doc.name,
@@ -1989,10 +2006,16 @@ def _commit_advice_locked(content, filename, chain, expected_hash, company, cust
         warnings.append(_("Đã tự nhận diện khách hàng cho {0} kỳ (suy từ hóa đơn đã khớp). "
                           "Kiểm lại trên bảng kê nếu thấy lạ.").format(len(auto_customer)))
 
+    if chain_assigned:
+        warnings.append(_("Đã gán chuỗi cho {0} khách hàng (lấy từ chuỗi của chính file). "
+                          "Khách đã có chuỗi thì giữ nguyên, không bị đè.")
+                        .format(len(chain_assigned)))
+
     return {
         "created": created,
         "advice_count": len(created),
         "auto_customer": auto_customer,
+        "chain_assigned": chain_assigned,
         "lines_on_other_customer": other_customer,
         "warnings": warnings,
         "checks": parsed.get("checks") or [],
@@ -2352,3 +2375,43 @@ def get_chain_assignment(company=None, only_unassigned=1):
         "note": _("'Suy từ bảng kê' là máy đoán từ các bảng kê đã nạp — nên chốt lại "
                   "bằng cách chọn chuỗi, vì khách có thể đổi chuỗi hoặc từng bị nạp nhầm."),
     }
+
+
+@frappe.whitelist()
+def get_mt_customers(company=None, chain=None):
+    """Danh sách khách hàng kênh MT để CHỌN khi nạp bảng kê.
+
+    Trả cả danh sách, không phải tìm-theo-gõ: kênh MT có giới hạn khách (mỗi
+    chuỗi vài pháp nhân), và kế toán cần NHÌN THẤY hết để chọn đúng chứ không
+    phải nhớ mã. Ô nhập mã trần ('CUS-0001') là bắt người dùng thuộc lòng mã —
+    không ai thuộc.
+
+    `chain` (lấy từ chuỗi máy nhận ra trong file) chỉ dùng để ĐƯA LÊN ĐẦU những
+    khách đã thuộc chuỗi đó, KHÔNG dùng để lọc bỏ: khách chưa gán chuỗi bao giờ
+    cũng phải chọn được, nếu không lại quay về vòng luẩn quẩn.
+    """
+    guard_mt()
+    _require_tables()
+    company = _company(company)
+    mapping, _amb = _customer_chain_map()
+
+    p = {"company": company}
+    mt = _mt_clause(p)
+    has_field = frappe.db.has_column("Customer", "custom_mt_chain")
+    col = "c.custom_mt_chain" if has_field else "NULL"
+    rows = frappe.db.sql(f"""
+        SELECT c.name AS customer, c.customer_name, {col} AS declared_chain
+        FROM `tabCustomer` c
+        WHERE c.disabled = 0 AND {mt}
+        ORDER BY c.customer_name
+    """, p, as_dict=True)
+
+    chain = norm_text(chain) or None
+    out = []
+    for r in rows:
+        ch = norm_text(r.declared_chain) or mapping.get(r.customer) or None
+        out.append({"customer": r.customer, "customer_name": r.customer_name,
+                    "chain": ch, "same_chain": bool(chain and ch == chain)})
+    # Khách cùng chuỗi lên trước, còn lại giữ thứ tự theo tên.
+    out.sort(key=lambda x: (not x["same_chain"], (x["customer_name"] or "").lower()))
+    return {"rows": out, "chain": chain, "has_field": has_field}
