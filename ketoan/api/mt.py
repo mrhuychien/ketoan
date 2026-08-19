@@ -170,6 +170,25 @@ def _range(from_date, to_date):
     return from_date, to_date
 
 
+def _require_tables():
+    """Bảng của DocType MT đã được tạo chưa.
+
+    VÌ SAO cần: DocType mới chỉ thành BẢNG sau `bench migrate`. Chưa migrate mà
+    mở màn hình thì mọi truy vấn ném thẳng lỗi MariaDB thô — kế toán nhận được
+    đúng câu `(1146, "Table 'xxx.tabMT Payment Advice Line' doesn't exist")` và
+    không có cách nào đoán ra phải làm gì. Đổi thành câu chỉ rõ việc cần làm.
+
+    Kiểm cả bảng CON: bảng cha có thể tạo được trong khi bảng con thất bại, và
+    phần lớn truy vấn của module này đọc bảng con.
+    """
+    for dt in ("MT Payment Advice", "MT Payment Advice Line"):
+        if not frappe.db.table_exists(dt):
+            frappe.throw(_(
+                "Chức năng Công nợ MT chưa được cài đặt trên site này (thiếu bảng {0}). "
+                "Quản trị chạy: bench --site TÊN_SITE migrate"
+            ).format(dt))
+
+
 def _company(company=None):
     """Công ty của màn hình — LUÔN kiểm quyền, kể cả khi lấy từ mặc định.
 
@@ -326,6 +345,7 @@ def get_overview(company=None, from_date=None, to_date=None):
     LẠI (chiết khấu / phí / ghi giảm).
     """
     guard_mt()
+    _require_tables()
     from_date, to_date = _range(from_date, to_date)
     company = _company(company)
 
@@ -626,6 +646,7 @@ def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None
     đơn — nạp hết rồi cắt ở trình duyệt là treo máy kế toán.
     """
     guard_mt()
+    _require_tables()
     if bucket not in BUCKETS:
         frappe.throw(_("Rổ không hợp lệ: {0}").format(bucket))
     from_date, to_date = _range(from_date, to_date)
@@ -701,6 +722,7 @@ def get_chain_summary(company=None, from_date=None, to_date=None):
     Gộp hai trục vào một cột là ra con số không có nghĩa kế toán nào.
     """
     guard_mt()
+    _require_tables()
     from_date, to_date = _range(from_date, to_date)
     company = _company(company)
     mapping, ambiguous = _customer_chain_map()
@@ -1581,6 +1603,7 @@ def preview_advice(content, filename=None, chain=None, company=None):
     Bắt buộc chạy trước `commit_advice` — trả về `plan_hash` mà commit đòi.
     """
     guard_mt()
+    _require_tables()
     company = _company(company)
     _check_size(content)
     filename = norm_text(filename)
@@ -1729,6 +1752,7 @@ def commit_advice(content, filename=None, chain=None, expected_hash=None,
     hạch toán sau khi soi bảng kê.
     """
     guard_manager()
+    _require_tables()
     company = _company(company)
     _check_size(content)
     filename = norm_text(filename)
@@ -1845,6 +1869,7 @@ def relink_line(line, sales_invoice=None, note=None):
     khóa mất nghiệp vụ trả nhiều đợt.
     """
     guard_manager()
+    _require_tables()
     row = frappe.db.get_value(
         "MT Payment Advice Line", line,
         ["name", "parent", "parenttype", "row_kind", "inv_series", "inv_no",
