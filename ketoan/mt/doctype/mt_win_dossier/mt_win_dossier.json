@@ -1,0 +1,211 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-08-20 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "dossier_no",
+  "submit_date",
+  "file_prefix",
+  "status",
+  "column_break_head",
+  "company",
+  "customer",
+  "vendor_code",
+  "period_from",
+  "period_to",
+  "section_total",
+  "total_before_vat",
+  "total_vat",
+  "column_break_total",
+  "total_amount",
+  "note",
+  "section_lines",
+  "lines"
+ ],
+ "fields": [
+  {
+   "default": "MT-HSW-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Chuỗi số",
+   "options": "MT-HSW-.#####",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "default": "1",
+   "description": "Phần <NN> của tên file. Nộp hai hồ sơ cùng ngày thì hồ sơ thứ hai là 02.",
+   "fieldname": "dossier_no",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "STT hồ sơ trong ngày",
+   "reqd": 1
+  },
+  {
+   "description": "Phần YYYYMMDD của tên file PDF.",
+   "fieldname": "submit_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày nộp hồ sơ",
+   "reqd": 1
+  },
+  {
+   "bold": 1,
+   "fieldname": "file_prefix",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên File PDF",
+   "read_only": 1
+  },
+  {
+   "default": "Nháp",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trạng thái",
+   "options": "\nNháp\nĐã nộp",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Công ty",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Khách hàng",
+   "options": "Customer",
+   "reqd": 1
+  },
+  {
+   "description": "Mẫu thật: 2007766. Vào cột `Code` của mọi dòng và vào tên file PDF.",
+   "fieldname": "vendor_code",
+   "fieldtype": "Data",
+   "label": "Mã NCC tại WinCommerce",
+   "reqd": 1
+  },
+  {
+   "fieldname": "period_from",
+   "fieldtype": "Date",
+   "label": "Hóa đơn từ ngày"
+  },
+  {
+   "fieldname": "period_to",
+   "fieldtype": "Date",
+   "label": "Đến ngày"
+  },
+  {
+   "fieldname": "section_total",
+   "fieldtype": "Section Break",
+   "label": "Tổng hợp"
+  },
+  {
+   "fieldname": "total_before_vat",
+   "fieldtype": "Currency",
+   "label": "Tổng trước VAT",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_vat",
+   "fieldtype": "Currency",
+   "label": "Tổng VAT",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_total",
+   "fieldtype": "Column Break"
+  },
+  {
+   "bold": 1,
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Tổng thanh toán",
+   "read_only": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "section_lines",
+   "fieldtype": "Section Break",
+   "label": "Chi tiết hóa đơn"
+  },
+  {
+   "fieldname": "lines",
+   "fieldtype": "Table",
+   "label": "Dòng hồ sơ",
+   "options": "MT Win Dossier Line"
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Win Dossier",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan Truong",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "write": 1
+  },
+  {
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan MT"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "search_fields": "file_prefix,customer",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "title_field": "file_prefix",
+ "track_changes": 1
+}

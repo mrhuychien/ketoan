@@ -205,6 +205,16 @@ export const api = {
                                             withCompany({ name })),
   mtDiscountJeCreate: (a) => callMethod(NS + "mt_discount.create_journal_entry", withCompany(a)),
 
+  // Hồ sơ thanh toán WinCommerce — Win chỉ xử lý khi file PDF đặt ĐÚNG TÊN
+  // (YYYYMMDD_<mã NCC>_<stt>_PF). Sai tên là hồ sơ bị trả, cả đợt trượt kỳ.
+  mtWinDossiers: (a) => callMethod(NS + "mt_win.list_dossiers", withCompany(a)),
+  mtWinPreview: (a) => callMethod(NS + "mt_win.preview_dossier", withCompany(a)),
+  mtWinCommit: (a) => callMethod(NS + "mt_win.commit_dossier", withCompany(a)),
+  // `expected_hash` đi kèm trong `a` — backend từ chối lập nếu thiếu hoặc lệch.
+  mtWinDossier: (name) => callMethod(NS + "mt_win.get_dossier", withCompany({ name })),
+  mtWinSubmitted: (name) => callMethod(NS + "mt_win.mark_submitted", withCompany({ name })),
+  mtWinExport: (name) => downloadPost(NS + "mt_win.export_dossier", withCompany({ name })),
+
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
 

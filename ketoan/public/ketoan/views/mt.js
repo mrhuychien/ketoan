@@ -27,6 +27,8 @@ const TABS = [
     hint: "Sinh bút toán NHÁP từ bảng kê. Hệ thống không bao giờ tự ghi sổ — người duyệt mới ghi. Tài khoản lấy từ cấu hình, không hardcode." },
   { key: "bkck", label: "Bảng kê chiết khấu", icon: "fa-file-signature",
     hint: "Chiều MÌNH xuất hóa đơn: nạp file doanh số của chuỗi → lập bảng kê (BKCK) → chốt lấy số → xuất hóa đơn CK trên MISA → ghi số về → sinh bút toán." },
+  { key: "ho-so-win", label: "Hồ sơ Winmart", icon: "fa-folder-open",
+    hint: "Bảng kê hồ sơ nộp cho WinCommerce. Win chỉ xử lý thanh toán khi file PDF hóa đơn đặt ĐÚNG TÊN — hệ thống sinh tên chuẩn, không để gõ tay." },
 ];
 
 // Rổ hóa đơn của tab 1 — đúng khóa mà backend nhận (mt.get_invoices).
@@ -110,6 +112,7 @@ export async function render({ container, query }) {
     jePicked: new Set(),
     jeKind: query?.je_kind || "",
     bkckStatus: query?.bkck_status || "",
+    winStatus: query?.win_status || "",
     // '0' = nháp chờ duyệt (mặc định), '1' = đã ghi sổ.
     jeDocstatus: query?.je_docstatus === "1" ? "1" : "0",
   };
@@ -302,6 +305,7 @@ async function loadTab(container, state) {
 
   if (state.tab === "chuoi") return loadChains(container, state);
   if (state.tab === "bkck") return loadBkck(container, state);
+  if (state.tab === "ho-so-win") return loadWinDossiers(container, state);
   if (state.tab === "but-toan") {
     return state.jeView === "duyet"
       ? loadJeApproval(container, state)
@@ -2987,5 +2991,324 @@ async function renderBkckDetail(container, state, modal, name) {
       await renderBkckDetail(container, state, modal, name);
       await loadTab(container, state);
     } catch (e) { je.disabled = false; msg(e.message, "danger"); }
+  });
+}
+
+
+// ── Tab 6: Hồ sơ thanh toán WinCommerce ────────────────────────────────────
+//
+// Win chỉ xử lý thanh toán khi nhận đủ bảng kê + file PDF hóa đơn ĐẶT ĐÚNG TÊN
+// (YYYYMMDD_<mã NCC>_<stt>_PF). Sai tên là hồ sơ bị trả về và cả đợt trượt kỳ
+// thanh toán — nên tên file do hệ thống sinh, không để gõ tay.
+//
+// MỘT HÓA ĐƠN CHỈ NỘP MỘT LẦN: hóa đơn đã nằm trong hồ sơ khác không được đề
+// xuất lại, và DocType chặn thêm một lớp nữa.
+
+const WIN_TONE = { "Nháp": "yellow", "Đã nộp": "green" };
+
+async function loadWinDossiers(container, state) {
+  const body = container.querySelector("#mt-body");
+  let res;
+  try {
+    res = await api.mtWinDossiers({
+      from_date: state.from, to_date: state.to,
+      status: state.winStatus || undefined,
+      search: state.search || undefined,
+      page: state.page, page_size: 20,
+    });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = res.rows || [];
+
+  setHTML(body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <select class="kt-input kt-input--sm" id="hw-status">
+        <option value="">Mọi trạng thái</option>
+        ${(res.statuses || []).map((x) => html`<option value="${x}" ${state.winStatus === x ? "selected" : ""}>${x}</option>`)}
+      </select>
+      <span class="kt-sub">${res.total} hồ sơ · ${formatVND(res.total_amount)}</span>
+      ${res.can_manage
+        ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="hw-new" style="margin-left:auto">
+            <i class="fas fa-folder-plus"></i> Lập hồ sơ mới
+          </button>`
+        : ""}
+    </div></div>
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-folder-open"></i>
+          <p>Chưa có hồ sơ Winmart nào trong khoảng này.</p>
+          ${res.can_manage
+            ? html`<div class="kt-sub">Bấm <b>Lập hồ sơ mới</b> — hệ thống gom hóa đơn Win
+                   chưa nộp hồ sơ nào và sinh tên file PDF chuẩn.</div>`
+            : ""}
+        </div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr>
+              <th>Tên file PDF</th><th>Ngày nộp</th><th>Khách hàng</th>
+              <th class="num">Số HĐ</th><th class="num">Trước VAT</th>
+              <th class="num">Tổng thanh toán</th><th>Trạng thái</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((r) => html`<tr>
+                <td><code>${r.file_prefix}</code>
+                  <div class="kt-sub">HĐ ${formatDate(r.period_from)} → ${formatDate(r.period_to)}</div></td>
+                <td>${formatDate(r.submit_date)}</td>
+                <td>${r.customer_name || r.customer}</td>
+                <td class="num">${r.n_lines}</td>
+                <td class="num">${formatVND(r.total_before_vat)}</td>
+                <td class="num"><b>${formatVND(r.total_amount)}</b></td>
+                <td><span class="kt-badge kt-badge--${WIN_TONE[r.status] || "gray"}">${r.status}</span></td>
+                <td><button class="kt-btn kt-btn--outline kt-btn--sm hw-open" data-name="${r.name}">
+                  <i class="fas fa-eye"></i></button></td>
+              </tr>`)}
+            </tbody>
+          </table></div>
+          ${pager(res, "hồ sơ")}
+        </div></div>`}
+  `);
+
+  bindPager(container, state);
+  const st = container.querySelector("#hw-status");
+  if (st) st.addEventListener("change", (e) => {
+    state.winStatus = e.target.value; state.page = 1; loadTab(container, state);
+  });
+  const nw = container.querySelector("#hw-new");
+  if (nw) nw.addEventListener("click", () => openWinPreview(container, state, res.default_vendor_code));
+  container.querySelectorAll(".hw-open").forEach((b) => {
+    b.addEventListener("click", () => openWinDetail(container, state, b.dataset.name));
+  });
+}
+
+// ── Lập hồ sơ: xem trước → lập ─────────────────────────────────────────────
+async function openWinPreview(container, state, vendorCode) {
+  const modal = openModal({
+    title: "Lập hồ sơ thanh toán WinCommerce",
+    icon: "fa-folder-plus",
+    maxWidth: 1000,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  const st = {
+    from: state.from, to: state.to,
+    submit: new Date().toISOString().slice(0, 10),
+    no: 1, vendor: vendorCode || "",
+  };
+  await renderWinPreview(container, state, modal, st);
+}
+
+async function renderWinPreview(container, state, modal, st) {
+  setHTML(modal.body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let res;
+  try {
+    res = await api.mtWinPreview({
+      from_date: st.from, to_date: st.to, submit_date: st.submit,
+      dossier_no: st.no, vendor_code: st.vendor || undefined,
+    });
+  } catch (e) {
+    setHTML(modal.body, html`
+      <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+        <div class="kt-sub" style="white-space:pre-wrap">${e.message}</div>
+      </div></div>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div><label class="kt-label">Mã NCC tại Win</label>
+          <input class="kt-input kt-input--sm" id="hp-vendor" value="${st.vendor}" placeholder="2007766"></div>
+        <button class="kt-btn kt-btn--outline" id="hp-retry"><i class="fas fa-rotate"></i> Thử lại</button>
+      </div>`);
+    modal.body.querySelector("#hp-retry").addEventListener("click", () => {
+      st.vendor = modal.body.querySelector("#hp-vendor").value.trim();
+      renderWinPreview(container, state, modal, st);
+    });
+    return;
+  }
+  const lines = res.sample || [];
+
+  setHTML(modal.body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div><label class="kt-label">Hóa đơn từ</label>
+          <input type="date" class="kt-input kt-input--sm" id="hp-from" value="${st.from}"></div>
+        <div><label class="kt-label">đến</label>
+          <input type="date" class="kt-input kt-input--sm" id="hp-to" value="${st.to}"></div>
+        <div><label class="kt-label">Ngày nộp</label>
+          <input type="date" class="kt-input kt-input--sm" id="hp-submit" value="${st.submit}"></div>
+        <div><label class="kt-label">STT hồ sơ</label>
+          <input type="number" min="1" class="kt-input kt-input--sm" id="hp-no" value="${st.no}" style="width:80px"></div>
+        <div><label class="kt-label">Mã NCC</label>
+          <input class="kt-input kt-input--sm" id="hp-vendor" value="${res.vendor_code}" style="width:110px"></div>
+        <button class="kt-btn kt-btn--outline kt-btn--sm" id="hp-refresh">
+          <i class="fas fa-rotate"></i> Áp dụng</button>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="kt-sub">Tên file PDF phải đặt:</span>
+        <b><code>${res.file_prefix}</code></b>
+        <span class="kt-sub">· ${res.n_lines} hóa đơn · ${formatVND(res.total_amount)}</span>
+      </div>
+      <div class="kt-sub" style="margin-top:6px">${res.note || ""}</div>
+    </div></div>
+
+    ${(res.warnings || []).length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body">
+          ${res.warnings.map((w) => html`<div class="kt-sub">• ${w}</div>`)}
+        </div></div>`
+      : ""}
+
+    ${!lines.length
+      ? html`<div class="kt-empty"><i class="fas fa-inbox"></i>
+          <p>Không có hóa đơn Winmart nào chưa nộp hồ sơ trong khoảng này.</p></div>`
+      : html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <div class="kt-table-wrap" style="max-height:340px;overflow:auto"><table class="kt-table">
+            <thead><tr>${(res.columns || []).map((c) => html`<th>${c}</th>`)}</tr></thead>
+            <tbody>${lines.map((l) => html`<tr>
+              <td>${l.stt}</td>
+              <td>${res.vendor_code}</td>
+              <td>${l.po_vcm || html`<span class="kt-badge kt-badge--yellow">thiếu PO</span>`}</td>
+              <td>${l.inv_series || ""}</td>
+              <td>${l.inv_no}</td>
+              <td>${formatDate(l.inv_date)}</td>
+              <td class="num">${formatVND(l.amount_before_vat)}</td>
+              <td class="num">${formatVND(l.vat_amount)}</td>
+              <td class="num">${formatVND(l.total_amount)}</td>
+              <td class="kt-sub"><code>${l.pdf_name}</code></td>
+            </tr>`)}</tbody>
+          </table></div>
+          ${res.n_lines > lines.length
+            ? html`<div class="kt-sub" style="margin-top:6px">…và ${res.n_lines - lines.length} hóa đơn nữa</div>`
+            : ""}
+        </div></div>`}
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="kt-btn kt-btn--outline" id="hp-close">Đóng</button>
+      <button class="kt-btn kt-btn--primary" id="hp-commit" ${!res.can_commit ? "disabled" : ""}>
+        <i class="fas fa-check"></i> Lập hồ sơ ${res.n_lines} hóa đơn
+      </button>
+    </div>
+    <div id="hp-msg"></div>`);
+
+  modal.body.querySelector("#hp-close").addEventListener("click", () => modal.close());
+  modal.body.querySelector("#hp-refresh").addEventListener("click", () => {
+    st.from = modal.body.querySelector("#hp-from").value;
+    st.to = modal.body.querySelector("#hp-to").value;
+    st.submit = modal.body.querySelector("#hp-submit").value;
+    st.no = Number(modal.body.querySelector("#hp-no").value) || 1;
+    st.vendor = modal.body.querySelector("#hp-vendor").value.trim();
+    renderWinPreview(container, state, modal, st);
+  });
+
+  const btn = modal.body.querySelector("#hp-commit");
+  if (btn) btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      const out = await api.mtWinCommit({
+        from_date: st.from, to_date: st.to, submit_date: st.submit,
+        dossier_no: st.no, vendor_code: res.vendor_code,
+        expected_hash: res.plan_hash,
+      });
+      toast(out.message, "success");
+      modal.close();
+      await loadTab(container, state);
+    } catch (e) {
+      btn.disabled = false;
+      setHTML(modal.body.querySelector("#hp-msg"), html`
+        <div class="kt-card" style="border-left:4px solid var(--kt-danger);margin-top:10px">
+          <div class="kt-card-body"><div class="kt-sub" style="white-space:pre-wrap">${e.message}</div></div>
+        </div>`);
+    }
+  });
+}
+
+// ── Một hồ sơ: xem, xuất Excel, đánh dấu đã nộp ────────────────────────────
+async function openWinDetail(container, state, name) {
+  const modal = openModal({
+    title: "Hồ sơ thanh toán Winmart",
+    icon: "fa-folder-open",
+    maxWidth: 1000,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  await renderWinDetail(container, state, modal, name);
+}
+
+async function renderWinDetail(container, state, modal, name) {
+  setHTML(modal.body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let res;
+  try {
+    res = await api.mtWinDossier(name);
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+  const d = res.doc || {};
+  const lines = res.lines || [];
+  const draft = d.status === "Nháp";
+
+  setHTML(modal.body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <b><code>${d.file_prefix}</code></b>
+        <span class="kt-badge kt-badge--${WIN_TONE[d.status] || "gray"}">${d.status}</span>
+        <span class="kt-sub">nộp ${formatDate(d.submit_date)} · mã NCC ${d.vendor_code}</span>
+        <b style="margin-left:auto">${formatVND(d.total_amount)}</b>
+      </div>
+      <div class="kt-sub" style="margin-top:8px">
+        <b>File PDF hóa đơn nộp kèm phải đặt tên đúng <code>${d.file_prefix}</code></b> —
+        sai tên là Win trả hồ sơ và cả đợt trượt kỳ thanh toán.
+      </div>
+    </div></div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div class="kt-table-wrap" style="max-height:320px;overflow:auto"><table class="kt-table">
+        <thead><tr>${(res.columns || []).map((c) => html`<th>${c}</th>`)}</tr></thead>
+        <tbody>${lines.map((l) => html`<tr>
+          <td>${l.stt}</td><td>${d.vendor_code}</td>
+          <td>${l.po_vcm || html`<span class="kt-badge kt-badge--yellow">thiếu PO</span>`}</td>
+          <td>${l.inv_series || ""}</td><td>${l.inv_no}</td>
+          <td>${formatDate(l.inv_date)}</td>
+          <td class="num">${formatVND(l.amount_before_vat)}</td>
+          <td class="num">${formatVND(l.vat_amount)}</td>
+          <td class="num">${formatVND(l.total_amount)}</td>
+          <td class="kt-sub"><code>${l.pdf_name}</code></td>
+        </tr>`)}</tbody>
+      </table></div>
+    </div></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
+      <a class="kt-btn kt-btn--outline kt-btn--sm" href="/app/mt-win-dossier/${d.name}" target="_blank">
+        <i class="fas fa-arrow-up-right-from-square"></i> Desk</a>
+      <button class="kt-btn kt-btn--outline" id="hd-close">Đóng</button>
+      <button class="kt-btn kt-btn--outline" id="hd-export">
+        <i class="fas fa-file-excel"></i> Xuất Excel nộp Win</button>
+      ${draft && res.can_manage
+        ? html`<button class="kt-btn kt-btn--primary" id="hd-submit">
+            <i class="fas fa-paper-plane"></i> Đánh dấu đã nộp</button>`
+        : ""}
+    </div>
+    <div id="hd-msg"></div>`);
+
+  modal.body.querySelector("#hd-close").addEventListener("click", () => modal.close());
+  modal.body.querySelector("#hd-export").addEventListener("click", async () => {
+    try {
+      await api.mtWinExport(name);
+    } catch (e) {
+      setHTML(modal.body.querySelector("#hd-msg"), html`
+        <div class="kt-card" style="border-left:4px solid var(--kt-danger);margin-top:10px">
+          <div class="kt-card-body"><div class="kt-sub">${e.message}</div></div></div>`);
+    }
+  });
+  const sb = modal.body.querySelector("#hd-submit");
+  if (sb) sb.addEventListener("click", async () => {
+    sb.disabled = true;
+    try {
+      const out = await api.mtWinSubmitted(name);
+      toast(out.message, "success");
+      await renderWinDetail(container, state, modal, name);
+      await loadTab(container, state);
+    } catch (e) {
+      sb.disabled = false;
+      setHTML(modal.body.querySelector("#hd-msg"), html`
+        <div class="kt-card" style="border-left:4px solid var(--kt-danger);margin-top:10px">
+          <div class="kt-card-body"><div class="kt-sub">${e.message}</div></div></div>`);
+    }
   });
 }

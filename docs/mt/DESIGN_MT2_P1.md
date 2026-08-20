@@ -552,16 +552,29 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-A** parser AEON + Fuji, gom `CHAIN_OPTIONS` một nguồn | `4cb04b2` | `regression_check` · `crosscheck_mt2` · `mutation_check` |
 | **MT2-C** master `MT Store` + seed từ bảng kê đã nạp | `48105e1` | `store_seed_check` |
 | **MT2-D** `MT Account Map` + sinh JE nháp (patch v0_0_14/15) | `1d65ed6` `f676467` | `je_plan_check` |
-| **MT2-E** duyệt / xóa bút toán trên portal | *(commit này)* | `je_submit_check` |
+| **MT2-E** duyệt / xóa bút toán trên portal | `bd420fd` | `je_submit_check` |
+| **MT2-B1** đọc file cơ sở tính chiết khấu (Central Retail · LOTTE · Mega) | `303ff6f` | `discount_basis_check` |
+| **MT2-B2** bảng kê chiết khấu: lập → chốt cấp số → in → sinh JE | `d029ed0` | `discount_sheet_check` |
+| **MT2-B3** hồ sơ thanh toán WinCommerce (xuất Excel + tên file PDF) | *(commit này)* | `win_dossier_check` |
 
 Chạy toàn bộ, không cần bench:
 
 ```bash
 for t in regression_check crosscheck_mt2 mutation_check \
-         store_seed_check je_plan_check je_submit_check; do
+         store_seed_check je_plan_check je_submit_check \
+         discount_basis_check discount_sheet_check win_dossier_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
 
-**MT2-B (chiều chiết khấu: nạp doanh số/TBCK → BKCK → hóa đơn CK) chưa làm** —
-ngoài phạm vi P1, xem `BRIEF_MT2_ketoan.md`.
+### Hồ sơ Winmart — chốt bằng file mẫu thật
+
+- Tên file PDF có **hậu tố `_PF`**: `20260817_2007766_01_PF`. §2.2 của SOP viết
+  gọn đã bỏ mất hậu tố này; lấy theo file mẫu, không lấy theo SOP.
+- Số thứ tự hồ sơ trong ngày là **hai chữ số** (`_01_`, `_12_`).
+- Bảng kê Excel có **header ở dòng 2**, đúng 10 cột theo đúng thứ tự mẫu.
+- Cột `Tên File PDF` giống nhau ở mọi dòng → nó định danh **hồ sơ**, không phải
+  định danh từng hóa đơn.
+- Một hóa đơn chỉ được nộp **một lần**: chặn trùng trong cùng hồ sơ *và* chặn
+  hóa đơn đã nằm ở hồ sơ khác (báo đích danh số hồ sơ kia).
+- Hồ sơ đã nộp **không xóa được**.

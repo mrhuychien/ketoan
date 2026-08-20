@@ -1,0 +1,102 @@
+{
+ "actions": [],
+ "creation": "2026-08-20 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "stt",
+  "po_vcm",
+  "inv_series",
+  "inv_no",
+  "inv_date",
+  "column_break_inv",
+  "amount_before_vat",
+  "vat_amount",
+  "total_amount",
+  "section_ref",
+  "pdf_name",
+  "sales_invoice"
+ ],
+ "fields": [
+  {
+   "description": "Số thứ tự hồ sơ. Sinh 1..N khi lập; kế toán sửa cho khớp cách đánh của Win thì hệ thống KHÔNG đánh lại.",
+   "fieldname": "stt",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "STT"
+  },
+  {
+   "description": "Số đơn hàng của WinCommerce, lấy từ Sales Invoice.custom_po_.",
+   "fieldname": "po_vcm",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "PO VCM"
+  },
+  {
+   "fieldname": "inv_series",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Ký hiệu HĐ"
+  },
+  {
+   "fieldname": "inv_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Số hóa đơn",
+   "reqd": 1
+  },
+  {
+   "fieldname": "inv_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày hóa đơn"
+  },
+  {
+   "fieldname": "column_break_inv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "amount_before_vat",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Số tiền trước VAT"
+  },
+  {
+   "fieldname": "vat_amount",
+   "fieldtype": "Currency",
+   "label": "VAT"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Tổng tiền thanh toán"
+  },
+  {
+   "fieldname": "section_ref",
+   "fieldtype": "Section Break"
+  },
+  {
+   "description": "Chuẩn YYYYMMDD_<mã NCC>_<stt hồ sơ>_PF. File PDF nộp kèm PHẢI đặt đúng tên này.",
+   "fieldname": "pdf_name",
+   "fieldtype": "Data",
+   "label": "Tên File PDF"
+  },
+  {
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Hóa đơn ERPNext",
+   "options": "Sales Invoice"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Win Dossier Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}
