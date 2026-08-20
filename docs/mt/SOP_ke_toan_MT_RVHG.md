@@ -159,4 +159,6 @@ Theo đúng pattern chung 5 bước; hạn mặc định 45 ngày; cơ chế CK 
 
 **Cần khai sau khi migrate**: `MT Account Map` (số hiệu TK từng công ty), `MT Discount Term` (tỷ lệ + cách tính từng chuỗi — LOTTE 10% tỷ lệ×tổng · Central Retail 3,35% cộng dòng · Mega 2% · **Emart 3% tỷ lệ×tổng**), và **hạn thanh toán** trên từng Customer (`Hạn thanh toán MT (ngày)` — để trống là *chưa khai*, hệ thống không đoán 45 ngày).
 
-**Chưa có — vẫn thao tác tay**: parser thanh toán Mega Market (chưa có file mẫu thật); khớp tự động dòng `Ghi giảm` với hóa đơn.
+**Chưa có — vẫn thao tác tay**: parser thanh toán Mega Market. Chưa có file *thanh toán* Mega nào làm mẫu (mới có file *doanh số*), mà đọc bừa bằng parser chuỗi khác là sai tiền — gửi được một file thật thì làm được ngay.
+
+**Đã kết luận KHÔNG làm**: khớp tự động dòng `Ghi giảm` sang hóa đơn của mình. Đo trên cả 7 file mẫu: 135/149 dòng ghi giảm có số hóa đơn, nhưng đó là hóa đơn CỦA CHUỖI xuất cho mình (`K26TRT`, `1K25TCH`, `K26TBD`) — 0 dòng mang ký hiệu `THG` của mình, 0 dòng trùng hóa đơn với một dòng thanh toán. Nối tự động là gán tiền hóa đơn chuỗi vào hóa đơn của mình. Khoản chuỗi trừ lại được hạch toán bằng **JE gộp** (mục 4), có ghi số chứng từ của chuỗi trong diễn giải.

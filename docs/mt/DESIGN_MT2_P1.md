@@ -557,7 +557,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-B2** bảng kê chiết khấu: lập → chốt cấp số → in → sinh JE | `d029ed0` | `discount_sheet_check` |
 | **MT2-B3** hồ sơ thanh toán WinCommerce (xuất Excel + tên file PDF) | `6912873` | `win_dossier_check` |
 | **MT2-F** công nợ MT đến hạn theo term (patch v0_0_16) | `899501a` | `debt_due_check` |
-| **MT2-B4** đọc Rebate Settlement Emart (PDF) -> BKCK | *(commit này)* | `rebate_pdf_check` · `discount_sheet_check` |
+| **MT2-B4** đọc Rebate Settlement Emart (PDF) -> BKCK | `32e0f08` | `rebate_pdf_check` · `discount_sheet_check` |
+| **MT2-G** đóng hạng mục "khớp tự động dòng Ghi giảm" bằng phép đo | *(commit này)* | `clawback_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -565,7 +566,7 @@ Chạy toàn bộ, không cần bench:
 for t in regression_check crosscheck_mt2 mutation_check \
          store_seed_check je_plan_check je_submit_check \
          discount_basis_check discount_sheet_check win_dossier_check \
-         debt_due_check rebate_pdf_check; do
+         debt_due_check rebate_pdf_check clawback_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -635,3 +636,41 @@ là hình dạng thật của chứng từ, không phải parser đọc thiếu.
 
 `Vendor:` trên file là **chính mình** (Hoàng Giang) — cố ý không đọc, đúng bài
 học đã sập một lần ở Central Retail. Bên mua lấy từ `Customer` / `MT Store`.
+
+## Hai hạng mục cuối — đóng lại, không phải bỏ dở
+
+### Khớp tự động dòng `Ghi giảm` → **quyết định KHÔNG làm** (đo được)
+
+Câu hỏi: dòng ghi giảm có mang số hóa đơn, có nên tự nối sang Sales Invoice để
+hóa đơn bị đòi lại tiền quay về rổ nợ? Đo trên **cả 7 file mẫu thật**:
+
+| Chuỗi | Dòng ghi giảm | Có số HĐ | Ký hiệu | Trùng HĐ thanh toán |
+|---|---|---|---|---|
+| Saigon Co.op | 126 | 126 | `1K25TAN` `1K25TBD` `1K25TCH` `1K25TDQ` | **0** |
+| AEON | 7 | 7 | `K26TBD` `K26TDH` | **0** |
+| Central Retail | 2 | 2 | `K26TRT` | **0** |
+| LOTTE | 8 | 0 | — | 0 |
+| Fuji | 6 | 0 | — | 0 |
+
+**0/135** dòng mang ký hiệu `THG` của mình; **0/135** trùng hóa đơn với một dòng
+thanh toán. Số hóa đơn trên dòng ghi giảm là hóa đơn **của chuỗi xuất cho
+mình** — nối tự động là gán tiền hóa đơn chuỗi vào hóa đơn của mình.
+
+⇒ Đây là **kết luận**, không phải việc tồn. `clawback_check.py` chạy lại phép đo
+mỗi lần, nên kỳ nào chuỗi đổi cách ghi thì nó đổi màu.
+
+Đi kèm: `_paid_subquery` được siết để `paid`/`paid_review` lọc
+`row_kind = 'Thanh toán'`. Hôm nay là **no-op** (dòng ghi giảm không thể mang
+`sales_invoice`), nhưng nó gỡ một phụ thuộc mong manh: chỉ dựa vào cái chặn ở
+`validate` thì ngày nào ai nới cái chặn đó, một dòng ghi giảm sẽ cộng vào **cả**
+`paid` **lẫn** `clawed_back` và triệt tiêu nhau — hóa đơn không nhúc nhích, tiền
+bị đòi lại biến mất im lặng.
+
+### Parser thanh toán Mega Market → **chặn, chờ file mẫu**
+
+`docs/mt/samples/` chỉ có `Chi tiết doanh số Mega Market.xlsx` (cơ sở tính chiết
+khấu, đã có parser ở MT2-B1). **Không có** file *thanh toán* Mega nào. Theo đúng
+luật "chưa có mẫu thật thì chưa viết parser" — không đoán cột, không mượn parser
+chuỗi khác. `Mega Market` vẫn nằm trong `CHAIN_LABEL` (để gán chuỗi cho khách và
+lập BKCK) nhưng cố ý **không** có trong `PARSERS`, và `read_payment_advice` báo
+đúng câu đó khi gặp file Mega.

@@ -299,24 +299,40 @@ def _paid_subquery():
     hóa đơn của công ty này thành "đã thanh toán".
 
     `clawed_back` — TIỀN CHUỖI ĐÒI LẠI trên đúng hóa đơn đó (dòng 'Ghi giảm' có
-    nối Sales Invoice). Quan sát thật: Co.op đòi lại tiền một hóa đơn đã trả
-    bằng một dòng ghi giảm mang CÙNG số hóa đơn (HĐ 3176, −3.121.200đ). Không
-    trừ ra thì hóa đơn vẫn hiện "đã thu đủ" trong khi tiền đã bị lấy lại — sai
-    đúng hai lần số đó khi đối chiếu với sao kê.
+    nối Sales Invoice). Không trừ ra thì hóa đơn vẫn hiện "đã thu đủ" trong khi
+    tiền đã bị lấy lại — sai đúng hai lần số đó khi đối chiếu với sao kê.
 
-    ⚠ CHƯA ĐỦ: tầng khớp tự động hiện chỉ nối Sales Invoice cho dòng 'Thanh
-    toán' (xem `_match_row`), nên `clawed_back` chỉ có số khi người chốt tay
-    liên kết cho dòng ghi giảm. Cột này vì vậy là bước đúng nhưng chưa khép kín
-    — mở rộng khớp tự động cho dòng ghi giảm phải kiểm được trên database thật
-    trước, vì dòng chiết khấu của Central Retail cũng mang ký hiệu hóa đơn bán
-    ra của chính mình mà KHÔNG hề trả cho hóa đơn đó.
+    ⚠ HIỆN GIỜ CỘT NÀY LUÔN BẰNG 0, và đó là CÓ CHỦ ĐÍCH — đừng đọc nó như một
+    cơ chế đang chạy:
+
+      · `relink_line` VÀ `MTPaymentAdviceLine.validate()` đều chặn cứng việc nối
+        Sales Invoice cho dòng không phải 'Thanh toán'. Không có đường nào, kể
+        cả chốt tay, để một dòng ghi giảm mang `sales_invoice`.
+      · Đo trên CẢ 7 file mẫu thật (`docs/mt/verified/clawback_check.py`):
+        149 dòng ghi giảm, 135 dòng CÓ số hóa đơn — nhưng đó là số hóa đơn CỦA
+        CHUỖI xuất cho mình (`K26TRT`, `1K25TCH`, `K26TBD`), không phải hóa đơn
+        bán ra của mình (`C26THG` — THG = Thực phẩm Hoàng Giang). Số dòng ghi
+        giảm trùng hóa đơn với một dòng thanh toán: **0 trên cả 3 chuỗi có số**.
+
+    ⇒ Khớp tự động dòng ghi giảm sang Sales Invoice của mình là SAI, không phải
+    "chưa làm". Cột được giữ lại vì công thức đã đúng sẵn: ngày nào chuỗi thật
+    sự đòi lại tiền trên hóa đơn của mình và kế toán chốt tay được, nó chạy đúng
+    ngay mà không phải sửa gì.
+
+    VÌ SAO `paid`/`paid_review` vẫn lọc `row_kind = 'Thanh toán'` dù dòng ghi
+    giảm không thể lọt vào đây: nếu chỉ dựa vào cái chặn ở validate thì ngày nào
+    ai đó nới cái chặn đó, một dòng ghi giảm sẽ cộng vào CẢ `paid` LẪN
+    `clawed_back` và triệt tiêu nhau — hóa đơn không nhúc nhích, tiền bị đòi lại
+    biến mất im lặng. Lọc ở đây là để hai cột không bao giờ đếm chung một dòng.
     """
     return """
         LEFT JOIN (
             SELECT l.sales_invoice AS si_name,
                    SUM(CASE WHEN l.match_confidence = 'Chắc chắn'
+                             AND l.row_kind = %(kind_payment)s
                             THEN ABS(l.total_amount) ELSE 0 END) AS paid,
                    SUM(CASE WHEN IFNULL(l.match_confidence, '') != 'Chắc chắn'
+                             AND l.row_kind = %(kind_payment)s
                             THEN ABS(l.total_amount) ELSE 0 END) AS paid_review,
                    SUM(CASE WHEN l.row_kind = %(kind_deduct)s
                             THEN ABS(l.total_amount) ELSE 0 END) AS clawed_back,
