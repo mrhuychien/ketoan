@@ -155,8 +155,8 @@ Theo đúng pattern chung 5 bước; hạn mặc định 45 ngày; cơ chế CK 
 
 **Đã chạy trên portal `/ketoan`**: nạp file thanh toán 5 chuỗi (WinCommerce, Central Retail, LOTTE, Emart, Saigon Co.op) vào `MT Payment Advice`, tự nhận diện chuỗi + khớp hóa đơn; MISA Invoice Snapshot đồng bộ số hóa đơn.
 
-**Đã bổ sung trong MT-2 (20/08/2026)**: parser AEON + Fuji; master điểm bán `MT Store`; cấu hình tài khoản `MT Account Map` + sinh/duyệt JE trên portal (luôn ở trạng thái Nháp, người duyệt mới ghi sổ); chiều chiết khấu từ file doanh số/TBCK → bảng kê BKCK → chốt cấp số → in → ghi số HĐ CK → JE; hồ sơ thanh toán Winmart (xuất Excel + tên file PDF chuẩn `_PF`); report **Công nợ MT đến hạn** theo hạn khai trên từng Customer.
+**Đã bổ sung trong MT-2 (20/08/2026)**: parser AEON + Fuji; master điểm bán `MT Store`; cấu hình tài khoản `MT Account Map` + sinh/duyệt JE trên portal (luôn ở trạng thái Nháp, người duyệt mới ghi sổ); chiều chiết khấu từ file doanh số/TBCK (kể cả **Rebate Settlement PDF của Emart**) → bảng kê BKCK → chốt cấp số → in → ghi số HĐ CK → JE; hồ sơ thanh toán Winmart (xuất Excel + tên file PDF chuẩn `_PF`); report **Công nợ MT đến hạn** theo hạn khai trên từng Customer.
 
-**Cần khai sau khi migrate**: `MT Account Map` (số hiệu TK từng công ty), `MT Discount Term` (tỷ lệ + cách tính từng chuỗi), và **hạn thanh toán** trên từng Customer (`Hạn thanh toán MT (ngày)` — để trống là *chưa khai*, hệ thống không đoán 45 ngày).
+**Cần khai sau khi migrate**: `MT Account Map` (số hiệu TK từng công ty), `MT Discount Term` (tỷ lệ + cách tính từng chuỗi — LOTTE 10% tỷ lệ×tổng · Central Retail 3,35% cộng dòng · Mega 2% · **Emart 3% tỷ lệ×tổng**), và **hạn thanh toán** trên từng Customer (`Hạn thanh toán MT (ngày)` — để trống là *chưa khai*, hệ thống không đoán 45 ngày).
 
-**Chưa có — vẫn thao tác tay**: parser thanh toán Mega Market; Rebate Settlement của Emart (file PDF, chưa có parser); khớp tự động dòng `Ghi giảm` với hóa đơn.
+**Chưa có — vẫn thao tác tay**: parser thanh toán Mega Market (chưa có file mẫu thật); khớp tự động dòng `Ghi giảm` với hóa đơn.

@@ -87,6 +87,9 @@ DISCOUNT_CHAIN_LABEL = {
     "central_retail": "Central Retail",
     "lotte": "LOTTE",
     "mega_market": "Mega Market",
+    # Emart gửi PDF chứ không gửi Excel — đọc bằng `mt_rebate_pdf`, không đi qua
+    # `read_sheets`. Xem nhánh PDF trong `read_discount_basis`.
+    "emart": "Emart",
 }
 
 # Sai số cho phép khi soát 'cơ sở × tỷ lệ = chiết khấu' TỪNG DÒNG. Chuỗi làm
@@ -552,9 +555,25 @@ PARSERS = {
     "central_retail": parse_central_retail,
     "lotte": parse_lotte,
     "mega_market": parse_mega,
-    # Emart CỐ Ý không có: file Rebate Settlement là PDF, chưa có bản máy đọc
-    # được. Đúng quy tắc "chưa có mẫu thật thì chưa viết parser".
+    # Emart KHÔNG nằm ở đây: file của nó là PDF, không có `sheets` để đưa vào.
+    # Nó có đường đọc riêng (`PDF_PARSERS`) nhận thẳng bytes.
 }
+
+# Chuỗi gửi PDF. Nhận bytes thay vì `sheets`, trả về cùng bộ khóa.
+PDF_PARSERS = {
+    "emart": lambda raw, key: _rebate_pdf().to_basis(raw, key),
+}
+
+
+def _rebate_pdf():
+    # Import trễ: `pdfminer.six` chỉ cần khi thật sự có file PDF, không bắt cả
+    # module gãy nếu máy chủ chưa `bench setup requirements`.
+    from ketoan.api import mt_rebate_pdf
+    return mt_rebate_pdf
+
+
+def has_parser(key):
+    return key in PARSERS or key in PDF_PARSERS
 
 
 def _detect(sheets):
@@ -567,6 +586,7 @@ def _detect(sheets):
         "central_retail": ("rbgroup", "rbvalue", "imvalue"),
         "lotte": ("invoiceno", "amt", "strcd", "fillindate"),
         "mega_market": ("invoicenopo", "baseamount"),
+        # Emart không qua đây (file PDF, rẽ nhánh trước `read_sheets`).
     }
     hits = [k for k, need in signs.items() if all(w in blob for w in need)]
     return hits[0] if len(hits) == 1 else None
@@ -574,6 +594,14 @@ def _detect(sheets):
 
 def read_discount_basis(content, chain=None):
     """base64 -> cơ sở tính chiết khấu (xem docstring đầu module). THUẦN ĐỌC."""
+    raw = decode_upload(content)
+
+    # NHẬN DẠNG THEO CHỮ KÝ BYTE, không theo đuôi tên file: mẫu Emart có đuôi
+    # `.PDF` viết hoa. Phải rẽ TRƯỚC `read_sheets` — đưa PDF vào đó thì thông
+    # báo lỗi nói "file Excel hỏng", kế toán đi tìm nhầm chỗ.
+    if _rebate_pdf().is_pdf(raw):
+        return _read_pdf_basis(raw, chain)
+
     sheets = read_sheets(content)
     if chain:
         key = _resolve(chain)
@@ -621,6 +649,56 @@ def read_discount_basis(content, chain=None):
     }
 
 
+def _read_pdf_basis(raw, chain=None):
+    """Nhánh PDF. Cùng bộ khóa trả về như nhánh Excel, không thiếu khóa nào."""
+    key = _resolve(chain) if chain else None
+    if chain and not key:
+        frappe.throw(_("Không có chuỗi tên '{0}' trong danh sách chuỗi mình xuất "
+                       "hóa đơn chiết khấu").format(chain))
+    if key and key not in PDF_PARSERS:
+        frappe.throw(_("Chuỗi {0} không gửi file PDF — chọn lại chuỗi hoặc file.")
+                     .format(DISCOUNT_CHAIN_LABEL.get(key, key)))
+    if not key:
+        # Chỉ MỘT chuỗi gửi PDF nên suy ra được; thêm chuỗi PDF thứ hai thì phải
+        # dò bằng dấu hiệu trong file, KHÔNG mặc định cái đầu danh sách.
+        if len(PDF_PARSERS) != 1:
+            frappe.throw(_("Có nhiều chuỗi gửi PDF — hãy chọn chuỗi bằng tay."))
+        key = next(iter(PDF_PARSERS))
+
+    res = PDF_PARSERS[key](raw, key)
+    rows = res["rows"]
+    total_base = sum(flt(r["base_amount"]) for r in rows)
+    has_disc = all(r["discount_amount"] is not None for r in rows) and bool(rows)
+    total_disc = (sum(flt(r["discount_amount"]) for r in rows) if has_disc else None)
+
+    warnings = list(res.get("warnings") or [])
+    if not rows:
+        warnings.append("KHÔNG đọc được dòng doanh số nào — không lập được bảng kê.")
+    reconciled = bool(res.get("checks")) and all(c["ok"] for c in res["checks"])
+
+    return {
+        "chain_key": key,
+        "chain": DISCOUNT_CHAIN_LABEL[key],
+        "vendor_code": res.get("vendor_code"),
+        "mode": res["mode"],
+        "mode_label": MODE_LABEL[res["mode"]],
+        "rate": res.get("rate"),
+        "groups": res["groups"],
+        "rows": rows,
+        "excluded": res.get("excluded") or [],
+        "checks": res.get("checks") or [],
+        "reconciled": reconciled,
+        "warnings": warnings,
+        "totals": {"base_amount": round(total_base, 2),
+                   "discount_amount": (None if total_disc is None else round(total_disc, 2)),
+                   "n_rows": len(rows), "n_groups": len(res["groups"])},
+        # PDF không có sheet. Trả khóa rỗng thay vì bỏ khóa: frontend đọc
+        # `res.sheets.length` và sẽ nổ nếu khóa biến mất.
+        "sheets": [],
+        "meta": res.get("meta") or {},
+    }
+
+
 def _resolve(chain):
     c = norm_text(chain)
     if c in DISCOUNT_CHAIN_LABEL:
@@ -652,6 +730,6 @@ def preview(content, chain=None):
     out["sample"] = res["rows"][:MAX_PREVIEW]
     out["n_rows_total"] = len(res["rows"])
     out.pop("rows", None)
-    out["chains"] = [{"key": k, "label": v, "has_parser": k in PARSERS}
+    out["chains"] = [{"key": k, "label": v, "has_parser": has_parser(k)}
                      for k, v in DISCOUNT_CHAIN_LABEL.items()]
     return out

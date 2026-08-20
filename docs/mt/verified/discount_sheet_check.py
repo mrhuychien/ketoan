@@ -33,6 +33,7 @@ TERMS = {
     "Central Retail": {"mode": "Cộng chiết khấu từng dòng", "rate": 3.35, "vat_rate": 8},
     "LOTTE": {"mode": "Tỷ lệ × tổng doanh số", "rate": 10.0, "vat_rate": 8},
     "Mega Market": {"mode": "Tỷ lệ × tổng doanh số", "rate": 2.0, "vat_rate": 8},
+    "Emart": {"mode": "Tỷ lệ × tổng doanh số", "rate": 3.0, "vat_rate": 8},
 }
 
 CASES = [
@@ -40,6 +41,10 @@ CASES = [
     ("Chi tiết doanh số BigC.xlsx", "Central Retail", 1, 755943625, 25324144, 177),
     ("7466- chi tiết doanh số Lotte.xlsx", "LOTTE", 14, 393014000, 39301400, 26),
     ("Chi tiết doanh số Mega Market.xlsx", "Mega Market", 1, 95390000, 1907800, 6),
+    # Emart gửi PDF. Cả kỳ chốt MỘT dòng trên `All-Store Thiso Retail`, không
+    # tách theo hóa đơn — nên bảng kê có đúng 1 dòng và 0 hóa đơn khớp được.
+    # Đó là hình dạng thật của chứng từ, không phải parser đọc thiếu.
+    ("Chi tiết doanh số Emart.PDF", "Emart", 1, 91245000, 2737350, 1),
 ]
 
 

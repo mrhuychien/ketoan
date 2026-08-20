@@ -556,7 +556,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-B1** đọc file cơ sở tính chiết khấu (Central Retail · LOTTE · Mega) | `303ff6f` | `discount_basis_check` |
 | **MT2-B2** bảng kê chiết khấu: lập → chốt cấp số → in → sinh JE | `d029ed0` | `discount_sheet_check` |
 | **MT2-B3** hồ sơ thanh toán WinCommerce (xuất Excel + tên file PDF) | `6912873` | `win_dossier_check` |
-| **MT2-F** công nợ MT đến hạn theo term (patch v0_0_16) | *(commit này)* | `debt_due_check` |
+| **MT2-F** công nợ MT đến hạn theo term (patch v0_0_16) | `899501a` | `debt_due_check` |
+| **MT2-B4** đọc Rebate Settlement Emart (PDF) -> BKCK | *(commit này)* | `rebate_pdf_check` · `discount_sheet_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -564,7 +565,7 @@ Chạy toàn bộ, không cần bench:
 for t in regression_check crosscheck_mt2 mutation_check \
          store_seed_check je_plan_check je_submit_check \
          discount_basis_check discount_sheet_check win_dossier_check \
-         debt_due_check; do
+         debt_due_check rebate_pdf_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -603,3 +604,34 @@ khai. Hai nguồn lệch nhau thì **giương cờ** `due_conflict`, không tự
 Patch `v0_0_16` chỉ **vớt** hạn từ `due_date` đã ghi sổ khi khách có ≥3 hóa đơn
 và **mọi** hóa đơn cách ngày hóa đơn đúng cùng một số ngày. Lệch nhau → để trống,
 kế toán tự khai. Patch không đoán số ngày cho ai.
+
+### Emart — chuỗi duy nhất gửi PDF
+
+`Rebate Settlement` là PDF có tầng văn bản thật (không phải scan), đọc bằng
+`pdfminer.six`. File scan sẽ ra 0 ký tự → parser **dừng** và nói rõ, không đoán.
+
+**Ba tín hiệu độc lập nói ai xuất hóa đơn, phải khớp cả ba:**
+
+| Tín hiệu | Mình xuất | Emart xuất |
+|---|---|---|
+| cột `Rebate type` | `Rebate` | `Fee` |
+| tiền tố mã khoản | `AP%…` | `AR%…` |
+| cột `Settlement Type` | `Vendor Tax Invoice` | `E-mart Tax Invoice` |
+
+Lệch nhau → **dừng và nêu đích danh dòng**, không lấy hai chọi một. Đây là chỗ
+đắt nhất của file: 7 dòng thì chỉ **1** dòng (2.737.350đ) mình được xuất hóa
+đơn; 6 dòng còn lại (8.212.050đ) Emart xuất cho mình. Lấy nhầm cả bảy là xuất
+khống 8.212.050đ **và** ghi nhận hai lần cùng một khoản.
+
+**Sáu số kiểm tra lấy từ chính file** (kỳ 07.2026, NCC 100968): `Rebate Amount`
+2.737.350 · `Fee Amount` 8.212.050 · `Support Amount` 0 · `Total` 10.949.400 ·
+`Net Amount` = `Invoice Amount` − `Return Amount` · và từng dòng
+`Net Amount × Rate = Settlement Amount`. Phép cuối là phép duy nhất bắt được
+việc đổi tỷ lệ một dòng — mọi TỔNG vẫn khớp nguyên vẹn (đã đo bằng đột biến).
+
+Emart chốt **cả kỳ một dòng** trên `All-Store Thiso Retail`, không tách theo
+hóa đơn hay điểm bán → BKCK Emart có đúng một dòng, không khớp hóa đơn nào. Đó
+là hình dạng thật của chứng từ, không phải parser đọc thiếu.
+
+`Vendor:` trên file là **chính mình** (Hoàng Giang) — cố ý không đọc, đúng bài
+học đã sập một lần ở Central Retail. Bên mua lấy từ `Customer` / `MT Store`.

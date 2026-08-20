@@ -11,8 +11,16 @@ dynamic = ["version"]
 # thanh toán ở định dạng .xls, mà openpyxl chỉ đọc .xlsx — thiếu gói này là
 # nghiệp vụ nạp bảng kê dùng không được cho hai chuỗi đó.
 # Bản 2.x CHỈ đọc .xls, đúng phần việc cần; phần .xlsx vẫn do openpyxl lo.
+# pdfminer.six đọc `Rebate Settlement` của Emart — chuỗi DUY NHẤT gửi cơ sở tính
+# chiết khấu bằng PDF (bốn chuỗi kia gửi Excel). Thiếu gói này thì nghiệp vụ lập
+# bảng kê chiết khấu Emart không dùng được, còn các chuỗi khác vẫn chạy bình
+# thường (import nằm trong hàm, không ở đầu module).
+# Chọn `pdfminer.six` chứ không `pdfplumber`: chỉ cần chữ + tọa độ, mà
+# pdfplumber kéo theo `pypdfium2` (thư viện nhị phân) — không đáng cho phần việc
+# này.
 dependencies = [
     "xlrd>=2.0.1",
+    "pdfminer.six>=20221105",
 ]
 
 [build-system]

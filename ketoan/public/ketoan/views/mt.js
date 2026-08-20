@@ -2686,7 +2686,10 @@ async function loadBkck(container, state) {
 function pickBkckFile(container, state) {
   const inp = document.createElement("input");
   inp.type = "file";
-  inp.accept = ".xlsx,.xls,.xlsm";
+  // `.pdf` cho Rebate Settlement của Emart — chuỗi duy nhất gửi PDF. Backend
+  // nhận dạng bằng CHỮ KÝ BYTE nên đuôi viết hoa `.PDF` vẫn vào đúng nhánh;
+  // liệt kê ở đây chỉ để hộp thoại chọn file không lọc mất nó.
+  inp.accept = ".xlsx,.xls,.xlsm,.pdf,.PDF";
   inp.addEventListener("change", () => {
     const f = inp.files && inp.files[0];
     if (!f) return;
