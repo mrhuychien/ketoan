@@ -197,37 +197,62 @@ def _norm(s):
 _NUM = re.compile(r"^-?[\d.,]+$")
 
 
-def label_value(words, *labels):
+def _label_rest(ws, want, anchored=False):
+    """Các từ đứng SAU nhãn `want` trên dòng này, hoặc None nếu dòng không có nhãn.
+
+    KHỚP THEO RANH GIỚI TỪ, không phải khớp chuỗi con. `anchored=True` bắt nhãn
+    phải nằm ở ĐẦU DÒNG — cần cho nhãn ngắn và phổ biến như `Total`.
+
+    VÌ SAO: bản đầu gom dần các từ rồi hỏi `acc.endswith(want)`. Với nhãn ngắn
+    như `Total`, dòng `Sub Total 999.999` cho acc = 'subtotal' — endswith('total')
+    ĐÚNG, nên số của dòng cộng phụ bị đọc thành `Total` của cả bảng. Đã đo:
+    `label_value` trả 999.999 thay vì 10.949.400. Số kiểm tra 'Tổng mọi khoản'
+    khi đó báo lệch (hoặc tệ hơn: khớp nhầm nếu hai số tình cờ bằng nhau).
+
+    File mẫu một trang không có dòng `Sub Total` nên không lộ. Bản nhiều trang
+    thì lộ, và lộ vào đúng con số chốt cả bảng.
+    """
+    starts = [0] if anchored else range(len(ws))
+    for i in starts:
+        acc = ""
+        for j in range(i, len(ws)):
+            acc += _norm(ws[j]["text"])
+            if acc == want:
+                return ws[j + 1:]
+            if len(acc) >= len(want):
+                break            # đã vượt độ dài nhãn mà chưa trùng -> thử vị trí sau
+    return None
+
+
+def label_value(words, *labels, anchored=False):
     """Số nằm NGAY BÊN PHẢI một nhãn, cùng dòng. None nếu không có nhãn đó.
 
     Dò theo NHÃN, không theo tọa độ cứng: khối đầu trang của Emart xếp hai cột
     (`Invoice Amount` trái, `Rebate Amount:` phải) và vị trí đổi theo độ dài tên
     nhà cung cấp.
+
+    Nhãn có mặt mà dòng đó KHÔNG có số thì đi tiếp xuống dòng CÓ NHÃN kế tiếp,
+    chứ không bỏ cuộc: `Net Amount` xuất hiện hai lần — một lần ở khối đầu trang
+    (kèm số) và một lần làm tiêu đề cột của bảng (không kèm số). Bỏ cuộc ở lần
+    gặp đầu tiên là mất số, và thứ tự hai dòng đó chỉ là may.
+
+    `anchored=True`: nhãn phải ở ĐẦU DÒNG. Bắt buộc với `Total` — `Sub Total`
+    chứa `Total` như một TỪ RIÊNG nên ranh giới từ không đủ để phân biệt; đã đo:
+    không neo thì dòng `Sub Total 999.999` cướp mất con số chốt cả bảng.
     """
     want = [_norm(x) for x in labels]
-    for text, ws in lines_of(words):
-        norm = _norm(text)
+    for _text, ws in lines_of(words):
         for w in want:
-            if w not in norm:
-                continue
-            # tìm chỗ nhãn kết thúc trên dòng này
-            acc = ""
-            end_x = None
-            for i, word in enumerate(ws):
-                acc += _norm(word["text"])
-                if acc.endswith(w):
-                    end_x = word["x1"]
-                    rest = ws[i + 1:]
-                    break
-            if end_x is None:
+            rest = _label_rest(ws, w, anchored=anchored)
+            if rest is None:
                 continue
             for word in rest:
                 if abs(word["y"] - ws[0]["y"]) > PAIR_TOL:
                     continue
                 if _NUM.match(word["text"].strip()):
                     return to_number(word["text"])
-            # nhãn có mà số không nằm cùng dòng -> KHÔNG lấy bừa số dòng khác
-            return None
+            # Dòng này mang nhãn nhưng không mang số -> thử dòng có nhãn kế tiếp.
+            # KHÔNG quét số ở dòng không mang nhãn: đó mới là lấy bừa.
     return None
 
 
@@ -252,18 +277,16 @@ def _in_parens(text):
 
 
 def label_text(words, *labels):
-    """Phần chữ còn lại bên phải một nhãn, cùng dòng."""
+    """Phần chữ còn lại bên phải một nhãn, cùng dòng. Khớp theo RANH GIỚI TỪ."""
     want = [_norm(x) for x in labels]
-    for text, ws in lines_of(words):
-        norm = _norm(text)
+    for _text, ws in lines_of(words):
         for w in want:
-            if w not in norm:
+            rest = _label_rest(ws, w)
+            if rest is None:
                 continue
-            acc = ""
-            for i, word in enumerate(ws):
-                acc += _norm(word["text"])
-                if acc.endswith(w):
-                    return " ".join(x["text"] for x in ws[i + 1:]).strip()
+            out = " ".join(x["text"] for x in rest).strip()
+            if out:
+                return out
     return None
 
 
@@ -368,7 +391,9 @@ def parse_rebate_settlement(raw: bytes):
     dec_rebate = label_value(words, "Rebate Amount:")
     dec_fee = label_value(words, "Fee Amount:")
     dec_support = label_value(words, "Support Amount:")
-    dec_total = label_value(words, "Total")
+    # `anchored`: `Total` phải ở ĐẦU DÒNG, nếu không `Sub Total` của bản nhiều
+    # trang sẽ cướp mất con số chốt cả bảng.
+    dec_total = label_value(words, "Total", anchored=True)
 
     ours, theirs, bad = [], [], []
     for text, _ws in lines_of(words):

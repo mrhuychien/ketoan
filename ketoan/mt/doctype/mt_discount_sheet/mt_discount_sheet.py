@@ -56,8 +56,43 @@ class MTDiscountSheet(Document):
             # nếu không `inv_no_norm` rỗng và mọi phép khớp hóa đơn trượt câm.
             row.validate()
 
+        self._check_invoice_numbers()
         self._compute_totals()
         self._validate_status()
+
+    def _check_invoice_numbers(self):
+        """Số hóa đơn: HOẶC mọi dòng đều có, HOẶC không dòng nào có. Cấm lẫn lộn.
+
+        VÌ SAO KHÔNG ĐẶT `reqd = 1` TRÊN `inv_no`:
+
+        Emart chốt chiết khấu GỘP CẢ KỲ trên `All-Store Thiso Retail`, không tách
+        theo hóa đơn — bảng kê Emart có đúng một dòng và dòng đó KHÔNG có số hóa
+        đơn. Đó là hình dạng thật của chứng từ. Để `reqd = 1` thì `doc.insert()`
+        ném `MandatoryError` và nghiệp vụ chiết khấu Emart không dùng được, trong
+        khi mọi phép kiểm ngoại tuyến vẫn xanh (chúng dựng kế hoạch chứ không ghi).
+
+        VÌ SAO KHÔNG BỎ HẲN GUARD:
+
+        Với 3 chuỗi còn lại, bảng kê in MỘT DÒNG / HÓA ĐƠN. Một dòng mất số hóa
+        đơn ở đó nghĩa là tầng đọc file sót cột — dòng vẫn mang tiền và vẫn cộng
+        vào tổng, nên hóa đơn chiết khấu ra đúng số tiền mà bảng kê đính kèm thì
+        thiếu căn cứ cho một phần tiền. Chuỗi ký xong mới phát hiện là phải làm
+        hóa đơn điều chỉnh.
+
+        Ranh giới đúng vì vậy là TÍNH ĐỒNG NHẤT, không phải sự tồn tại: trống hết
+        = chuỗi chốt gộp; có hết = chốt theo hóa đơn; lẫn lộn = đọc sót.
+        """
+        rows = self.lines or []
+        if not rows:
+            return
+        blank = [r.idx for r in rows if not norm_text(r.inv_no)]
+        if blank and len(blank) != len(rows):
+            frappe.throw(_(
+                "Bảng kê có {0}/{1} dòng KHÔNG có số hóa đơn (dòng {2}…) trong khi các "
+                "dòng khác có. Trống lẫn lộn nghĩa là tầng đọc file sót cột số hóa đơn — "
+                "các dòng đó vẫn mang tiền và vẫn cộng vào tổng, nên hóa đơn chiết khấu "
+                "sẽ đúng tiền mà bảng kê đính kèm thiếu căn cứ. Kiểm lại file rồi lập lại."
+            ).format(len(blank), len(rows), blank[0]))
 
     def _compute_totals(self):
         """Tổng của bảng kê + số tiền chiết khấu, theo ĐÚNG cách tính đã chốt.

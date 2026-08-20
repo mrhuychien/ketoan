@@ -32,11 +32,11 @@
    "label": "Ký hiệu"
   },
   {
+   "description": "Số hóa đơn của mình mà khoản chiết khấu này tính trên. ĐỂ TRỐNG chỉ hợp lệ khi chuỗi chốt gộp cả kỳ, không tách theo hóa đơn (Emart) — và khi đó MỌI dòng của bảng kê đều trống. Trống lẫn lộn với dòng có số là dấu hiệu đọc file sót.",
    "fieldname": "inv_no",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Số hóa đơn",
-   "reqd": 1
+   "label": "Số hóa đơn"
   },
   {
    "fieldname": "inv_no_norm",

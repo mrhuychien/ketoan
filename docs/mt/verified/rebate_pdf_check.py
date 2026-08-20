@@ -166,6 +166,41 @@ def main():
         print(f"       └─ thiếu khóa: {sorted(miss)}")
     bad += not ok
 
+    # ── 5b. DÒ NHÃN: hai bẫy chỉ lộ ra ở bản NHIỀU TRANG ─────────────────
+    #
+    # File mẫu có đúng một trang nên không bẫy nào lộ. Cả hai đã ĐO ĐƯỢC bằng
+    # dòng giả lập, và cả hai đều cướp/làm mất một con số chốt.
+    print("-" * 78)
+
+    def _w(txt, y):
+        ws, x = [], 0
+        for t in txt.split():
+            ws.append({"text": t, "x0": x, "x1": x + len(t) * 5, "y": y})
+            x += len(t) * 5 + 6
+        return ws
+
+    got = mp.label_value(_w("Sub Total 999.999", 300) + _w("Total 10.949.400", 200),
+                         "Total", anchored=True)
+    ok = got == 10_949_400
+    print(f"  {'✅' if ok else '❌'} `Sub Total` KHÔNG cướp được nhãn `Total` -> {got:,.0f}"
+          if got else "  ❌ `Total` đọc ra None")
+    bad += not ok
+
+    got = mp.label_value(_w("Net Amount Settlement Type", 300)
+                         + _w("Net Amount 91.245.000", 200), "Net Amount")
+    ok = got == 91_245_000
+    print(f"  {'✅' if ok else '❌'} nhãn `Net Amount` lặp lại ở tiêu đề cột (không kèm số) "
+          f"-> vẫn lấy được số ở dòng kia: {got:,.0f}" if got else
+          "  ❌ `Net Amount` đọc ra None")
+    bad += not ok
+
+    # Dòng tiêu đề cột KHÔNG được đọc thành dòng dữ liệu (bản nhiều trang lặp nó).
+    hdr = "Rebate type Rebate Rate Net Amount Settlement Settlement Type Settlement Date"
+    ok = mp.ROW_RE.match(hdr) is None
+    print(f"  {'✅' if ok else '❌'} dòng TIÊU ĐỀ CỘT không khớp văn phạm dòng dữ liệu "
+          f"(bản nhiều trang lặp tiêu đề ở mỗi trang)")
+    bad += not ok
+
     # ── 6. ĐỘT BIẾN — phép kiểm phải BIẾT TRƯỢT ──────────────────────────
     print("-" * 78)
     print("  Đột biến: làm hỏng chính file thật, parser phải kêu")

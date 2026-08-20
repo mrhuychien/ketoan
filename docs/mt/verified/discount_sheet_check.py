@@ -246,8 +246,77 @@ def main():
     print(f"  {'✅' if ok else '❌'} đổi kỳ -> vân tay ĐỔI theo")
     bad += not ok
 
+    # ── GHI THẬT: chạy controller, không chỉ dựng kế hoạch ───────────────
+    #
+    # Mọi phép trên đây dừng ở `_build_plan` — nó KHÔNG chạm DocType. Bảng kê
+    # Emart từng qua hết các phép đó rồi chết ở `doc.insert()` vì `inv_no` khai
+    # `reqd = 1` và controller dòng còn ném thêm một lần nữa. Phép dưới đây chạy
+    # ĐÚNG hai controller thật để lỗi loại đó không lọt lần hai.
+    print("-" * 78)
+    import importlib as _il
+
+    sheet_mod = _il.import_module("ketoan.mt.doctype.mt_discount_sheet.mt_discount_sheet")
+    line_mod = _il.import_module(
+        "ketoan.mt.doctype.mt_discount_sheet_line.mt_discount_sheet_line")
+
+    class _Line(line_mod.MTDiscountSheetLine):
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    class _Sheet(sheet_mod.MTDiscountSheet):
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    def _sheet(lines, mode="Tỷ lệ × tổng doanh số", rate=3.0):
+        return _Sheet(company=COMPANY, chain="Emart", customer="KH-EMART",
+                      status="Nháp", mode=mode, rate=rate, vat_rate=8,
+                      buyer_name="Bên mua", buyer_tax_id="0304741634",
+                      discount_invoice_series=None, discount_invoice_no=None,
+                      sheet_no=None, lines=lines)
+
+    def _line(idx, inv_no, base):
+        return _Line(idx=idx, inv_series="1C26THG", inv_no=inv_no, inv_no_norm=None,
+                     inv_date="2026-07-31", amount_before_vat=base, vat_amount=base * 0.08,
+                     discount_amount=None, total_amount=0)
+
+    # Hình dạng Emart: MỘT dòng, KHÔNG số hóa đơn -> phải ghi được.
+    doc = _sheet([_line(1, None, 91_245_000)])
+    try:
+        doc.validate()
+        ok = round(doc.discount_base) == 2_737_350
+        print(f"  {'✅' if ok else '❌'} bảng kê Emart (1 dòng, KHÔNG số hóa đơn) qua được "
+              f"controller: chiết khấu {doc.discount_base:,.0f}đ")
+    except Exception as e:  # noqa: BLE001
+        ok = False
+        print(f"  ❌ bảng kê Emart chết ở controller: {str(e)[:70]}")
+    bad += not ok
+
+    # Mọi dòng ĐỀU có số hóa đơn -> vẫn ghi được như trước.
+    doc = _sheet([_line(1, "6999", 10_000_000), _line(2, "7006", 20_000_000)])
+    try:
+        doc.validate()
+        ok = round(doc.total_base) == 30_000_000
+        print(f"  {'✅' if ok else '❌'} bảng kê thường (mọi dòng có số hóa đơn) vẫn qua: "
+              f"tổng {doc.total_base:,.0f}đ")
+    except Exception as e:  # noqa: BLE001
+        ok = False
+        print(f"  ❌ bảng kê thường chết ở controller: {str(e)[:70]}")
+    bad += not ok
+
+    # LẪN LỘN -> phải DỪNG. Đây mới là dấu hiệu đọc file sót cột.
+    doc = _sheet([_line(1, "6999", 10_000_000), _line(2, None, 20_000_000)])
+    try:
+        doc.validate()
+        print("  ❌ bảng kê có dòng CÓ dòng KHÔNG số hóa đơn -> không dừng")
+        bad += 1
+    except Exception as e:  # noqa: BLE001
+        ok = "lẫn lộn" in str(e) and "1/2" in str(e)
+        print(f"  {'✅' if ok else '❌'} 1/2 dòng thiếu số hóa đơn -> dừng, nêu rõ đọc sót cột")
+        bad += not ok
+
     print("=" * 78)
-    print("KẾT QUẢ:", "ĐẠT — bảng kê đúng số tiền, đúng bên mua, không đoán tỷ lệ"
+    print("KẾT QUẢ:", "ĐẠT — bảng kê đúng số tiền, đúng bên mua, không đoán tỷ lệ, "
+                      "ghi được cả hình dạng Emart"
           if not bad else f"HỎNG {bad} mục")
     return 1 if bad else 0
 

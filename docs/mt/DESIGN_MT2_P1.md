@@ -558,7 +558,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-B3** hồ sơ thanh toán WinCommerce (xuất Excel + tên file PDF) | `6912873` | `win_dossier_check` |
 | **MT2-F** công nợ MT đến hạn theo term (patch v0_0_16) | `899501a` | `debt_due_check` |
 | **MT2-B4** đọc Rebate Settlement Emart (PDF) -> BKCK | `32e0f08` | `rebate_pdf_check` · `discount_sheet_check` |
-| **MT2-G** đóng hạng mục "khớp tự động dòng Ghi giảm" bằng phép đo | *(commit này)* | `clawback_check` |
+| **MT2-G** đóng hạng mục "khớp tự động dòng Ghi giảm" bằng phép đo | `165cf30` | `clawback_check` |
+| **MT2-H** soát trước deploy: 3 lỗi thật, bịt vùng mù "kiểm không bao giờ GHI" | *(commit này)* | `discount_sheet_check` · `rebate_pdf_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -674,3 +675,65 @@ luật "chưa có mẫu thật thì chưa viết parser" — không đoán cột
 chuỗi khác. `Mega Market` vẫn nằm trong `CHAIN_LABEL` (để gán chuỗi cho khách và
 lập BKCK) nhưng cố ý **không** có trong `PARSERS`, và `read_payment_advice` báo
 đúng câu đó khi gặp file Mega.
+
+## MT2-H — soát trước deploy
+
+Vùng mù đã biết: cả 12 bộ kiểm đều **stub `frappe`**, nên chúng dựng kế hoạch
+chứ **không bao giờ ghi**. Soát lại toàn bộ MT-2 tìm đúng loại lỗi đó.
+
+### Ba lỗi thật
+
+**1. Bảng kê chiết khấu Emart KHÔNG GHI ĐƯỢC** *(nặng nhất — tính năng chết)*
+
+`mt_discount_sheet_line.json` khai `inv_no` **`reqd = 1`**, và controller dòng
+còn ném thêm `"Dòng {0}: thiếu số hóa đơn"`. Emart chốt gộp cả kỳ trên
+`All-Store Thiso Retail`, dòng BKCK **không có** số hóa đơn — nên
+`commit_sheets` chết ở `doc.insert()` với `MandatoryError`. MT2-B4 xanh 27/27
+phép vì `discount_sheet_check` chỉ chạy `_build_plan`.
+
+Sửa: bỏ `reqd`, gỡ throw ở cấp dòng, thay bằng quy tắc ở **cấp bảng kê** —
+`_check_invoice_numbers`: hoặc **mọi** dòng có số hóa đơn, hoặc **không** dòng
+nào có. Lẫn lộn = tầng đọc file sót cột, và đó mới là ca nguy hiểm (dòng vẫn
+mang tiền, vẫn cộng vào tổng, nên hóa đơn CK đúng tiền mà bảng kê đính kèm
+thiếu căn cứ). Ranh giới đúng là **tính đồng nhất**, không phải sự tồn tại.
+
+**2. `Sub Total` cướp nhãn `Total`** *(sai số chốt cả bảng)*
+
+`label_value` khớp chuỗi con bằng `acc.endswith(want)`. Dòng `Sub Total 999.999`
+cho `acc = 'subtotal'`, `endswith('total')` đúng → đọc 999.999 làm `Total`. Đo
+được. File mẫu một trang không có dòng cộng phụ nên không lộ; bản nhiều trang
+thì lộ, và lộ đúng vào con số chốt. Sửa: khớp theo **ranh giới từ**, cộng
+`anchored=True` cho `Total` (nhãn ngắn, `Sub Total` chứa `Total` như một từ
+riêng nên ranh giới từ vẫn chưa đủ).
+
+**3. Nhãn lặp làm mất số**
+
+`Net Amount` xuất hiện hai lần: khối đầu trang (kèm số) và tiêu đề cột (không
+kèm số). Bản cũ gặp dòng có nhãn mà không có số thì **bỏ cuộc** → thứ tự hai
+dòng đó chỉ là may. Sửa: đi tiếp xuống dòng **có nhãn** kế tiếp (không quét số
+ở dòng không mang nhãn — đó mới là lấy bừa).
+
+### Đã soi và SẠCH
+
+| Soát | Kết quả |
+|---|---|
+| Cột SQL trỏ DocType của app | ✅ đúng hết |
+| Field qua ORM (`get_all`/`get_value`/`filters`) | ✅ đúng hết |
+| `api.js` → chữ ký Python | ✅ 0 tham số lạ |
+| Lớp CSS `kt-*` dùng trong JS | ✅ (2 lớp thừa nằm ngoài MT) |
+| `field_order` · `module` · `permissions` 9 DocType MT | ✅ `Ke Toan MT` chỉ đọc mọi nơi |
+| `hooks.py` doc_events | ✅ hàm tồn tại, đúng chữ ký `(doc, method)` |
+| Patch v0_0_13/14/15 idempotent, không throw | ✅ log thay vì làm chết migrate |
+| Field `reqd` mà code để trống | ✅ chỉ `inv_no` (đã sửa); Win đã lọc `custom_misa_inv_no != ''` |
+
+### Vùng mù CÒN LẠI — chỉ bench thật mới soi được
+
+Bộ kiểm không thể chạm tới, phải bấm tay sau `bench migrate`:
+
+1. **Cột của DocType CORE.** Kiểm được cột của app; `si.base_net_total`,
+   `Address.gstin`, `custom_misa_*` thì phải xem trên site.
+2. **Patch chạy thật.** v0_0_15 dò tài khoản theo số hiệu, v0_0_16 vớt hạn từ
+   `due_date` — cả hai chưa từng chạy trên dữ liệu thật.
+3. **Sinh + duyệt Journal Entry** với account/company/cost center thật.
+4. **Tải file Excel về** (`export_dossier` dùng `frappe.local.response`).
+5. **Print Format BKCK** dựng Jinja trên bản ghi thật.
