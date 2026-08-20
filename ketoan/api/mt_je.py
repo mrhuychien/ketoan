@@ -83,7 +83,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, cstr, flt
 
-from ketoan.api._guard import guard_manager, guard_mt
+from ketoan.api._guard import guard_manager, guard_mt, is_chief
 from ketoan.mt.doctype.mt_account_map.mt_account_map import (
     EVENT_DISCOUNT,
     EVENT_FEE,
@@ -864,4 +864,326 @@ def create_journal_entries(advice, expected_hash=None, company=None):
         "not_posted": not_posted,
         "message": _("Đã sinh {0} bút toán NHÁP. Chưa ghi sổ — vào tab 'Duyệt bút toán' để duyệt.")
                    .format(len(created)),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DUYỆT BÚT TOÁN (MT2-E)
+#
+# Đây là chỗ DUY NHẤT trong toàn bộ kênh MT mà tiền thật sự vào sổ. Ba nguyên
+# tắc, mỗi cái đều là một cách hỏng đã lường trước:
+#
+#   1. TỪNG BÚT TOÁN MỘT, có savepoint. Duyệt 20 cái mà cái thứ 3 hỏng thì 17
+#      cái còn lại vẫn phải vào sổ — không thì kế toán phải mò tay từng cái để
+#      biết cái nào đã ghi. Trả kết quả PER-JE, không trả một chữ "xong".
+#   2. BẢNG KÊ CHƯA ĐỐI CHIẾU thì phải xác nhận thêm một lần. Duyệt là ghi sổ,
+#      và hủy một bút toán đã ghi để lại vết trong sổ cái mà kiểm toán sẽ hỏi.
+#   3. CHỈ ĐỘNG VÀO BÚT TOÁN CỦA CHÍNH KÊNH MT. Mọi truy vấn đều lọc
+#      `custom_mt_source_dt = 'MT Payment Advice'` — không bao giờ để một cái
+#      tên gửi lên từ client làm submit/xóa nhầm chứng từ của phân hệ khác.
+# ═══════════════════════════════════════════════════════════════════════════
+
+MAX_BATCH = 100
+
+
+def _je_names(names):
+    """Bóc danh sách tên JE từ tham số client (JSON hoặc list). Chuẩn hóa + chặn trần."""
+    if isinstance(names, str):
+        import json
+        try:
+            names = json.loads(names)
+        except ValueError:
+            names = [n.strip() for n in names.split(",")]
+    if not isinstance(names, (list, tuple)):
+        frappe.throw(_("Danh sách bút toán không hợp lệ"))
+    out = sorted({cstr(n).strip() for n in names if cstr(n).strip()})
+    if not out:
+        frappe.throw(_("Chưa chọn bút toán nào"))
+    if len(out) > MAX_BATCH:
+        frappe.throw(_("Chọn tối đa {0} bút toán một lần. Duyệt cả nghìn cái trong một "
+                       "lượt là không ai soi kịp — và lỗi giữa chừng thì rất khó dò.")
+                     .format(MAX_BATCH))
+    return out
+
+
+def _load_mt_jes(names, company, docstatus=0):
+    """Đọc JE THUỘC KÊNH MT theo tên. Cái nào không đủ điều kiện -> trả kèm lý do.
+
+    Không throw khi một cái sai: người bấm chọn 20 cái, một cái vừa bị người khác
+    duyệt mất thì 19 cái còn lại vẫn phải xử lý được.
+    """
+    rows = frappe.db.sql("""
+        SELECT je.name, je.docstatus, je.company, je.posting_date, je.total_debit,
+               je.custom_mt_kind, je.custom_mt_source_dt, je.custom_mt_source_name
+        FROM `tabJournal Entry` je
+        WHERE je.name IN %(names)s
+    """, {"names": tuple(names)}, as_dict=True)
+    found = {r.name: r for r in rows}
+
+    ok, bad = [], []
+    for n in names:
+        r = found.get(n)
+        if not r:
+            bad.append({"name": n, "error": _("Không tìm thấy bút toán")})
+        elif cstr(r.custom_mt_source_dt) != SOURCE_DT:
+            # Chốt số 3: tên gửi lên từ client không được phép chạm vào chứng từ
+            # của phân hệ khác.
+            bad.append({"name": n, "error": _("Không phải bút toán của kênh MT")})
+        elif cstr(r.company) != cstr(company):
+            bad.append({"name": n, "error": _("Thuộc công ty khác")})
+        elif cint(r.docstatus) != cint(docstatus):
+            bad.append({"name": n, "error": _("Trạng thái đã đổi (docstatus={0}) — "
+                                              "tải lại danh sách").format(cint(r.docstatus))})
+        else:
+            ok.append(r)
+    return ok, bad
+
+
+@frappe.whitelist()
+def list_draft_journal_entries(from_date=None, to_date=None, chain=None, kind=None,
+                               advice=None, docstatus=0, search=None,
+                               page=1, page_size=20, company=None):
+    """Bút toán do kênh MT sinh, kèm bảng kê nguồn. Chỉ đọc.
+
+    `chain` không có trên Journal Entry -> JOIN sang bảng kê qua
+    `custom_mt_source_name`. Dùng SQL thô vì `frappe.get_all` không diễn đạt
+    được phép join này mà không nạp hai lượt rồi ghép tay trên RAM.
+    """
+    guard_mt()
+    _require_tables()
+    company = _company(company)
+
+    page = max(1, cint(page) or 1)
+    page_size = min(100, max(1, cint(page_size) or 20))
+
+    where = ["je.custom_mt_source_dt = %(dt)s", "je.company = %(company)s",
+             "je.docstatus = %(docstatus)s"]
+    params = {"dt": SOURCE_DT, "company": company, "docstatus": cint(docstatus)}
+    if from_date and to_date:
+        where.append("je.posting_date BETWEEN %(fd)s AND %(td)s")
+        params["fd"], params["td"] = from_date, to_date
+    if chain:
+        where.append("a.chain = %(chain)s")
+        params["chain"] = chain
+    if kind:
+        where.append("je.custom_mt_kind = %(kind)s")
+        params["kind"] = kind
+    if advice:
+        where.append("je.custom_mt_source_name = %(advice)s")
+        params["advice"] = advice
+    if search:
+        where.append("(je.name LIKE %(q)s OR je.custom_mt_source_name LIKE %(q)s "
+                     "OR IFNULL(a.advice_no,'') LIKE %(q)s OR IFNULL(a.customer,'') LIKE %(q)s)")
+        params["q"] = "%" + cstr(search).strip() + "%"
+    clause = " AND ".join(where)
+
+    base = """
+        FROM `tabJournal Entry` je
+        LEFT JOIN `tabMT Payment Advice` a ON a.name = je.custom_mt_source_name
+        LEFT JOIN `tabCustomer` cus ON cus.name = a.customer
+        WHERE {clause}
+    """.format(clause=clause)
+
+    head = frappe.db.sql("SELECT COUNT(*) AS n, IFNULL(SUM(je.total_debit), 0) AS amount "
+                         + base, params, as_dict=True)[0]
+
+    params["limit"] = page_size
+    params["offset"] = (page - 1) * page_size
+    rows = frappe.db.sql("""
+        SELECT je.name, je.posting_date, je.total_debit AS amount, je.docstatus,
+               je.custom_mt_kind AS kind, je.custom_mt_source_name AS advice,
+               a.chain, a.customer, cus.customer_name, a.advice_no, a.reconciled,
+               a.payment_date, a.file_name
+    """ + base + """
+        ORDER BY je.posting_date DESC, je.name DESC
+        LIMIT %(limit)s OFFSET %(offset)s
+    """, params, as_dict=True)
+
+    total = cint(head.n)
+    return {
+        "rows": rows,
+        "total": total,
+        "total_amount": flt(head.amount),
+        "page": page,
+        "page_size": page_size,
+        "pages": (total + page_size - 1) // page_size if total else 1,
+        "kinds": ["Thanh toán", "Chiết khấu", "Phí"],
+        # Nút duyệt chỉ hiện với người thật sự duyệt được. Hiện cho người khác
+        # chỉ tạo một cú bấm để nhận lỗi.
+        "can_submit": is_chief(),
+        "note": _(
+            "Duyệt là GHI SỔ. Hủy một bút toán đã ghi để lại vết trong sổ cái — "
+            "soi kỹ trước khi bấm. Bút toán nháp thì xóa sạch được."
+        ),
+    }
+
+
+@frappe.whitelist()
+def get_journal_entry(name, company=None):
+    """Chi tiết MỘT bút toán MT để soi trước khi duyệt. Chỉ đọc."""
+    guard_mt()
+    _require_tables()
+    company = _company(company)
+
+    # Truy vấn đã tự lọc `custom_mt_source_dt` + `company` nên không cần
+    # `_load_mt_jes` ở đây; hàm này đọc CẢ bút toán đã ghi sổ để soi lại.
+    head = frappe.db.sql("""
+        SELECT je.name, je.docstatus, je.posting_date, je.total_debit, je.total_credit,
+               je.custom_mt_kind AS kind, je.custom_mt_source_name AS advice,
+               je.custom_mt_fingerprint AS fingerprint,
+               je.remark, je.user_remark,
+               a.chain, a.customer, a.advice_no, a.reconciled, a.je_state, a.file_name
+        FROM `tabJournal Entry` je
+        LEFT JOIN `tabMT Payment Advice` a ON a.name = je.custom_mt_source_name
+        WHERE je.name = %(name)s AND je.custom_mt_source_dt = %(dt)s
+          AND je.company = %(company)s
+    """, {"name": cstr(name), "dt": SOURCE_DT, "company": company}, as_dict=True)
+    if not head:
+        frappe.throw(_("Không tìm thấy bút toán {0} của kênh MT trong công ty này").format(name))
+    doc = head[0]
+
+    lines = frappe.db.sql("""
+        SELECT jea.idx, jea.account, jea.debit_in_account_currency AS debit,
+               jea.credit_in_account_currency AS credit, jea.party_type, jea.party,
+               jea.reference_type, jea.reference_name,
+               acc.account_number, acc.account_name
+        FROM `tabJournal Entry Account` jea
+        LEFT JOIN `tabAccount` acc ON acc.name = jea.account
+        WHERE jea.parent = %(name)s AND jea.parenttype = 'Journal Entry'
+        ORDER BY jea.idx
+    """, {"name": doc.name}, as_dict=True)
+
+    return {
+        "doc": doc,
+        "lines": lines,
+        "remark": doc.remark or doc.user_remark or "",
+        "desk_url": "/app/journal-entry/" + doc.name,
+        "can_submit": is_chief(),
+    }
+
+
+@frappe.whitelist()
+def submit_journal_entries(names, force_unreconciled=0, company=None):
+    """DUYỆT (ghi sổ) các bút toán nháp của kênh MT. Từng cái một, có savepoint.
+
+    `force_unreconciled=1` là XÁC NHẬN CÓ Ý THỨC rằng bảng kê nguồn chưa được
+    tick 'Đã đối chiếu khớp'. Không có cờ này thì hàm TỪ CHỐI và trả về danh
+    sách để người xem — duyệt là ghi sổ, và hủy bút toán đã ghi để lại vết.
+    """
+    guard_manager()
+    _require_tables()
+    company = _company(company)
+    names = _je_names(names)
+
+    jes, bad = _load_mt_jes(names, company, docstatus=0)
+
+    # Chốt số 2: bảng kê chưa đối chiếu -> đòi xác nhận, không lặng lẽ ghi.
+    if not cint(force_unreconciled):
+        unrec = []
+        for r in jes:
+            if not cint(frappe.db.get_value(SOURCE_DT, r.custom_mt_source_name, "reconciled") or 0):
+                unrec.append({"name": r.name, "advice": r.custom_mt_source_name,
+                              "kind": r.custom_mt_kind, "amount": flt(r.total_debit)})
+        if unrec:
+            return {
+                "needs_confirm": True,
+                "unreconciled": unrec,
+                "submitted": [], "failed": bad, "skipped": [],
+                "message": _(
+                    "{0} bút toán thuộc bảng kê CHƯA tick 'Đã đối chiếu khớp'. Duyệt là "
+                    "ghi sổ — soi lại rồi xác nhận nếu vẫn muốn duyệt."
+                ).format(len(unrec)),
+            }
+
+    submitted, failed = [], list(bad)
+    touched = set()
+    for i, r in enumerate(jes):
+        sp = "mt_je_sub_%d" % i
+        try:
+            frappe.db.savepoint(sp)
+            # get_doc + submit() chạy DƯỚI QUYỀN của người bấm: `Ke Toan MT`
+            # không có submit trên Journal Entry nên sẽ bị chặn ở đây, đúng ý đồ
+            # (guard_manager ở trên đã chặn trước, đây là lớp thứ hai).
+            doc = frappe.get_doc("Journal Entry", r.name)
+            doc.submit()
+            submitted.append({"name": r.name, "kind": r.custom_mt_kind,
+                              "amount": flt(r.total_debit),
+                              "advice": r.custom_mt_source_name})
+            touched.add(r.custom_mt_source_name)
+        except Exception as ex:                                  # noqa: BLE001
+            # Chốt số 1: một cái hỏng KHÔNG kéo theo cái còn lại.
+            try:
+                frappe.db.rollback(save_point=sp)
+            except Exception:                                    # noqa: BLE001
+                pass
+            frappe.log_error(frappe.get_traceback(), "ketoan: mt_je.submit_journal_entries")
+            failed.append({"name": r.name, "error": cstr(ex)[:300]})
+
+    # Hook `on_submit` đã cập nhật `je_state`, nhưng hook bọc try/except (tích
+    # hợp MT hỏng không được chặn ghi sổ) nên tính lại ở đây cho chắc.
+    states = {}
+    for advice in sorted(touched):
+        try:
+            states[advice] = _set_je_state(advice)
+        except Exception:                                        # noqa: BLE001
+            frappe.log_error(frappe.get_traceback(), "ketoan: mt_je.submit -> je_state")
+
+    frappe.db.commit()
+    return {
+        "needs_confirm": False,
+        "submitted": submitted,
+        "failed": failed,
+        "je_states": states,
+        "message": _("Đã ghi sổ {0} bút toán{1}.").format(
+            len(submitted), _(", {0} cái KHÔNG ghi được").format(len(failed)) if failed else ""),
+    }
+
+
+@frappe.whitelist()
+def delete_draft_journal_entries(names, company=None):
+    """XÓA bút toán NHÁP của kênh MT. Chỉ nháp — không đụng cái đã ghi sổ.
+
+    VÌ SAO cần: sinh nhầm rồi thì phải xóa được. Vân tay chống trùng sẽ chặn lần
+    sinh lại nếu bản nháp cũ còn đó, nên không có đường xóa là bế tắc — kế toán
+    buộc phải vào Desk, mà `Ke Toan MT` lại không có quyền xóa ở đó.
+
+    Bút toán ĐÃ GHI SỔ thì KHÔNG xóa ở đây: hủy chứng từ đã ghi là việc của Desk,
+    có vết và có quy trình riêng.
+    """
+    guard_manager()
+    _require_tables()
+    company = _company(company)
+    names = _je_names(names)
+
+    jes, bad = _load_mt_jes(names, company, docstatus=0)
+    deleted, failed = [], list(bad)
+    touched = set()
+    for i, r in enumerate(jes):
+        sp = "mt_je_del_%d" % i
+        try:
+            frappe.db.savepoint(sp)
+            frappe.delete_doc("Journal Entry", r.name, ignore_permissions=False)
+            deleted.append(r.name)
+            touched.add(r.custom_mt_source_name)
+        except Exception as ex:                                  # noqa: BLE001
+            try:
+                frappe.db.rollback(save_point=sp)
+            except Exception:                                    # noqa: BLE001
+                pass
+            frappe.log_error(frappe.get_traceback(), "ketoan: mt_je.delete_draft_journal_entries")
+            failed.append({"name": r.name, "error": cstr(ex)[:300]})
+
+    states = {}
+    for advice in sorted(touched):
+        try:
+            states[advice] = _set_je_state(advice)
+        except Exception:                                        # noqa: BLE001
+            frappe.log_error(frappe.get_traceback(), "ketoan: mt_je.delete -> je_state")
+
+    frappe.db.commit()
+    return {
+        "deleted": deleted,
+        "failed": failed,
+        "je_states": states,
+        "message": _("Đã xóa {0} bút toán nháp.").format(len(deleted)),
     }

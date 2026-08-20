@@ -431,8 +431,23 @@ việc ghi sổ**. Cùng nguyên tắc `misa_sync.ensure_ref_id`.
 | `mt_je.preview_journal_entries(advice)` | `guard_mt` | Xem trước JE sẽ sinh: từng dòng, TK, tiền, SI reference. **KHÔNG ghi** |
 | `mt_je.create_journal_entries(advice, expected_hash)` | `guard_manager` | Sinh JE Draft. Bắt buộc vân tay từ preview |
 | `mt_je.list_advices(...)` | `guard_mt` | Bảng kê + `je_state` của từng cái, lọc chuỗi/kỳ/trạng thái, chia trang |
-| `mt_je.list_draft_journal_entries(...)` | `guard_mt` | *(MT2-E)* Danh sách JE Draft do MT sinh |
-| `mt_je.submit_journal_entries(names)` | `guard_manager` | *(MT2-E)* Duyệt. **try/except từng JE**, trả kết quả per-JE |
+| `mt_je.list_draft_journal_entries(...)` | `guard_mt` | Danh sách JE do MT sinh (nháp hoặc đã ghi sổ), lọc chuỗi/kỳ/loại, chia trang |
+| `mt_je.get_journal_entry(name)` | `guard_mt` | Chi tiết một JE để soi trước khi duyệt |
+| `mt_je.submit_journal_entries(names, force_unreconciled)` | `guard_manager` | Duyệt. **try/except + savepoint từng JE**, trả kết quả per-JE |
+| `mt_je.delete_draft_journal_entries(names)` | `guard_manager` | Xóa JE **nháp** sinh nhầm |
+
+> **Bổ sung khi build MT2-E (20/08/2026)**
+>
+> · `get_journal_entry` — duyệt mà không soi được nội dung thì nút duyệt chỉ là
+>   một cú bấm mù. Đọc cả JE đã ghi sổ để tra lại sau.
+> · `delete_draft_journal_entries` — không có đường xóa là **bế tắc**: sinh nhầm
+>   → vân tay chống trùng chặn lần sinh lại → kế toán buộc phải vào Desk, mà
+>   `Ke Toan MT` không có quyền xóa ở đó. Chỉ đụng bản nháp; hủy chứng từ đã ghi
+>   sổ vẫn là việc của Desk, có vết và có quy trình riêng.
+> · `force_unreconciled` — bảng kê chưa tick 'Đã đối chiếu khớp' thì
+>   `submit_journal_entries` **từ chối ghi sổ** và trả `needs_confirm` kèm danh
+>   sách, cho tới khi người xác nhận có ý thức. Duyệt là ghi sổ; hủy một bút toán
+>   đã ghi để lại vết trong sổ cái mà kiểm toán sẽ hỏi.
 | `mt_je.get_account_map(company)` | `guard_mt` | Bảng TK đang áp dụng — để màn xem trước nói rõ bút toán vào TK nào |
 | `mt_store.preview_seed()` | `guard_mt` | Xem trước danh sách store dựng được |
 | `mt_store.commit_seed(expected_hash)` | `guard_manager` | Tạo `MT Store` |
@@ -523,7 +538,30 @@ Push cả nhánh `claude/zen-babbage-0vj0eg` và `main`.
 | 2 — DocType blueprint | ✅ duyệt (Q1·Q2·Q3 chốt ở 2.6) |
 | 3 — Permission matrix | ✅ duyệt (Q4 chốt phương án **a**) |
 | 4 — Workflow | ✅ **bỏ có lý do** |
-| 5 — Integration & hooks | **chờ duyệt** |
+| 5 — Integration & hooks | ✅ duyệt |
 | 6 — Patch plan | **chờ duyệt** |
 
 Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D → E**.
+
+---
+
+## ✅ P1 ĐÃ SHIP (20/08/2026)
+
+| Hạng mục | Commit | Bộ kiểm |
+|---|---|---|
+| **MT2-A** parser AEON + Fuji, gom `CHAIN_OPTIONS` một nguồn | `4cb04b2` | `regression_check` · `crosscheck_mt2` · `mutation_check` |
+| **MT2-C** master `MT Store` + seed từ bảng kê đã nạp | `48105e1` | `store_seed_check` |
+| **MT2-D** `MT Account Map` + sinh JE nháp (patch v0_0_14/15) | `1d65ed6` `f676467` | `je_plan_check` |
+| **MT2-E** duyệt / xóa bút toán trên portal | *(commit này)* | `je_submit_check` |
+
+Chạy toàn bộ, không cần bench:
+
+```bash
+for t in regression_check crosscheck_mt2 mutation_check \
+         store_seed_check je_plan_check je_submit_check; do
+  python3 docs/mt/verified/$t.py
+done
+```
+
+**MT2-B (chiều chiết khấu: nạp doanh số/TBCK → BKCK → hóa đơn CK) chưa làm** —
+ngoài phạm vi P1, xem `BRIEF_MT2_ketoan.md`.

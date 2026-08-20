@@ -101,6 +101,14 @@ export async function render({ container, query }) {
     canManage: false,
     // Tab 'Bút toán': lọc theo trạng thái bút toán của bảng kê.
     jeState: query?.je_state || "",
+    // Tab 'Bút toán' có hai cách nhìn: theo BẢNG KÊ (sinh bút toán) và theo
+    // BÚT TOÁN (duyệt). Tách ra vì hai việc khác nhau, hai quyền khác nhau.
+    jeView: query?.je_view === "duyet" ? "duyet" : "bang-ke",
+    // Bút toán đang tick để duyệt/xóa hàng loạt.
+    jePicked: new Set(),
+    jeKind: query?.je_kind || "",
+    // '0' = nháp chờ duyệt (mặc định), '1' = đã ghi sổ.
+    jeDocstatus: query?.je_docstatus === "1" ? "1" : "0",
   };
 
   let ov;
@@ -290,7 +298,11 @@ async function loadTab(container, state) {
   setHTML(body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
 
   if (state.tab === "chuoi") return loadChains(container, state);
-  if (state.tab === "but-toan") return loadJournals(container, state);
+  if (state.tab === "but-toan") {
+    return state.jeView === "duyet"
+      ? loadJeApproval(container, state)
+      : loadJournals(container, state);
+  }
 
   const bucket = state.tab === "chiet-khau" ? "chiet_khau" : state.bucket;
   let res;
@@ -1854,7 +1866,8 @@ async function loadJournals(container, state) {
   setHTML(body, html`
     <div class="kt-card kt-mb"><div class="kt-card-body"
          style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <label class="kt-label" style="margin:0">Chuỗi</label>
+      ${jeViewSwitch(state)}
+      <label class="kt-label" style="margin:0 0 0 8px">Chuỗi</label>
       <select class="kt-input kt-input--sm" id="mt-chain">
         <option value="">Tất cả chuỗi</option>
         ${chainOptionHTML(state, state.chain)}
@@ -1928,6 +1941,7 @@ async function loadJournals(container, state) {
   });
   const am = container.querySelector("#je-accmap");
   if (am) am.addEventListener("click", () => openAccountMap());
+  bindJeViewSwitch(container, state);
   container.querySelectorAll(".je-open").forEach((b) => {
     b.addEventListener("click", () => openJePreview(container, state, b.dataset.advice));
   });
@@ -2146,4 +2160,399 @@ function jeCard(e) {
         </details>
       </div>
     </div>`;
+}
+
+
+// ── Tab 4b: Duyệt bút toán ─────────────────────────────────────────────────
+//
+// ĐÂY LÀ CHỖ DUY NHẤT trong toàn bộ kênh MT mà tiền thật sự vào sổ. Mọi thứ
+// trước đó — nạp bảng kê, khớp hóa đơn, sinh bút toán — đều là NHÁP và xóa được.
+//
+// Nút duyệt CHỈ hiện với người thật sự duyệt được (kế toán trưởng). Hiện cho
+// người khác chỉ tạo một cú bấm để nhận lỗi quyền.
+
+function jeViewSwitch(state) {
+  const b = (key, label, icon) => html`<button
+    class="kt-btn kt-btn--sm ${state.jeView === key ? "" : "kt-btn--outline"}"
+    data-jeview="${key}"><i class="fas ${icon}"></i> ${label}</button>`;
+  return html`<span style="display:inline-flex;gap:6px">
+    ${b("bang-ke", "Theo bảng kê", "fa-file-invoice")}
+    ${b("duyet", "Chờ duyệt", "fa-stamp")}
+  </span>`;
+}
+
+function bindJeViewSwitch(container, state) {
+  container.querySelectorAll("[data-jeview]").forEach((b) => {
+    b.addEventListener("click", () => {
+      if (state.jeView === b.dataset.jeview) return;
+      state.jeView = b.dataset.jeview;
+      state.page = 1;
+      state.jePicked = new Set();   // chọn của màn này không mang sang màn kia
+      loadTab(container, state);
+    });
+  });
+}
+
+async function loadJeApproval(container, state) {
+  const body = container.querySelector("#mt-body");
+  let res;
+  try {
+    res = await api.mtJeDrafts({
+      from_date: state.from, to_date: state.to,
+      chain: state.chain || undefined,
+      kind: state.jeKind || undefined,
+      docstatus: state.jeDocstatus === "1" ? 1 : 0,
+      search: state.search || undefined,
+      page: state.page, page_size: 20,
+    });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = res.rows || [];
+  const posted = state.jeDocstatus === "1";
+  // Chỉ giữ lại lựa chọn của những dòng còn trên trang — tránh duyệt nhầm một
+  // bút toán đã trôi khỏi bộ lọc.
+  const onPage = new Set(rows.map((r) => r.name));
+  state.jePicked = new Set([...state.jePicked].filter((n) => onPage.has(n)));
+
+  setHTML(body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      ${jeViewSwitch(state)}
+      <label class="kt-label" style="margin:0 0 0 8px">Chuỗi</label>
+      <select class="kt-input kt-input--sm" id="mt-chain">
+        <option value="">Tất cả chuỗi</option>
+        ${chainOptionHTML(state, state.chain)}
+      </select>
+      <select class="kt-input kt-input--sm" id="je-kind">
+        <option value="">Mọi loại</option>
+        ${(res.kinds || []).map((k) => html`<option value="${k}" ${state.jeKind === k ? "selected" : ""}>${k}</option>`)}
+      </select>
+      <select class="kt-input kt-input--sm" id="je-docstatus">
+        <option value="0" ${!posted ? "selected" : ""}>Nháp — chờ duyệt</option>
+        <option value="1" ${posted ? "selected" : ""}>Đã ghi sổ</option>
+      </select>
+      <span class="kt-sub" style="margin-left:auto">
+        ${res.total} bút toán · ${formatVND(res.total_amount)}
+      </span>
+    </div></div>
+
+    ${!posted
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body kt-sub">
+          <b>Duyệt là GHI SỔ.</b> ${res.note || ""}
+        </div></div>`
+      : ""}
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-stamp"></i>
+          <p>${posted ? "Chưa có bút toán MT nào đã ghi sổ trong khoảng này."
+                      : "Không còn bút toán nháp nào chờ duyệt."}</p>
+          ${!posted ? html`<div class="kt-sub">Sinh bút toán ở màn <b>Theo bảng kê</b>.</div>` : ""}
+        </div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          ${!posted && res.can_submit
+            ? html`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+                <label style="display:flex;gap:6px;align-items:center">
+                  <input type="checkbox" id="je-all"> <span class="kt-sub">Chọn cả trang</span>
+                </label>
+                <span class="kt-sub" id="je-count"></span>
+                <button class="kt-btn kt-btn--outline kt-btn--sm" id="je-del" style="margin-left:auto" disabled>
+                  <i class="fas fa-trash"></i> Xóa nháp
+                </button>
+                <button class="kt-btn kt-btn--primary kt-btn--sm" id="je-sub" disabled>
+                  <i class="fas fa-stamp"></i> Duyệt (ghi sổ)
+                </button>
+              </div>`
+            : ""}
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr>
+              ${!posted && res.can_submit ? html`<th style="width:32px"></th>` : ""}
+              <th>Bút toán</th><th>Loại</th><th>Chuỗi</th><th>Khách hàng</th>
+              <th>Ngày</th><th class="num">Số tiền</th><th>Bảng kê</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((r) => html`<tr>
+                ${!posted && res.can_submit
+                  ? html`<td><input type="checkbox" class="je-pick" data-name="${r.name}"
+                           ${state.jePicked.has(r.name) ? "checked" : ""}></td>`
+                  : ""}
+                <td><code>${r.name}</code></td>
+                <td><span class="kt-badge kt-badge--${KIND_TONE[r.kind] || "gray"}">${r.kind || "—"}</span></td>
+                <td><span class="kt-badge kt-badge--gray">${r.chain || "—"}</span></td>
+                <td>${r.customer_name || r.customer || "—"}</td>
+                <td>${formatDate(r.posting_date)}</td>
+                <td class="num">${formatVND(r.amount)}</td>
+                <td><code class="kt-sub">${r.advice || "—"}</code>
+                  ${!r.reconciled
+                    ? html`<div><span class="kt-badge kt-badge--yellow">chưa đối chiếu</span></div>`
+                    : ""}</td>
+                <td><button class="kt-btn kt-btn--outline kt-btn--sm je-detail" data-name="${r.name}">
+                  <i class="fas fa-eye"></i></button></td>
+              </tr>`)}
+            </tbody>
+          </table></div>
+          ${pager(res, "bút toán")}
+        </div></div>`}
+  `);
+
+  bindChainFilter(container, state);
+  bindPager(container, state);
+  bindJeViewSwitch(container, state);
+
+  const kind = container.querySelector("#je-kind");
+  if (kind) kind.addEventListener("change", (e) => {
+    state.jeKind = e.target.value; state.page = 1; loadTab(container, state);
+  });
+  const ds = container.querySelector("#je-docstatus");
+  if (ds) ds.addEventListener("change", (e) => {
+    state.jeDocstatus = e.target.value;
+    state.page = 1;
+    state.jePicked = new Set();
+    loadTab(container, state);
+  });
+  container.querySelectorAll(".je-detail").forEach((b) => {
+    b.addEventListener("click", () => openJeDetail(container, state, b.dataset.name));
+  });
+
+  const refreshPicked = () => {
+    const n = state.jePicked.size;
+    const cnt = container.querySelector("#je-count");
+    if (cnt) cnt.textContent = n ? `${n} bút toán đang chọn` : "";
+    const sub = container.querySelector("#je-sub");
+    const del = container.querySelector("#je-del");
+    if (sub) sub.disabled = !n;
+    if (del) del.disabled = !n;
+  };
+  container.querySelectorAll(".je-pick").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      if (cb.checked) state.jePicked.add(cb.dataset.name);
+      else state.jePicked.delete(cb.dataset.name);
+      refreshPicked();
+    });
+  });
+  const all = container.querySelector("#je-all");
+  if (all) all.addEventListener("change", () => {
+    container.querySelectorAll(".je-pick").forEach((cb) => {
+      cb.checked = all.checked;
+      if (all.checked) state.jePicked.add(cb.dataset.name);
+      else state.jePicked.delete(cb.dataset.name);
+    });
+    refreshPicked();
+  });
+  refreshPicked();
+
+  const sub = container.querySelector("#je-sub");
+  if (sub) sub.addEventListener("click", () => doSubmitJes(container, state, rows));
+  const del = container.querySelector("#je-del");
+  if (del) del.addEventListener("click", () => doDeleteJes(container, state, rows));
+}
+
+// ── Duyệt hàng loạt ────────────────────────────────────────────────────────
+async function doSubmitJes(container, state, rows, force) {
+  const names = [...state.jePicked];
+  if (!names.length) return;
+  const picked = rows.filter((r) => state.jePicked.has(r.name));
+  const total = picked.reduce((s, r) => s + (r.amount || 0), 0);
+
+  const modal = openModal({
+    title: "Duyệt bút toán — ghi sổ",
+    icon: "fa-stamp",
+    maxWidth: 720,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+
+  let res;
+  try {
+    res = await api.mtJeSubmit(names, force ? { force_unreconciled: 1 } : {});
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-card" style="border-left:4px solid var(--kt-danger)">
+      <div class="kt-card-body"><div class="kt-sub" style="white-space:pre-wrap">${e.message}</div></div></div>`);
+    return;
+  }
+
+  // Backend TỪ CHỐI ghi sổ khi bảng kê nguồn chưa tick đối chiếu — đây là lần
+  // xác nhận có ý thức, không phải một hộp thoại cho có.
+  if (res.needs_confirm) {
+    setHTML(modal.body, html`
+      <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body">
+        <b>${res.message}</b>
+        <div class="kt-sub" style="margin-top:8px">
+          Duyệt là ghi sổ. Hủy một bút toán đã ghi để lại vết trong sổ cái mà kiểm toán sẽ hỏi —
+          bút toán nháp thì xóa sạch được.
+        </div>
+      </div></div>
+      <div class="kt-card kt-mb"><div class="kt-card-body">
+        <div class="kt-table-wrap" style="max-height:280px;overflow:auto"><table class="kt-table">
+          <thead><tr><th>Bút toán</th><th>Loại</th><th>Bảng kê</th><th class="num">Số tiền</th></tr></thead>
+          <tbody>${(res.unreconciled || []).map((u) => html`<tr>
+            <td><code>${u.name}</code></td><td>${u.kind}</td>
+            <td><code class="kt-sub">${u.advice}</code></td>
+            <td class="num">${formatVND(u.amount)}</td>
+          </tr>`)}</tbody>
+        </table></div>
+      </div></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="kt-btn kt-btn--outline" id="jc-cancel">Để tôi soi lại</button>
+        <button class="kt-btn kt-btn--danger" id="jc-force">
+          <i class="fas fa-stamp"></i> Vẫn duyệt ${names.length} bút toán (${formatVND(total)})
+        </button>
+      </div>`);
+    modal.body.querySelector("#jc-cancel").addEventListener("click", () => modal.close());
+    modal.body.querySelector("#jc-force").addEventListener("click", () => {
+      modal.close();
+      doSubmitJes(container, state, rows, true);
+    });
+    return;
+  }
+
+  setHTML(modal.body, jeBatchResult(res.message, res.submitted || [], res.failed || [], "đã ghi sổ"));
+  modal.body.querySelector("#jr-close").addEventListener("click", () => modal.close());
+  toast(res.message, (res.failed || []).length ? "error" : "success");
+  state.jePicked = new Set();
+  await loadTab(container, state);
+}
+
+async function doDeleteJes(container, state, rows) {
+  const names = [...state.jePicked];
+  if (!names.length) return;
+  const modal = openModal({
+    title: "Xóa bút toán nháp",
+    icon: "fa-trash",
+    maxWidth: 640,
+    body: html`
+      <div class="kt-card kt-mb"><div class="kt-card-body">
+        Xóa <b>${names.length}</b> bút toán <b>nháp</b>. Chưa ghi sổ nên xóa sạch, không để lại vết.
+        <div class="kt-sub" style="margin-top:6px">
+          Sinh lại được ngay sau khi sửa bảng kê — vân tay chống trùng chỉ chặn khi bản nháp cũ còn đó.
+        </div>
+      </div></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="kt-btn kt-btn--outline" id="jd-cancel">Hủy</button>
+        <button class="kt-btn kt-btn--danger" id="jd-ok"><i class="fas fa-trash"></i> Xóa</button>
+      </div>
+      <div id="jd-msg"></div>`,
+  });
+  modal.body.querySelector("#jd-cancel").addEventListener("click", () => modal.close());
+  modal.body.querySelector("#jd-ok").addEventListener("click", async () => {
+    const btn = modal.body.querySelector("#jd-ok");
+    btn.disabled = true;
+    try {
+      const res = await api.mtJeDeleteDrafts(names);
+      setHTML(modal.body, jeBatchResult(res.message,
+        (res.deleted || []).map((n) => ({ name: n })), res.failed || [], "đã xóa"));
+      modal.body.querySelector("#jr-close").addEventListener("click", () => modal.close());
+      toast(res.message, (res.failed || []).length ? "error" : "success");
+      state.jePicked = new Set();
+      await loadTab(container, state);
+    } catch (e) {
+      btn.disabled = false;
+      setHTML(modal.body.querySelector("#jd-msg"), html`
+        <div class="kt-card" style="border-left:4px solid var(--kt-danger);margin-top:10px">
+          <div class="kt-card-body"><div class="kt-sub" style="white-space:pre-wrap">${e.message}</div></div>
+        </div>`);
+    }
+  });
+}
+
+// Kết quả TỪNG BÚT TOÁN — không gộp thành một chữ "xong". Duyệt 20 cái mà 3 cái
+// hỏng thì kế toán phải biết ĐÍCH DANH ba cái nào.
+function jeBatchResult(message, done, failed, verb) {
+  return html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-${failed.length ? "warning" : "success"})">
+      <div class="kt-card-body"><b>${message}</b></div>
+    </div>
+    ${done.length
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <div class="kt-sub" style="margin-bottom:6px">${done.length} bút toán ${verb}</div>
+          <div class="kt-table-wrap" style="max-height:220px;overflow:auto"><table class="kt-table">
+            <tbody>${done.map((d) => html`<tr>
+              <td><code>${d.name}</code></td>
+              <td>${d.kind || ""}</td>
+              <td class="num">${d.amount != null ? formatVND(d.amount) : ""}</td>
+            </tr>`)}</tbody>
+          </table></div>
+        </div></div>`
+      : ""}
+    ${failed.length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)">${failed.length} bút toán KHÔNG xử lý được</b>
+          ${failed.map((f) => html`<div class="kt-sub" style="margin-top:6px">
+            • <code>${f.name}</code>: ${f.error}</div>`)}
+        </div></div>`
+      : ""}
+    <div style="display:flex;justify-content:flex-end">
+      <button class="kt-btn kt-btn--outline" id="jr-close">Đóng</button>
+    </div>`;
+}
+
+// ── Soi một bút toán trước khi duyệt ───────────────────────────────────────
+async function openJeDetail(container, state, name) {
+  const modal = openModal({
+    title: "Bút toán " + name,
+    icon: "fa-file-invoice-dollar",
+    maxWidth: 860,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  let res;
+  try {
+    res = await api.mtJeDetail(name);
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+  const d = res.doc || {};
+  const draft = Number(d.docstatus) === 0;
+
+  setHTML(modal.body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="kt-badge kt-badge--${KIND_TONE[d.kind] || "gray"}">${d.kind || "—"}</span>
+        <span class="kt-badge kt-badge--gray">${d.chain || "—"}</span>
+        <span class="kt-badge kt-badge--${draft ? "yellow" : "green"}">${draft ? "Nháp — chưa ghi sổ" : "Đã ghi sổ"}</span>
+        ${!d.reconciled ? html`<span class="kt-badge kt-badge--yellow">bảng kê chưa tick đối chiếu</span>` : ""}
+        <span class="kt-sub">ngày ${formatDate(d.posting_date)}</span>
+        <b style="margin-left:auto">${formatVND(d.total_debit)}</b>
+      </div>
+      <div class="kt-sub" style="margin-top:6px">
+        Bảng kê nguồn <code>${d.advice || "—"}</code>${d.advice_no ? ` · ${d.advice_no}` : ""}
+        ${d.file_name ? ` · file ${d.file_name}` : ""}
+      </div>
+    </div></div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div class="kt-table-wrap"><table class="kt-table">
+        <thead><tr><th>Tài khoản</th><th>Đối tượng</th><th class="num">Nợ</th><th class="num">Có</th></tr></thead>
+        <tbody>
+          ${(res.lines || []).map((l) => html`<tr>
+            <td><code>${l.account_number || ""}</code> ${l.account_name || l.account}</td>
+            <td>${l.party || ""}</td>
+            <td class="num">${l.debit ? formatVND(l.debit) : ""}</td>
+            <td class="num">${l.credit ? formatVND(l.credit) : ""}</td>
+          </tr>`)}
+        </tbody>
+      </table></div>
+    </div></div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div class="kt-sub" style="margin-bottom:6px">Diễn giải</div>
+      <pre class="kt-sub" style="white-space:pre-wrap;margin:0">${res.remark || "(trống)"}</pre>
+    </div></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
+      <a class="kt-btn kt-btn--outline kt-btn--sm" href="${res.desk_url}" target="_blank">
+        <i class="fas fa-arrow-up-right-from-square"></i> Mở trên Desk</a>
+      <button class="kt-btn kt-btn--outline" id="jd2-close">Đóng</button>
+      ${draft && res.can_submit
+        ? html`<button class="kt-btn kt-btn--primary" id="jd2-sub"><i class="fas fa-stamp"></i> Duyệt bút toán này</button>`
+        : ""}
+    </div>`);
+
+  modal.body.querySelector("#jd2-close").addEventListener("click", () => modal.close());
+  const sub = modal.body.querySelector("#jd2-sub");
+  if (sub) sub.addEventListener("click", async () => {
+    modal.close();
+    state.jePicked = new Set([name]);
+    await doSubmitJes(container, state, [{ name, amount: d.total_debit }]);
+  });
 }

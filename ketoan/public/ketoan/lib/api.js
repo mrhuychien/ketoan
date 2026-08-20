@@ -178,6 +178,16 @@ export const api = {
   mtJeCreate: (advice, a) => callMethod(NS + "mt_je.create_journal_entries", withCompany({ advice, ...a })),
   // `expected_hash` đi kèm trong `a` — backend từ chối sinh nếu thiếu hoặc lệch.
 
+  // Duyệt bút toán — chỗ DUY NHẤT của kênh MT mà tiền thật sự vào sổ.
+  mtJeDrafts: (a) => callMethod(NS + "mt_je.list_draft_journal_entries", withCompany(a)),
+  mtJeDetail: (name) => callMethod(NS + "mt_je.get_journal_entry", withCompany({ name })),
+  // `force_unreconciled=1` là XÁC NHẬN CÓ Ý THỨC khi bảng kê chưa tick đối chiếu.
+  // Không có cờ này thì backend trả `needs_confirm` chứ không ghi sổ.
+  mtJeSubmit: (names, a) => callMethod(NS + "mt_je.submit_journal_entries",
+                                       withCompany({ names: JSON.stringify(names), ...a })),
+  mtJeDeleteDrafts: (names) => callMethod(NS + "mt_je.delete_draft_journal_entries",
+                                          withCompany({ names: JSON.stringify(names) })),
+
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
 
