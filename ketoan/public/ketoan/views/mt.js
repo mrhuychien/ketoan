@@ -2117,11 +2117,7 @@ function jeCard(e) {
               ${(e.credit_lines || []).map((l) => html`<tr>
                 <td><code>${l.account}</code></td>
                 <td>${l.party_name || l.party || ""}</td>
-                <td>${l.reference_name
-                  ? html`<code>${l.reference_name}</code>${l.over_outstanding
-                      ? html` <span class="kt-badge kt-badge--red" title="Trả vượt số còn nợ của hóa đơn">vượt ${formatVNDShort(l.over_outstanding)}</span>`
-                      : ""}`
-                  : html`<span class="kt-badge kt-badge--yellow">gộp — không gắn hóa đơn</span>`}</td>
+                <td><span class="kt-sub">tổng ${l.n_rows} dòng bảng kê</span></td>
                 <td></td>
                 <td class="num">${formatVND(l.amount)}</td>
               </tr>`)}
@@ -2129,16 +2125,19 @@ function jeCard(e) {
           </table>
         </div>
 
-        ${(e.skipped_rows || []).length
-          ? html`<div class="kt-sub" style="margin-top:8px;color:var(--kt-danger)">
-              <b>${e.skipped_rows.length} dòng KHÔNG vào bút toán</b> vì chưa nối được hóa đơn
-              (${formatVND(e.skipped_rows.reduce((s, x) => s + (x.amount || 0), 0))}).
-              Dòng Có 131 bắt buộc phải gắn hóa đơn, nếu không thì công nợ của hóa đơn đó không giảm.
+        ${e.n_invoices != null
+          ? html`<div class="kt-sub" style="margin-top:8px">
+              Kỳ này gạch được <b>${e.n_invoices}</b> hóa đơn${e.n_unmatched
+                ? html`, còn <b style="color:var(--kt-warning)">${e.n_unmatched} dòng chưa gạch</b>
+                       — tiền VẪN vào bút toán (ghi tổng), xử lý việc gạch ở tab
+                       <b>Quản lý thanh toán</b>.`
+                : "."}
             </div>`
           : ""}
         ${e.n_review
           ? html`<div class="kt-sub" style="margin-top:4px">
-              ${e.n_review} dòng nối hóa đơn ở mức <b>Cần review</b> — vẫn nằm trong bút toán, phải soi tay trước khi duyệt.
+              ${e.n_review} dòng nối hóa đơn ở mức <b>Cần review</b> — không ảnh hưởng số tiền
+              bút toán, nhưng phải soi tay ở màn gạch hóa đơn.
             </div>`
           : ""}
         <details style="margin-top:8px">

@@ -200,7 +200,7 @@ Chốt:
 
 | Loại JE | Dòng 131 | Tham chiếu |
 |---|---|---|
-| **Thanh toán** | 1 dòng / Sales Invoice | `reference_type=Sales Invoice` + `reference_name` — **bắt buộc, không ngoại lệ** |
+| **Thanh toán** | ~~1 dòng / Sales Invoice~~ → **1 dòng gộp** *(sửa 20/08/2026, xem dưới)* | ~~reference bắt buộc~~ → không reference |
 | **Phí chuỗi xuất** | **1 dòng gộp cả cục** | Không reference SI. Ghi ĐẦY ĐỦ vào `user_remark`: chuỗi · kỳ · số hóa đơn của chuỗi · danh sách khoản trừ · tên bảng kê nguồn |
 | **Chiết khấu mình xuất** (MT2-B) | 1 dòng gộp | `user_remark` ghi số BKCK + số hóa đơn CK |
 
@@ -212,6 +212,31 @@ trên màn duyệt JE, không giấu trong tooltip.
 Riêng Co.op có 17,75% theo **từng hóa đơn**: vẫn gộp một dòng 131 theo quyết
 định trên, nhưng `user_remark` liệt kê chi tiết từng hóa đơn + số tiền trừ, vì
 dữ liệu có sẵn — "ghi tham chiếu đầy đủ" đúng nghĩa.
+
+#### ✏️ SỬA Q1 (20/08/2026) — **bút toán thanh toán cũng ghi 1 dòng tổng**
+
+Người dùng chốt: *"131 thanh toán các hóa đơn chỉ cần ghi tổng thanh toán. Đã có
+trang gạch hóa đơn thanh toán riêng."*
+
+Đúng, và nó nhất quán với một quyết định đã có từ **MT-1**: ở kênh MT, con số
+"đã thu / còn lại" tính từ **chính các dòng bảng kê**, không từ
+`outstanding_amount` của ERPNext (xem chú thích `mtOverview` trong `api.js`).
+Gắn reference Sales Invoice lên dòng 131 là dựng **cơ chế gạch nợ thứ hai** —
+hai nguồn sự thật sẽ lệch nhau ngay kỳ đầu có một hóa đơn bị điều chỉnh.
+
+Bảng cuối cùng: **cả ba loại JE đều ghi Có 131 một dòng tổng cho một pháp nhân,
+không reference.**
+
+| | Trước | Sau |
+|---|---|---|
+| Dòng 131 của JE thanh toán | 1 dòng / hóa đơn, có reference | **1 dòng tổng**, không reference |
+| Dòng thanh toán chưa gạch được hóa đơn | **bị LOẠI** khỏi JE (để JE còn cân) → tiền đã về mà không vào sổ | **vẫn vào JE**, kèm cảnh báo |
+| Việc gạch hóa đơn | JE reference + màn 'Quản lý thanh toán' (trùng nhau) | chỉ màn 'Quản lý thanh toán' |
+| Tra ngược từ JE về hóa đơn | qua reference | qua `user_remark` (liệt kê tối đa 60 hóa đơn + số tiền) |
+
+Đổi này còn **sửa một lỗ mất tiền**: ở bản cũ, dòng thanh toán chưa nối được hóa
+đơn buộc phải loại khỏi bút toán để bút toán còn cân — tiền thật đã về nhưng
+không được ghi sổ, chỉ có một dòng cảnh báo.
 
 #### Q2 — 1 JE thanh toán / advice ✅
 

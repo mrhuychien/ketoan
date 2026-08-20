@@ -19,7 +19,7 @@ BA SỰ KIỆN, BA BÚT TOÁN (§4 SOP, chốt 20/08/2026)
 
     Loại dòng bảng kê    Sự kiện                 Bút toán
     ─────────────────────────────────────────────────────────────────────────
-    Thanh toán           Nhận thanh toán         Nợ 112 · Có 131 TỪNG HÓA ĐƠN
+    Thanh toán           Nhận thanh toán         Nợ 112 · Có 131 MỘT DÒNG TỔNG
     Chiết khấu           Chiết khấu mình xuất    Nợ 5211 (+33311) · Có 131 GỘP
     Phí                  Phí chuỗi xuất          Nợ 6411 (+1331)  · Có 131 GỘP
     Ghi giảm             — KHÔNG sinh bút toán —
@@ -37,36 +37,43 @@ Cả hai đều được BÁO RÕ ở màn xem trước kèm số tiền — b�
 tưởng đã ghi hết.
 
 ═══════════════════════════════════════════════════════════════════════════════
-DÒNG 131 — HAI CÁCH GHI KHÁC NHAU, CÓ LÝ DO
+DÒNG 131 — LUÔN GHI TỔNG, KHÔNG THAM CHIẾU HÓA ĐƠN  (chốt 20/08/2026)
 ═══════════════════════════════════════════════════════════════════════════════
 
-**Thanh toán**: MỘT dòng Có 131 cho MỖI Sales Invoice, mang
-`reference_type='Sales Invoice'` + `reference_name`. Bắt buộc, không ngoại lệ —
-thiếu reference thì `outstanding_amount` của hóa đơn không giảm, và hóa đơn đã
-được trả tiền vẫn nằm mãi ở rổ "chưa thanh toán".
+Cả ba bút toán đều ghi Có 131 bằng MỘT DÒNG TỔNG cho MỘT pháp nhân, không mang
+`reference_type='Sales Invoice'`.
 
-**Chiết khấu / Phí**: MỘT dòng Có 131 GỘP CẢ CỤC, không reference hóa đơn nào.
-Lý do là dữ liệu, không phải cho tiện: phí của Central Retail (`D1`), LOTTE
-(khoản `L`), Emart (`I1`), AEON (`Costdet`), Fuji (7 mục) đều tính theo KỲ hoặc
-theo PHIẾU GIAO, không thuộc hóa đơn bán nào. Ép cứng reference thì 5/7 chuỗi
-không sinh được bút toán phí.
+VÌ SAO không tách theo hóa đơn ở bút toán thanh toán: việc gạch hóa đơn nào đã
+được trả bao nhiêu ĐÃ CÓ MÀN RIÊNG lo (tab 'Quản lý thanh toán'), và ở kênh này
+con số "đã thu / còn lại" vốn tính từ CHÍNH CÁC DÒNG BẢNG KÊ chứ không từ
+`outstanding_amount` của ERPNext — quyết định đó có từ MT-1. Dựng thêm cơ chế
+gạch nợ thứ hai qua reference của JE là tạo HAI NGUỒN SỰ THẬT, và chúng sẽ lệch
+nhau ngay kỳ đầu tiên có một hóa đơn bị điều chỉnh.
+
+Với chiết khấu / phí thì còn một lý do dữ liệu nữa: phí của Central Retail
+(`D1`), LOTTE (khoản `L`), Emart (`I1`), AEON (`Costdet`), Fuji (7 mục) đều tính
+theo KỲ hoặc theo PHIẾU GIAO, không thuộc hóa đơn bán nào. Ép cứng reference thì
+5/7 chuỗi không sinh được bút toán phí.
 
 HỆ QUẢ KẾ TOÁN PHẢI BIẾT — và câu này hiện ngay trên màn duyệt, không giấu trong
-tooltip: bút toán phí gộp làm GIẢM SỐ DƯ 131 CỦA KHÁCH nhưng KHÔNG giảm
-outstanding của từng hóa đơn. Đúng bản chất (chuỗi trừ phí vào tổng thanh toán
-của kỳ, không trừ vào một hóa đơn cụ thể), nhưng phải nói ra.
+tooltip: bút toán MT làm GIẢM SỐ DƯ 131 CỦA KHÁCH nhưng KHÔNG giảm
+`outstanding_amount` của từng hóa đơn.
 
-Bù lại, `user_remark` ghi ĐẦY ĐỦ: chuỗi · kỳ · số hóa đơn của chuỗi · danh sách
-từng khoản trừ · tên bảng kê nguồn. Riêng Co.op tính 17,75% theo TỪNG hóa đơn
-thì liệt kê luôn từng hóa đơn + số tiền trừ — dữ liệu có sẵn thì phải ghi ra.
+Bù lại, `user_remark` ghi ĐẦY ĐỦ để tra ngược được mà không cần mở bảng kê:
+chuỗi · kỳ · số chứng từ · danh sách hóa đơn đã gạch (bút toán thanh toán) hoặc
+danh sách từng khoản trừ + chứng từ của chuỗi (bút toán chiết khấu/phí). Riêng
+Co.op tính 17,75% theo TỪNG hóa đơn thì liệt kê luôn từng hóa đơn.
+
+LỢI THÊM CỦA CÁCH GHI TỔNG: dòng thanh toán chưa nối được hóa đơn vẫn vào bút
+toán. Ở bản tách-theo-hóa-đơn chúng buộc phải bị loại để bút toán còn cân, nên
+tiền thật đã về mà không được ghi sổ.
 
 ═══════════════════════════════════════════════════════════════════════════════
 CHỐNG SINH TRÙNG
 ═══════════════════════════════════════════════════════════════════════════════
 
-`custom_mt_fingerprint` = sha1 của (nguồn, loại, ngày, tổng tiền, danh sách hóa
-đơn đã sắp xếp). Đã có JE mang cùng vân tay và `docstatus != 2` -> KHÔNG sinh
-lại. Không có chốt này thì bấm hai lần (mạng chậm, người sốt ruột) là hai bộ bút
+`custom_mt_fingerprint` = sha1 của (nguồn, loại, ngày, tổng tiền). Đã có JE mang
+cùng vân tay và `docstatus != 2` -> KHÔNG sinh lại. Không có chốt này thì bấm hai lần (mạng chậm, người sốt ruột) là hai bộ bút
 toán y hệt nhau, và duyệt cả hai là trừ công nợ khách GẤP ĐÔI.
 """
 
@@ -115,13 +122,6 @@ NO_JE_REASON = {
                  "hóa đơn/biên bản trước. Ghi sổ khoản chưa rõ chứng từ là tạo ra một khoản "
                  "không giải trình được."),
 }
-
-# Trần số dòng 131 trong MỘT bút toán thanh toán. Thật: Co.op 443 dòng thanh
-# toán trong một file, nhưng đã tách thành 8 kỳ nên mỗi bút toán ~55 dòng.
-# 1.000 là dư rất xa mà vẫn chặn được ca một bảng kê bất thường sinh ra bút toán
-# nặng tới mức không mở nổi trên Desk.
-MAX_JE_LINES = 1000
-
 
 def _require_tables():
     for dt in (SOURCE_DT, "MT Payment Advice Line", "MT Account Map"):
@@ -201,12 +201,16 @@ def _has_mixed_signs(rows):
     return any(v > 0 for v in vals) and any(v < 0 for v in vals)
 
 
-def _fingerprint(source_name, kind, posting_date, total, invoices):
+def _fingerprint(source_name, kind, posting_date, total):
+    """Vân tay CHỐNG SINH TRÙNG của một bút toán.
+
+    (nguồn, loại, ngày, tổng tiền) đã đủ định danh: mỗi bảng kê có ĐÚNG một bút
+    toán mỗi loại, và cả ba loại đều ghi một dòng tổng. Sinh lại sau khi sửa
+    bảng kê thì tổng đổi -> vân tay đổi -> sinh được, đúng ý.
+    """
     h = hashlib.sha1()
     h.update("MTJE|{}|{}|{}|{}|{:.2f}\n".format(
         SOURCE_DT, source_name, kind, cstr(posting_date), flt(total)).encode())
-    for si in sorted(invoices):
-        h.update(("SI|" + cstr(si) + "\n").encode())
     return h.hexdigest()
 
 
@@ -230,7 +234,8 @@ def _split_tax(total, lines, tax_rate):
     return flt(total), 0.0, ""
 
 
-def _remark_payment(doc, rows, skipped):
+def _remark_payment(doc, rows, matched, n_unmatched):
+    """Diễn giải bút toán thanh toán — ghi đủ để tra ngược mà không cần mở bảng kê."""
     parts = [
         "Nhận thanh toán %s" % (doc.chain or ""),
         "bảng kê %s" % doc.name,
@@ -241,14 +246,24 @@ def _remark_payment(doc, rows, skipped):
         parts.append("ngày %s" % cstr(doc.payment_date))
     if doc.file_name:
         parts.append("file %s" % doc.file_name)
-    head = " · ".join(parts)
-    body = ["%d hóa đơn được trả." % len({r["sales_invoice"] for r in rows})]
-    if skipped:
-        # Phải nằm TRONG bút toán, không chỉ trên màn hình: người mở lại bút
-        # toán sau ba tháng cần thấy ngay là kỳ này còn tiền chưa ghi.
-        body.append("CHƯA GHI %d dòng (%s đ) vì chưa nối được hóa đơn — xem lại bảng kê."
-                    % (len(skipped), "{:,.0f}".format(sum(s["amount"] for s in skipped))))
-    return head + "\n" + " ".join(body)
+    lines = [" · ".join(parts)]
+    lines.append("Ghi TỔNG thanh toán của kỳ: %d dòng bảng kê, %d hóa đơn đã gạch được%s."
+                 % (len(rows), len(matched),
+                    ", %d dòng chưa gạch" % n_unmatched if n_unmatched else ""))
+
+    # Liệt kê hóa đơn để tra ngược ĐƯỢC mà không cần mở bảng kê — bù cho việc
+    # dòng 131 không mang reference. Người mở bút toán sau ba tháng cần thấy
+    # ngay kỳ này trả cho những hóa đơn nào.
+    keys = sorted(matched)
+    for si in keys[:60]:
+        lines.append("  • %s: %s đ" % (si, "{:,.0f}".format(matched[si]["amount"])))
+    if len(keys) > 60:
+        lines.append("  • …và %d hóa đơn nữa (xem bảng kê %s)" % (len(keys) - 60, doc.name))
+
+    lines.append("LƯU Ý: bút toán này giảm SỐ DƯ 131 của khách, KHÔNG giảm outstanding "
+                 "của từng hóa đơn. Việc gạch từng hóa đơn do tab 'Quản lý thanh toán' "
+                 "lo, tính từ chính các dòng bảng kê.")
+    return "\n".join(lines)
 
 
 def _remark_deduction(doc, kind_label, rows, tax_note):
@@ -352,21 +367,45 @@ def _build_plan(doc):
 
 
 def _plan_payment(doc, rows, acc, je_kind, posting_date, warnings):
-    """Nợ 112 · Có 131 TỪNG hóa đơn. Dòng chưa nối hóa đơn bị LOẠI, không im lặng."""
-    matched, skipped = {}, []
-    n_review = 0
+    """Nợ 112 · Có 131 MỘT DÒNG TỔNG. Không tách theo hóa đơn.
+
+    CHỐT 20/08/2026 (thay quyết định Q1 cũ): dòng 131 thanh toán chỉ ghi TỔNG
+    THANH TOÁN của kỳ, không tách một dòng cho mỗi hóa đơn.
+
+    VÌ SAO đúng: việc gạch hóa đơn nào đã được trả bao nhiêu ĐÃ CÓ MÀN RIÊNG lo
+    (tab 'Quản lý thanh toán'), và ở kênh này con số 'đã thu / còn lại' vốn tính
+    từ CHÍNH CÁC DÒNG BẢNG KÊ chứ không từ `outstanding_amount` của ERPNext —
+    đó là quyết định từ MT-1, không phải phát sinh mới. Nhân đôi cơ chế gạch nợ
+    (một ở bảng kê, một ở reference của JE) là hai nguồn sự thật sẽ lệch nhau.
+
+    Hệ quả phải nói ra, và nó hiện trên màn duyệt: bút toán này làm GIẢM SỐ DƯ
+    131 của khách nhưng KHÔNG giảm `outstanding_amount` của từng hóa đơn. Giống
+    hệt bút toán chiết khấu/phí.
+
+    LỢI THÊM: dòng thanh toán CHƯA nối được hóa đơn vẫn vào bút toán. Ở bản cũ
+    (tách theo hóa đơn) chúng buộc phải bị loại để bút toán còn cân, nên tiền
+    thật đã về mà không được ghi sổ.
+    """
+    if not doc.customer:
+        # Dòng 131 phải có party. Không có khách thì bút toán không trừ được nợ
+        # của ai — mà ERPNext vẫn cho ghi, nên phải chặn ở đây.
+        frappe.throw(_(
+            "Bảng kê {0} chưa gán Khách hàng. Bút toán thanh toán ghi Có 131 cho MỘT "
+            "pháp nhân, không có khách thì không trừ được công nợ của ai."
+        ).format(doc.name))
+
+    total = _group_amount(rows)
+    if not total:
+        return None
+
+    # Thống kê để người duyệt biết tình trạng gạch hóa đơn của kỳ này — CHỈ để
+    # thông tin, không còn ảnh hưởng tới số tiền của bút toán nữa.
+    matched, n_unmatched, n_review = {}, 0, 0
     for r in rows:
         amt = _line_amount(r)
-        if not amt:
-            continue
         si = cstr(r.get("sales_invoice") or "")
         if not si:
-            # KHÔNG đưa vào bút toán: dòng 131 bắt buộc có reference Sales Invoice,
-            # thiếu nó thì outstanding của hóa đơn không giảm. Cộng vào Nợ 112 mà
-            # không có dòng Có tương ứng là bút toán KHÔNG CÂN.
-            skipped.append({"source_row": r.get("source_row"),
-                            "inv_no": r.get("inv_no"), "amount": amt,
-                            "match_method": r.get("match_method")})
+            n_unmatched += 1
             continue
         if cstr(r.get("match_confidence")) != "Chắc chắn":
             n_review += 1
@@ -374,48 +413,28 @@ def _plan_payment(doc, rows, acc, je_kind, posting_date, warnings):
         g["amount"] += amt
         g["n_rows"] += 1
 
-    if not matched:
-        warnings.append(
-            "Bảng kê %s: KHÔNG dòng thanh toán nào nối được hóa đơn — không sinh được "
-            "bút toán thanh toán. Nối hóa đơn ở màn Quản lý thanh toán rồi làm lại."
-            % doc.name)
-        return None
-
+    # Hóa đơn của KHÁCH KHÁC lọt vào bảng kê này: tiền đang được ghi Có 131 cho
+    # `doc.customer` trong khi hóa đơn thuộc pháp nhân khác. Không chặn (một
+    # chuỗi có nhiều pháp nhân, và bảng kê có thể trả gộp) nhưng phải báo.
     si_info = _invoice_info(list(matched))
-    lines = []
-    for si in sorted(matched):
-        g = matched[si]
-        info = si_info.get(si) or {}
-        if not info.get("customer"):
-            frappe.throw(_("Hóa đơn {0} không đọc được khách hàng — dừng, không sinh bút toán")
-                         .format(si))
-        g["customer"] = info["customer"]
-        g["customer_name"] = info.get("customer_name")
-        g["grand_total"] = flt(info.get("grand_total"))
-        g["outstanding"] = flt(info.get("outstanding_amount"))
-        # Trả VƯỢT outstanding: có thể đúng (kỳ trước đã trả một phần rồi bị hủy)
-        # nhưng cũng có thể là nạp trùng bảng kê. Báo để người xem, không chặn.
-        if g["amount"] > g["outstanding"] + 0.5:
-            g["over_outstanding"] = round(g["amount"] - g["outstanding"], 2)
-        lines.append(g)
-
-    if len(lines) > MAX_JE_LINES:
-        frappe.throw(_(
-            "Bút toán sẽ có {0} dòng — vượt trần {1}. Bảng kê này gần như chắc chắn "
-            "gộp nhiều kỳ. Kiểm lại trước khi sinh."
-        ).format(len(lines), MAX_JE_LINES))
-
-    total = sum(g["amount"] for g in lines)
-    if skipped:
+    other_customer = sorted({
+        cstr(si_info[si].customer) for si in matched
+        if si in si_info and si_info[si].customer
+        and cstr(si_info[si].customer) != cstr(doc.customer)})
+    if other_customer:
         warnings.append(
-            "Bảng kê %s: %d dòng thanh toán (%s đ) CHƯA nối được hóa đơn nên KHÔNG vào "
-            "bút toán. Tiền này chưa được ghi sổ."
-            % (doc.name, len(skipped), "{:,.0f}".format(sum(s["amount"] for s in skipped))))
+            "Bảng kê %s: có hóa đơn thuộc khách khác (%s) trong khi bút toán ghi Có 131 "
+            "cho %s. Kiểm lại trước khi duyệt — tiền đang trừ nợ của pháp nhân này."
+            % (doc.name, ", ".join(other_customer[:3]), doc.customer))
+    if n_unmatched:
+        warnings.append(
+            "Bảng kê %s: %d dòng thanh toán chưa nối được hóa đơn. Tiền VẪN vào bút toán "
+            "(bút toán ghi tổng), nhưng hóa đơn tương ứng chưa được gạch — xử lý ở tab "
+            "'Quản lý thanh toán'." % (doc.name, n_unmatched))
     if n_review:
         warnings.append(
-            "Bảng kê %s: %d dòng thanh toán nối hóa đơn ở mức 'Cần review' — bút toán "
-            "VẪN gồm chúng, nhưng phải soi tay trước khi duyệt."
-            % (doc.name, n_review))
+            "Bảng kê %s: %d dòng nối hóa đơn ở mức 'Cần review' — không ảnh hưởng số tiền "
+            "bút toán, nhưng phải soi tay ở màn gạch hóa đơn." % (doc.name, n_review))
 
     return {
         "kind": je_kind,
@@ -426,18 +445,24 @@ def _plan_payment(doc, rows, acc, je_kind, posting_date, warnings):
         "debit_lines": [{"account": acc["debit_account"], "amount": total,
                          "label": "Tiền về"}],
         "credit_lines": [{
-            "account": acc["credit_account"], "amount": g["amount"],
-            "party_type": "Customer", "party": g["customer"],
-            "party_name": g.get("customer_name"),
-            "reference_type": "Sales Invoice", "reference_name": g["sales_invoice"],
-            "n_rows": g["n_rows"],
-            "outstanding": g.get("outstanding"),
-            "over_outstanding": g.get("over_outstanding"),
-        } for g in lines],
-        "remark": _remark_payment(doc, lines, skipped),
-        "skipped_rows": skipped,
+            "account": acc["credit_account"], "amount": total,
+            "party_type": "Customer", "party": doc.customer,
+            "party_name": frappe.db.get_value("Customer", doc.customer, "customer_name"),
+            "reference_type": None, "reference_name": None,
+            "n_rows": len(rows),
+        }],
+        "remark": _remark_payment(doc, rows, matched, n_unmatched),
         "n_review": n_review,
-        "fingerprint": _fingerprint(doc.name, je_kind, posting_date, total, list(matched)),
+        "n_invoices": len(matched),
+        "n_unmatched": n_unmatched,
+        "mixed_signs": _has_mixed_signs(rows),
+        "amount_gross": (sum(_line_amount(r) for r in rows)
+                         if _has_mixed_signs(rows) else None),
+        "note_no_reference": (
+            "Bút toán ghi TỔNG thanh toán: giảm số dư 131 của khách, KHÔNG giảm "
+            "outstanding của từng hóa đơn. Việc gạch từng hóa đơn do tab "
+            "'Quản lý thanh toán' lo, tính từ chính các dòng bảng kê."),
+        "fingerprint": _fingerprint(doc.name, je_kind, posting_date, total),
     }
 
 
@@ -484,7 +509,6 @@ def _plan_deduction(doc, rows, acc, je_kind, event, posting_date, warnings):
             "n_rows": len(rows),
         }],
         "remark": _remark_deduction(doc, je_kind, rows, tax_note),
-        "skipped_rows": [],
         "n_review": 0,
         # Nhóm có cả dòng âm lẫn dương -> bút toán ghi số RÒNG. Phải nói ra:
         # kế toán đối chiếu với hóa đơn của chuỗi sẽ thấy tổng gộp lớn hơn.
@@ -492,7 +516,7 @@ def _plan_deduction(doc, rows, acc, je_kind, event, posting_date, warnings):
         "amount_gross": (sum(_line_amount(r) for r in rows)
                          if _has_mixed_signs(rows) else None),
         # Bút toán gộp không gắn hóa đơn nào -> vân tay không có phần SI.
-        "fingerprint": _fingerprint(doc.name, je_kind, posting_date, total, []),
+        "fingerprint": _fingerprint(doc.name, je_kind, posting_date, total),
         "note_no_reference": (
             "Bút toán gộp: giảm số dư 131 của khách, KHÔNG giảm outstanding của "
             "từng hóa đơn. Diễn giải ghi đủ chứng từ của chuỗi."),
@@ -796,6 +820,10 @@ def create_journal_entries(advice, expected_hash=None, company=None):
                     "debit_in_account_currency": flt(ln["amount"]),
                 })
             for ln in e["credit_lines"]:
+                # KHÔNG gắn `reference_type`/`reference_name`: bút toán MT ghi
+                # TỔNG, việc gạch từng hóa đơn do tab 'Quản lý thanh toán' lo.
+                # Nhánh này giữ lại để nếu sau có loại bút toán cần reference
+                # thì chỉ việc điền, chứ không phải sửa vòng lặp.
                 row = {
                     "account": ln["account"],
                     "credit_in_account_currency": flt(ln["amount"]),
@@ -803,8 +831,6 @@ def create_journal_entries(advice, expected_hash=None, company=None):
                     "party": ln["party"],
                 }
                 if ln.get("reference_name"):
-                    # Thiếu reference thì outstanding của hóa đơn KHÔNG giảm, và
-                    # hóa đơn đã được trả vẫn nằm mãi ở rổ "chưa thanh toán".
                     row["reference_type"] = ln["reference_type"]
                     row["reference_name"] = ln["reference_name"]
                 je.append("accounts", row)

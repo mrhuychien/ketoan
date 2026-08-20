@@ -205,21 +205,16 @@ def main():
             if abs(d - c) > 0.005:
                 errs.append(f"{e['kind']}: Nợ {d:,.0f} ≠ Có {c:,.0f}")
 
-        # 2. Bút toán thanh toán: mỗi dòng Có phải có reference Sales Invoice.
-        pay = next((e for e in plan if e["kind"] == "Thanh toán"), None)
-        if pay:
-            miss = [l for l in pay["credit_lines"] if not l.get("reference_name")]
-            if miss:
-                errs.append(f"bút toán thanh toán có {len(miss)} dòng 131 KHÔNG gắn hóa đơn")
-
-        # 3. Bút toán khoản trừ: ĐÚNG MỘT dòng Có, KHÔNG reference.
+        # 2+3. MỌI bút toán: ĐÚNG MỘT dòng Có 131, ghi TỔNG, KHÔNG reference
+        #      hóa đơn (chốt 20/08/2026 — việc gạch hóa đơn do màn riêng lo).
         for e in plan:
-            if e["kind"] == "Thanh toán":
-                continue
             if len(e["credit_lines"]) != 1:
-                errs.append(f"{e['kind']}: {len(e['credit_lines'])} dòng Có (phải gộp 1)")
+                errs.append(f"{e['kind']}: {len(e['credit_lines'])} dòng Có (phải ghi tổng 1 dòng)")
             elif e["credit_lines"][0].get("reference_name"):
-                errs.append(f"{e['kind']}: dòng gộp lại gắn hóa đơn")
+                errs.append(f"{e['kind']}: dòng 131 lại gắn reference hóa đơn — "
+                            f"tạo nguồn gạch nợ thứ hai, sẽ lệch với bảng kê")
+            if not e["credit_lines"][0].get("party"):
+                errs.append(f"{e['kind']}: dòng 131 KHÔNG có party — không trừ nợ của ai")
 
         # 4. KHÔNG ĐƯỢC THẤT LẠC TIỀN — kiểm theo TỪNG loại dòng, đúng quy ước
         #    của loại đó. Cộng gộp một con số chung sẽ che mất lỗi dấu.
@@ -227,12 +222,14 @@ def main():
         for l in lines:
             by_kind[l["row_kind"]].append(l)
 
-        #    Thanh toán: cộng ĐỘ LỚN từng dòng (mỗi dòng một hóa đơn riêng).
-        want_pay = sum(abs(float(l["total_amount"] or 0)) for l in by_kind["Thanh toán"])
+        #    Thanh toán: TOÀN BỘ tiền phải vào bút toán, kể cả dòng chưa gạch
+        #    được hóa đơn — bút toán ghi tổng nên không còn lý do gì loại chúng.
+        want_pay = abs(sum(float(l["total_amount"] or 0) for l in by_kind["Thanh toán"]))
         got_pay = sum(e["total"] for e in plan if e["kind"] == "Thanh toán")
-        got_pay += sum(s["amount"] for e in plan for s in e["skipped_rows"])
         if abs(want_pay - got_pay) > 0.5:
             errs.append(f"thanh toán thất lạc: {want_pay:,.0f} vs {got_pay:,.0f}")
+        # `want_pay == got_pay` ở trên đã là chốt "không loại dòng nào": chỉ cần
+        # một dòng bị bỏ là hai số lệch ngay.
 
         #    Khoản trừ: TRỊ TUYỆT ĐỐI CỦA TỔNG ĐẠI SỐ. Đây là chỗ AEON từng sai
         #    598.208đ vì cộng độ lớn từng dòng (8 dòng hoàn lại bị đảo dấu).
@@ -294,21 +291,33 @@ def main():
           f"809.335 + gắn cờ (cộng độ lớn ra 11.868.813)")
     bad += not ok
 
-    # ── Dòng thanh toán chưa nối hóa đơn: bị LOẠI nhưng phải BÁO ──────────
+    # ── Dòng chưa gạch được hóa đơn: tiền VẪN vào bút toán ────────────────
+    #
+    # Đây là điểm khác hẳn bản tách-theo-hóa-đơn: ở đó chúng buộc phải bị loại
+    # để bút toán còn cân, nên tiền thật đã về mà KHÔNG được ghi sổ.
     print("-" * 78)
+    all_lines = _advice_lines_from_sample("lotte", "Chi tiết thanh toán Lotte.xls")
+    full = abs(sum(float(l["total_amount"] or 0) for l in all_lines
+                   if l["row_kind"] == "Thanh toán"))
     lines = _advice_lines_from_sample("lotte", "Chi tiết thanh toán Lotte.xls", unmatched=3)
-    doc = FakeAdvice(lines, chain="LOTTE")
-    plan, warnings, _np = mj._build_plan(doc)
+    plan, warnings, _np = mj._build_plan(FakeAdvice(lines, chain="LOTTE"))
     pay = next((e for e in plan if e["kind"] == "Thanh toán"), None)
     d, c = _balance(pay)
-    ok = (len(pay["skipped_rows"]) == 3 and abs(d - c) < 0.005
-          and any("CHƯA nối được hóa đơn" in w for w in warnings)
-          and "CHƯA GHI 3 dòng" in pay["remark"])
-    print(f"  {'✅' if ok else '❌'} 3 dòng chưa nối hóa đơn: bị loại khỏi bút toán, "
-          f"bút toán VẪN cân, và được báo ở cả cảnh báo lẫn diễn giải")
-    if not ok:
-        print(f"       └─ skipped={len(pay['skipped_rows'])} Nợ={d:,.0f} Có={c:,.0f} "
-              f"warnings={warnings}")
+    ok = (pay and abs(pay["total"] - full) < 0.5 and abs(d - c) < 0.005
+          and pay["n_unmatched"] == 3
+          and any("chưa nối được hóa đơn" in w for w in warnings)
+          and "3 dòng chưa gạch" in pay["remark"])
+    print(f"  {'✅' if ok else '❌'} 3 dòng chưa gạch hóa đơn: tiền VẪN vào bút toán "
+          f"({full:,.0f} đủ), bút toán cân, và được báo ở cảnh báo lẫn diễn giải")
+    if not ok and pay:
+        print(f"       └─ total={pay['total']:,.0f} mong {full:,.0f} · "
+              f"n_unmatched={pay['n_unmatched']}")
+    bad += not ok
+
+    # Diễn giải phải LIỆT KÊ hóa đơn — bù cho việc dòng 131 không mang reference.
+    ok = pay and sum(1 for ln in pay["remark"].splitlines() if ln.startswith("  • SI-")) > 0
+    print(f"  {'✅' if ok else '❌'} diễn giải liệt kê hóa đơn đã gạch (tra ngược được "
+          f"mà không cần mở bảng kê)")
     bad += not ok
 
     # ── Vân tay: ổn định, và bắt được bản đã sinh ─────────────────────────
@@ -368,7 +377,8 @@ def main():
     _throws(lambda: mj._build_plan(FakeAdvice(
         _advice_lines_from_sample("aeon", "chi tiet thanh to\xa0n AEON.xls"),
         chain="AEON", customer=None)),
-        "bảng kê THIẾU khách hàng -> dừng ở bút toán khoản trừ (dòng 131 không có party)")
+        "bảng kê THIẾU khách hàng -> dừng (dòng 131 ghi tổng cho MỘT pháp nhân, "
+        "không có khách thì không trừ được nợ của ai)")
 
     _install_stub(account_rows={"Nhận thanh toán": ACCOUNTS["Nhận thanh toán"]})
     _throws(lambda: mj._build_plan(FakeAdvice(
@@ -384,14 +394,40 @@ def main():
         "có tiền thuế nhưng CHƯA khai TK thuế -> dừng (không ghi VAT vào chi phí)")
     _install_stub()
 
-    # ── Không dòng nào nối được hóa đơn -> không sinh bút toán thanh toán ──
+    # ── Không dòng nào gạch được hóa đơn -> VẪN sinh bút toán (ghi tổng) ──
+    #
+    # Tiền đã về theo bảng kê của chuỗi thì phải được ghi sổ, bất kể việc gạch
+    # hóa đơn tới đâu — đó là hai việc khác nhau, và đó chính là lý do tách màn.
     lines = _advice_lines_from_sample("lotte", "Chi tiết thanh toán Lotte.xls", unmatched=10 ** 6)
     plan, warnings, _n = mj._build_plan(FakeAdvice(lines, chain="LOTTE"))
-    ok = (not any(e["kind"] == "Thanh toán" for e in plan)
-          and any("KHÔNG dòng thanh toán nào nối được" in w for w in warnings))
-    print(f"  {'✅' if ok else '❌'} không dòng nào nối được hóa đơn -> KHÔNG sinh bút toán "
-          f"thanh toán + cảnh báo")
+    pay = next((e for e in plan if e["kind"] == "Thanh toán"), None)
+    ok = (pay and abs(pay["total"] - full) < 0.5
+          and any("chưa nối được hóa đơn" in w for w in warnings))
+    print(f"  {'✅' if ok else '❌'} không gạch được hóa đơn nào -> VẪN ghi đủ "
+          f"{full:,.0f} + cảnh báo (tiền đã về thì phải vào sổ)")
     bad += not ok
+
+    # ── Hóa đơn thuộc khách KHÁC -> cảnh báo, không chặn ──────────────────
+    import frappe as _fr
+    _sql_old = _fr.db.sql
+
+    def _sql_other(query, values=None, **kw):
+        q = " ".join(str(query).split())
+        if "tabSales Invoice" in q:
+            names = (values or {}).get("names") or ()
+            return [_D(name=n, customer="KH-PHAP-NHAN-KHAC", customer_name="Khách khác",
+                       grand_total=10 ** 9, outstanding_amount=10 ** 9, docstatus=1)
+                    for n in names]
+        return _sql_old(query, values, **kw)
+
+    _fr.db.sql = _sql_other
+    _p, w2, _n = mj._build_plan(FakeAdvice(
+        _advice_lines_from_sample("lotte", "Chi tiết thanh toán Lotte.xls"), chain="LOTTE"))
+    ok = any("thuộc khách khác" in x for x in w2)
+    print(f"  {'✅' if ok else '❌'} hóa đơn thuộc pháp nhân KHÁC -> cảnh báo "
+          f"(tiền đang trừ nợ của pháp nhân trên bảng kê)")
+    bad += not ok
+    _fr.db.sql = _sql_old
 
     print("=" * 78)
     print("KẾT QUẢ:", "ĐẠT — bút toán cân, không ghi trùng, không mất tiền im lặng"
