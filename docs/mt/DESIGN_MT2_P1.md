@@ -5,7 +5,7 @@
 > Giai đoạn 1 (khai thác nghiệp vụ) bỏ qua — đã có `SOP_ke_toan_MT_RVHG.md` và
 > `docs/blueprint/00_blueprint_p0.md`.
 >
-> Trạng thái: GĐ2 ✅ duyệt · **GĐ3–4 CHỜ DUYỆT** · GĐ5–6 chưa làm. Chưa viết code app.
+> Trạng thái: GĐ2 ✅ · GĐ3 ✅ · GĐ4 ✅ (bỏ, có lý do) · **GĐ5–6 CHỜ DUYỆT CUỐI**. Chưa viết code app.
 
 ---
 
@@ -298,10 +298,18 @@ quyền của user — nên **chỉ kế toán trưởng duyệt được**, đ�
 | Ke Toan Hach Toan | ✓ | `FULL_DOC` sẵn có |
 | Ke Toan Truong | ✓ | |
 
-⚠ **Điểm cần anh xác nhận (Q4)**: hiện `Ke Toan MT` **không duyệt được JE**.
-Nếu thực tế 1 kế toán làm toàn bộ kênh MT và người đó *chính là* người duyệt,
-thì hoặc (a) người đó mang thêm role `Ke Toan Truong`, hoặc (b) nới `submit`
-cho `Ke Toan MT`. Em **không tự quyết** vì đây là nới quyền ghi sổ.
+#### ✅ Q4 đã chốt (phương án **a**)
+
+Người kế toán phụ trách kênh MT **mang thêm role `Ke Toan Truong`**.
+**KHÔNG nới `submit` Journal Entry cho `Ke Toan MT`.**
+
+Hệ quả cho build:
+- Ma trận quyền `install.py` **giữ nguyên**, MT-2 không đụng vào.
+- `mt.submit_journal_entries()` vẫn `guard_manager()` ở dòng đầu — đúng.
+- Tab "Duyệt bút toán" **ẩn nút duyệt** với user không phải chief
+  (`ov.can_import` đã là `is_chief()`), giống cách `state.canManage` đang làm.
+  Hiện nút cho người không có quyền chỉ tạo một cú bấm để nhận lỗi.
+- Khi giao tài khoản cho kế toán MT: **phải gán 2 role**. Ghi vào SOP mục 0.
 
 ### 3.4 User Permission
 
@@ -332,10 +340,134 @@ trạng thái theo role**. Đối chiếu:
 
 ---
 
-## ✅ CỔNG DUYỆT — GIAI ĐOẠN 3 & 4
+---
 
-GĐ2 đã duyệt (Q1·Q2·Q3 chốt ở mục 2.6). Cần anh duyệt GĐ3–4, và trả lời **Q4**
-(ai được duyệt JE — xem 3.3). Sau đó em sang:
+## GIAI ĐOẠN 5 — INTEGRATION & HOOKS PLAN
 
-- **Giai đoạn 5** — Integration & hooks plan
-- **Giai đoạn 6** — Patch plan (thay cho fixtures — đã chốt ở BƯỚC 0)
+### 5.1 Điểm chạm với ERPNext core
+
+| DocType core | Chiều | Việc |
+|---|---|---|
+| `Journal Entry` | **GHI** (tạo Draft) | Sản phẩm chính của MT2-D. Không bao giờ `submit()` tự động |
+| `Sales Invoice` | ĐỌC | `reference_name` dòng 131 của JE thanh toán; nguồn `shipping_address_name` để seed store CR |
+| `Customer` | ĐỌC + custom field | `custom_mt_chain` (đã có, nới options) |
+| `Address` | ĐỌC | buyer info cho `MT Store`; nguồn tên store CR |
+| `Account`, `Company` | ĐỌC | `MT Account Map` |
+| `MISA Invoice Snapshot` | ĐỌC | đã dùng ở MT-1, không đổi |
+
+**KHÔNG đụng**: `Payment Entry` (ràng buộc JE-only), `GL Entry` (chỉ core ghi),
+`Stock Entry` (hàng trả đi đường chứng từ trả hàng của ERPNext).
+
+### 5.2 `hooks.py` — chỉ thêm 2 doc_events
+
+```python
+doc_events = {
+    "Journal Entry": {
+        "on_submit":  "ketoan.api.mt_je.sync_advice_state",
+        "on_cancel":  "ketoan.api.mt_je.sync_advice_state",
+    },
+}
+```
+
+**Vì sao cần**: `je_state` và `status='Đã ghi nhận'` của advice suy từ docstatus
+của các JE. Kế toán hoàn toàn có thể submit/cancel JE **thẳng trên Desk**, không
+qua portal. Thiếu hook thì advice đứng mãi ở "Đã sinh nháp" trong khi JE đã ghi
+sổ — màn hình nói dối.
+
+Hàm bọc `try/except` + `log_error` toàn bộ: **tích hợp MT hỏng không được chặn
+việc ghi sổ**. Cùng nguyên tắc `misa_sync.ensure_ref_id`.
+
+**KHÔNG thêm**: `scheduler_events` (không có việc định kỳ ở P1),
+`override_doctype_class`, `jinja` (Print Format của BKCK thuộc MT2-B).
+
+### 5.3 Whitelisted endpoints mới
+
+| Method | Guard | Việc |
+|---|---|---|
+| `mt.preview_journal_entries(advice)` | `guard_mt` | Xem trước JE sẽ sinh: từng dòng, TK, tiền, SI reference. **KHÔNG ghi** |
+| `mt.create_journal_entries(advice, expected_hash)` | `guard_manager` | Sinh JE Draft. Bắt buộc vân tay từ preview |
+| `mt.list_draft_journal_entries(...)` | `guard_mt` | Danh sách JE Draft do MT sinh, lọc chuỗi/kỳ, có chia trang |
+| `mt.submit_journal_entries(names)` | `guard_manager` | Duyệt. **try/except từng JE**, trả kết quả per-JE |
+| `mt.get_account_map(company)` | `guard_mt` | Bảng TK đang áp dụng — để màn xem trước nói rõ bút toán vào TK nào |
+| `mt.preview_store_seed()` | `guard_mt` | Xem trước danh sách store dựng được |
+| `mt.commit_store_seed(expected_hash)` | `guard_manager` | Tạo `MT Store` |
+
+Mọi method **guard ở DÒNG ĐẦU**, `_require_tables()` ngay sau — đúng lối MT-1.
+
+### 5.4 Nguồn seed `MT Store` — từ DỮ LIỆU TRÊN SITE, không ship file mẫu
+
+| Chuỗi | Nguồn seed |
+|---|---|
+| LOTTE · AEON · Co.op · Mega | `MT Payment Advice Line.store_code/store_name` **đã nạp trên site** — `DISTINCT` theo chuỗi |
+| Central Retail | `Address` / `Sales Invoice.shipping_address_name` — lấy phần trong **cặp ngoặc cuối** |
+| Win · Emart · Fuji | Không có store trong chứng từ → **không seed**, để trống |
+
+*Vì sao không seed từ `docs/mt/samples/`*: file mẫu là ảnh chụp một kỳ, site có
+dữ liệu đầy đủ hơn và luôn mới hơn. Ship dữ liệu mẫu vào patch là đóng băng một
+thời điểm rồi lệch dần.
+
+**Preview bắt buộc** trước khi ghi (lối `misa_legacy`): store dựng từ heuristic
+(CR lấy trong ngoặc) nên người phải nhìn trước khi tạo master.
+
+### 5.5 Thứ tự phụ thuộc khi build
+
+```
+MT2-A (parser AEON+Fuji)   ── độc lập, ship trước, có giá trị ngay
+        │
+MT2-C (MT Store)           ── cần advice đã nạp để seed
+        │
+MT2-D (JE Draft)           ── cần MT Account Map + advice đã đối chiếu
+        │
+MT2-E (duyệt trên portal)  ── cần JE đã sinh
+```
+
+---
+
+## GIAI ĐOẠN 6 — PATCH PLAN (thay cho fixtures)
+
+Đã chốt ở BƯỚC 0: **`create_custom_fields` + patch**, KHÔNG fixtures.
+Quy tắc bất di bất dịch của repo: **thêm field mới = thêm patch mới**.
+
+`patches.txt` đang ở `v0_0_12`. Dự kiến:
+
+| Patch | Hạng mục | Việc |
+|---|---|---|
+| `v0_0_13.mt_chain_aeon_fuji` | MT2-A | Nới options `Customer.custom_mt_chain` thêm `AEON`, `Fuji`, `Mega Market`. Select `chain` của `MT Payment Advice` tự theo migrate (DocType app-owned) |
+| `v0_0_14.mt_je_custom_fields` | MT2-D | 4 custom field trên `Journal Entry` (`custom_mt_source_dt`, `custom_mt_source_name`, `custom_mt_kind`, `custom_mt_fingerprint`) |
+| `v0_0_15.mt_account_map_seed` | MT2-D | Seed 3 dòng `MT Account Map` mặc định cho mỗi Company. Dò account theo số hiệu đầu; không tìm được → tạo dòng với account TRỐNG + log, **không đoán** |
+
+**Không cần patch**: `MT Store`, `MT Account Map`, field `je_state` — đều là
+DocType/field do app sở hữu, `bench migrate` tự đồng bộ.
+
+**Không có patch seed `MT Store`**: seed đi qua preview + commit trên portal
+(mục 5.4), vì dựng store là heuristic phải cho người nhìn trước.
+
+### Kiểm tra bắt buộc trước mỗi commit
+
+1. `python3 -m py_compile` mọi file `.py` đụng tới
+2. `node --check` mọi file `.js` đụng tới
+3. `python3 -c "import json; json.load(...)"` mọi DocType JSON
+4. **`python3 docs/mt/verified/regression_check.py`** — 5 chuỗi cũ phải vẫn
+   đúng từng đồng. Đây là chốt chặn: MT2-A sửa `mt_advice.py` là đụng thẳng vào
+   tầng đọc của 5 chuỗi đang chạy
+5. Kiểm AST: mọi `@frappe.whitelist` có guard ở dòng đầu
+6. Ba nơi khai `CHAIN_OPTIONS` phải khớp nhau
+
+### Commit convention
+
+Một commit / hạng mục, tiêu đề ghi rõ `MT2-A` / `MT2-C` / `MT2-D` / `MT2-E`.
+Push cả nhánh `claude/zen-babbage-0vj0eg` và `main`.
+
+---
+
+## ✅ CỔNG DUYỆT CUỐI — TOÀN BỘ THIẾT KẾ P1
+
+| Giai đoạn | Trạng thái |
+|---|---|
+| 2 — DocType blueprint | ✅ duyệt (Q1·Q2·Q3 chốt ở 2.6) |
+| 3 — Permission matrix | ✅ duyệt (Q4 chốt phương án **a**) |
+| 4 — Workflow | ✅ **bỏ có lý do** |
+| 5 — Integration & hooks | **chờ duyệt** |
+| 6 — Patch plan | **chờ duyệt** |
+
+Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D → E**.
