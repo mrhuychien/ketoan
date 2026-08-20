@@ -215,6 +215,14 @@ export const api = {
   mtWinSubmitted: (name) => callMethod(NS + "mt_win.mark_submitted", withCompany({ name })),
   mtWinExport: (name) => downloadPost(NS + "mt_win.export_dossier", withCompany({ name })),
 
+  // Công nợ MT đến hạn (SOP §5, việc hàng tuần). Số còn nợ tính từ DÒNG BẢNG KÊ
+  // chứ không từ outstanding_amount — kênh MT không tạo Payment Entry.
+  mtDueSummary: (a) => callMethod(NS + "mt_debt.get_due_summary", withCompany(a)),
+  mtDueInvoices: (a) => callMethod(NS + "mt_debt.get_due_invoices", withCompany(a)),
+  mtCreditTerms: () => callMethod(NS + "mt_debt.get_credit_terms", withCompany({})),
+  mtSaveCreditDays: (customer, credit_days) =>
+    callMethod(NS + "mt_debt.save_credit_days", withCompany({ customer, credit_days })),
+
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
 

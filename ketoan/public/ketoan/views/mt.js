@@ -29,7 +29,19 @@ const TABS = [
     hint: "Chiều MÌNH xuất hóa đơn: nạp file doanh số của chuỗi → lập bảng kê (BKCK) → chốt lấy số → xuất hóa đơn CK trên MISA → ghi số về → sinh bút toán." },
   { key: "ho-so-win", label: "Hồ sơ Winmart", icon: "fa-folder-open",
     hint: "Bảng kê hồ sơ nộp cho WinCommerce. Win chỉ xử lý thanh toán khi file PDF hóa đơn đặt ĐÚNG TÊN — hệ thống sinh tên chuẩn, không để gõ tay." },
+  { key: "den-han", label: "Công nợ đến hạn", icon: "fa-clock",
+    hint: "Hóa đơn còn nợ xếp theo tuổi nợ, tính từ hạn thanh toán khai trên từng khách. Khách CHƯA khai hạn nằm rổ riêng — hệ thống không đoán 45 ngày cho ai." },
 ];
+
+// Rổ tuổi nợ — khóa phải trùng `mt_debt.BUCKETS`. Nhãn hiển thị lấy từ backend.
+const DUE_TONE = {
+  chua_den_han: "green",
+  qua_han_1_15: "yellow",
+  qua_han_16_30: "yellow",
+  qua_han_31_60: "red",
+  qua_han_60: "red",
+  chua_khai_han: "gray",
+};
 
 // Rổ hóa đơn của tab 1 — đúng khóa mà backend nhận (mt.get_invoices).
 const INV_BUCKETS = [
@@ -306,6 +318,7 @@ async function loadTab(container, state) {
   if (state.tab === "chuoi") return loadChains(container, state);
   if (state.tab === "bkck") return loadBkck(container, state);
   if (state.tab === "ho-so-win") return loadWinDossiers(container, state);
+  if (state.tab === "den-han") return loadDueDebt(container, state);
   if (state.tab === "but-toan") {
     return state.jeView === "duyet"
       ? loadJeApproval(container, state)
@@ -3310,5 +3323,254 @@ async function renderWinDetail(container, state, modal, name) {
         <div class="kt-card" style="border-left:4px solid var(--kt-danger);margin-top:10px">
           <div class="kt-card-body"><div class="kt-sub">${e.message}</div></div></div>`);
     }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TAB — CÔNG NỢ ĐẾN HẠN (SOP §5, việc hàng tuần)
+//
+// Màn hình này quyết định GỌI ĐIỆN ĐÒI AI, nên hai thứ phải hiện ngay, không
+// giấu trong tooltip:
+//   1. Số còn nợ tính từ BẢNG KÊ CHUỖI, không phải số dư TK 131 trên sổ cái.
+//   2. Khách CHƯA KHAI HẠN có bao nhiêu tiền treo. Nợ của họ không bao giờ vào
+//      rổ quá hạn, nên nếu không đếm riêng thì nó im lặng biến mất.
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadDueDebt(container, state) {
+  const body = container.querySelector("#mt-body");
+  let sum;
+  try {
+    sum = await api.mtDueSummary({ as_of: state.dueAsOf || undefined,
+                                   chain: state.dueChain || undefined,
+                                   search: state.search || undefined });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+  state.dueAsOf = sum.as_of;
+  state.dueBucket = state.dueBucket || "tat_ca";
+
+  let list;
+  try {
+    list = await api.mtDueInvoices({
+      as_of: state.dueAsOf, chain: state.dueChain || undefined,
+      search: state.search || undefined,
+      bucket: state.dueBucket, page: state.page, page_size: 50,
+    });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = list.rows || [];
+
+  setHTML(body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label class="kt-sub">Tính đến ngày</label>
+        <input type="date" class="kt-input kt-input--sm" id="dd-asof" value="${sum.as_of}">
+        <span class="kt-sub">·</span>
+        <span>Còn nợ <b>${formatVND(sum.total)}</b> / ${sum.total_count} HĐ</span>
+        <span class="kt-sub">·</span>
+        <span>Quá hạn <b style="color:var(--kt-danger)">${formatVND(sum.overdue)}</b>
+              / ${sum.overdue_count} HĐ</span>
+        ${state.dueChain
+          ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="dd-clear-chain">
+              <i class="fas fa-xmark"></i> chỉ chuỗi ${state.dueChain}
+            </button>`
+          : ""}
+        <button class="kt-btn kt-btn--outline kt-btn--sm" id="dd-terms" style="margin-left:auto">
+          <i class="fas fa-sliders"></i> Khai hạn thanh toán
+        </button>
+      </div>
+      <div class="kt-sub" style="margin-top:8px">${sum.basis_note}</div>
+      ${sum.unknown_term_count
+        ? html`<div class="kt-sub" style="margin-top:6px;color:var(--kt-warning)">
+            <i class="fas fa-triangle-exclamation"></i>
+            ${sum.unknown_term_count} hóa đơn (${formatVND(sum.unknown_term_amount)})
+            thuộc khách CHƯA KHAI HẠN — chúng không bao giờ vào rổ quá hạn.
+            Bấm <b>Khai hạn thanh toán</b> để điền.
+          </div>`
+        : ""}
+      ${sum.due_conflicts
+        ? html`<div class="kt-sub" style="margin-top:6px;color:var(--kt-warning)">
+            <i class="fas fa-code-compare"></i>
+            ${sum.due_conflicts} hóa đơn có hạn khai trên khách KHÁC với hạn ghi trên
+            hóa đơn. Màn hình lấy hạn khai trên khách; kiểm lại xem chỗ nào sai.
+          </div>`
+        : ""}
+    </div></div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="kt-btn kt-btn--sm ${state.dueBucket === "tat_ca" ? "" : "kt-btn--outline"}"
+                data-bucket="tat_ca">Tất cả · ${formatVNDShort(sum.total)}</button>
+        ${(sum.buckets || []).map((b) => html`
+          <button class="kt-btn kt-btn--sm ${state.dueBucket === b.key ? "" : "kt-btn--outline"}"
+                  data-bucket="${b.key}">
+            ${b.label} · ${b.count} · ${formatVNDShort(b.amount)}
+          </button>`)}
+      </div>
+    </div></div>
+
+    ${(sum.chains || []).length > 1
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Chuỗi</th><th class="num">Số HĐ</th>
+              <th class="num">Còn nợ</th><th class="num">Trong đó quá hạn</th>
+              <th class="num">HĐ chưa khai hạn</th></tr></thead>
+            <tbody>${sum.chains.map((c) => html`<tr class="dd-chain" data-chain="${c.chain}"
+                  style="cursor:pointer" title="bấm để chỉ xem chuỗi này">
+              <td>${c.chain || html`<span class="kt-sub">(chưa gán chuỗi)</span>`}</td>
+              <td class="num">${c.count}</td>
+              <td class="num">${formatVND(c.amount)}</td>
+              <td class="num">${c.overdue ? html`<b style="color:var(--kt-danger)">${formatVND(c.overdue)}</b>` : "—"}</td>
+              <td class="num">${c.unknown_term || "—"}</td>
+            </tr>`)}</tbody>
+          </table></div>
+        </div></div>`
+      : ""}
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-clock"></i>
+          <p>Không có hóa đơn nào trong rổ này.</p></div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr>
+              <th>Hóa đơn</th><th>Khách hàng</th><th>Ngày HĐ</th>
+              <th>Đến hạn</th><th class="num">Trễ (ngày)</th>
+              <th class="num">Tổng HĐ</th><th class="num">Còn nợ</th><th>Rổ</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((r) => html`<tr>
+                <td><a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a></td>
+                <td>${r.customer_name || r.customer}
+                  ${r.chain ? html`<div class="kt-sub">${r.chain}</div>` : ""}</td>
+                <td>${formatDate(r.posting_date)}</td>
+                <td>${r.due_date ? formatDate(r.due_date) : html`<span class="kt-sub">chưa khai</span>`}
+                  ${r.due_conflict ? html`<i class="fas fa-code-compare" title="hạn khai trên khách khác hạn trên hóa đơn"></i>` : ""}
+                  ${r.due_source === "hoa_don" ? html`<div class="kt-sub">theo hóa đơn</div>` : ""}</td>
+                <td class="num">${r.days_overdue === null || r.days_overdue === undefined
+                  ? "—"
+                  : (r.days_overdue > 0
+                      ? html`<b style="color:var(--kt-danger)">${r.days_overdue}</b>`
+                      : html`<span class="kt-sub">${r.days_overdue}</span>`)}</td>
+                <td class="num">${formatVND(r.grand_total)}</td>
+                <td class="num"><b>${formatVND(r.remaining)}</b>
+                  ${r.paid_review
+                    ? html`<div class="kt-sub" title="dòng bảng kê máy đoán, chưa ai chốt — chưa trừ vào nợ">
+                        chờ chốt ${formatVNDShort(r.paid_review)}</div>`
+                    : ""}</td>
+                <td><span class="kt-badge kt-badge--${DUE_TONE[r.bucket] || "gray"}">${r.bucket_label}</span></td>
+              </tr>`)}
+            </tbody>
+          </table></div>
+          ${pager(list, "hóa đơn")}
+        </div></div>`}
+  `);
+
+  bindPager(container, state);
+  container.querySelector("#dd-asof").addEventListener("change", (e) => {
+    state.dueAsOf = e.target.value; state.page = 1; loadTab(container, state);
+  });
+  container.querySelectorAll("button[data-bucket]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.dueBucket = b.dataset.bucket; state.page = 1; loadTab(container, state);
+    });
+  });
+  const cc = container.querySelector("#dd-clear-chain");
+  if (cc) cc.addEventListener("click", () => {
+    state.dueChain = ""; state.page = 1; loadTab(container, state);
+  });
+  container.querySelectorAll("tr.dd-chain").forEach((tr) => {
+    tr.addEventListener("click", () => {
+      // Chuỗi rỗng = khách chưa gán chuỗi; lọc theo nó thì backend bỏ qua bộ lọc
+      // và trả về TOÀN BỘ — im lặng sai. Chặn ngay ở đây.
+      if (!tr.dataset.chain) return;
+      state.dueChain = tr.dataset.chain; state.page = 1; loadTab(container, state);
+    });
+  });
+  container.querySelector("#dd-terms")
+    .addEventListener("click", () => openCreditTerms(container, state));
+}
+
+// ── Khai hạn thanh toán từng khách ─────────────────────────────────────────
+//
+// KHÔNG có nút "áp hạn theo chuỗi cho tất cả". Central Retail có hai pháp nhân
+// EB hạn khác nhau 10 ngày mà cùng mang một tên chuỗi — một nút như vậy sẽ gán
+// sai hạn cho một trong hai, và sai âm thầm.
+async function openCreditTerms(container, state) {
+  const modal = openModal({
+    title: "Hạn thanh toán từng khách (kênh MT)",
+    icon: "fa-sliders",
+    maxWidth: 860,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  await renderCreditTerms(container, state, modal);
+}
+
+async function renderCreditTerms(container, state, modal) {
+  let res;
+  try {
+    res = await api.mtCreditTerms();
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+  if (!res.has_field) {
+    setHTML(modal.body, html`<div class="kt-empty"><p>${res.message}</p></div>`);
+    return;
+  }
+  const rows = res.rows || [];
+
+  setHTML(modal.body, html`
+    <div class="kt-sub" style="margin-bottom:10px">
+      Số ngày kể từ ngày hóa đơn. Để <b>0</b> nghĩa là <b>chưa khai</b> — hệ thống
+      KHÔNG tự đoán 45 ngày, hóa đơn của khách đó nằm rổ riêng.
+      Gợi ý theo SOP: Win 60 · LOTTE 45 · Co.op 45 · AEON 30 ·
+      Central Retail A030 = 30 / A040 = 40 (hai pháp nhân khác nhau, phải khai riêng).
+    </div>
+    ${res.missing_with_invoices
+      ? html`<div class="kt-sub" style="margin-bottom:10px;color:var(--kt-warning)">
+          <i class="fas fa-triangle-exclamation"></i>
+          ${res.missing_with_invoices} khách ĐANG CÓ hóa đơn mà chưa khai hạn.
+        </div>`
+      : ""}
+    <div class="kt-table-wrap" style="max-height:52vh;overflow:auto">
+      <table class="kt-table">
+        <thead><tr><th>Khách hàng</th><th>Chuỗi</th>
+          <th class="num">Số HĐ</th><th class="num">Hạn (ngày)</th><th></th></tr></thead>
+        <tbody>
+          ${rows.map((r) => html`<tr>
+            <td>${r.customer_name || r.customer}</td>
+            <td>${r.chain || html`<span class="kt-sub">—</span>`}</td>
+            <td class="num">${r.n_invoices}</td>
+            <td class="num"><input type="number" min="0" max="365"
+                  class="kt-input kt-input--sm ct-days" style="width:90px;text-align:right"
+                  data-customer="${r.customer}" value="${r.credit_days || ""}"
+                  placeholder="chưa khai"></td>
+            <td><button class="kt-btn kt-btn--success kt-btn--sm ct-save"
+                        data-customer="${r.customer}">
+              <i class="fas fa-check"></i></button></td>
+          </tr>`)}
+        </tbody>
+      </table>
+    </div>
+  `);
+
+  modal.body.querySelectorAll(".ct-save").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const cus = b.dataset.customer;
+      const inp = modal.body.querySelector(`.ct-days[data-customer="${cus}"]`);
+      b.disabled = true;
+      try {
+        const r = await api.mtSaveCreditDays(cus, parseInt(inp.value, 10) || 0);
+        toast(r.message, "success");
+        loadTab(container, state);
+      } catch (e) {
+        toast(e.message, "error");
+      } finally {
+        b.disabled = false;
+      }
+    });
   });
 }

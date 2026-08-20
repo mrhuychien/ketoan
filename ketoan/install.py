@@ -278,6 +278,27 @@ MT_CUSTOM_FIELDS = {
             "description": "Khách thuộc chuỗi nào. Dùng để gom công nợ theo chuỗi ở màn hình Công nợ MT.",
             "insert_after": "customer_group",
         },
+        # HẠN THANH TOÁN theo từng KHÁCH, không theo chuỗi.
+        #
+        # VÌ SAO không tra bảng chuỗi -> số ngày trong code: Central Retail có
+        # HAI pháp nhân EB hạn khác nhau (A030 = 30 ngày, A040 = 40 ngày) và cả
+        # hai đều mang `custom_mt_chain = Central Retail`. Bảng tra theo chuỗi sẽ
+        # gán sai hạn cho một trong hai — sai 10 ngày trên toàn bộ công nợ của
+        # pháp nhân đó.
+        #
+        # Để TRỐNG có nghĩa "chưa khai", KHÔNG có nghĩa "45 ngày". Hóa đơn của
+        # khách chưa khai hạn bị tách thành rổ riêng và đếm rõ ràng, không bị
+        # nhét vào rổ "chưa đến hạn" để rồi im lặng quá hạn.
+        {
+            "fieldname": "custom_mt_credit_days",
+            "label": "Hạn thanh toán MT (ngày)",
+            "fieldtype": "Int",
+            "non_negative": 1,
+            "description": ("Số ngày kể từ ngày hóa đơn. Để trống = chưa khai — "
+                            "hệ KHÔNG tự đoán 45 ngày. Ví dụ: Win 60, LOTTE 45, "
+                            "Co.op 45, AEON 30, Central Retail A030=30 / A040=40."),
+            "insert_after": "custom_mt_chain",
+        },
     ]
 }
 

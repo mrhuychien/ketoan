@@ -555,14 +555,16 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-E** duyệt / xóa bút toán trên portal | `bd420fd` | `je_submit_check` |
 | **MT2-B1** đọc file cơ sở tính chiết khấu (Central Retail · LOTTE · Mega) | `303ff6f` | `discount_basis_check` |
 | **MT2-B2** bảng kê chiết khấu: lập → chốt cấp số → in → sinh JE | `d029ed0` | `discount_sheet_check` |
-| **MT2-B3** hồ sơ thanh toán WinCommerce (xuất Excel + tên file PDF) | *(commit này)* | `win_dossier_check` |
+| **MT2-B3** hồ sơ thanh toán WinCommerce (xuất Excel + tên file PDF) | `6912873` | `win_dossier_check` |
+| **MT2-F** công nợ MT đến hạn theo term (patch v0_0_16) | *(commit này)* | `debt_due_check` |
 
 Chạy toàn bộ, không cần bench:
 
 ```bash
 for t in regression_check crosscheck_mt2 mutation_check \
          store_seed_check je_plan_check je_submit_check \
-         discount_basis_check discount_sheet_check win_dossier_check; do
+         discount_basis_check discount_sheet_check win_dossier_check \
+         debt_due_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -578,3 +580,26 @@ done
 - Một hóa đơn chỉ được nộp **một lần**: chặn trùng trong cùng hồ sơ *và* chặn
   hóa đơn đã nằm ở hồ sơ khác (báo đích danh số hồ sơ kia).
 - Hồ sơ đã nộp **không xóa được**.
+
+### Công nợ đến hạn — hai chiều sai ngược nhau
+
+Báo cáo này quyết định **gọi điện đòi ai**, nên sai kiểu nào cũng đắt:
+
+| Sai kiểu | Nguyên nhân DUY NHẤT có thể | Chốt chặn |
+|---|---|---|
+| **Đòi nhầm** hóa đơn chuỗi đã trả | lấy `si.outstanding_amount` | kênh MT không tạo Payment Entry nên nó *không bao giờ* giảm; module dùng chung `_paid_subquery()` với màn hình Tổng quan |
+| **Không đòi** hóa đơn đã quá hạn | đoán hạn mặc định 45 ngày | khách chưa khai hạn vào **rổ riêng** `chua_khai_han`, đếm và hiện tiền treo |
+
+**Hạn thanh toán theo KHÁCH, không theo chuỗi.** Central Retail có hai pháp nhân
+EB (A030 = 30 ngày, A040 = 40 ngày) cùng mang `custom_mt_chain = Central Retail`.
+Bảng tra chuỗi → số ngày sẽ gán sai hạn cho một trong hai, lệch 10 ngày trên
+toàn bộ công nợ pháp nhân đó. Vì vậy không có nút "áp hạn theo chuỗi cho tất cả".
+
+Thứ tự xác định hạn: `Customer.custom_mt_credit_days` → `Sales Invoice.due_date`
+(chỉ khi nó **lớn hơn** `posting_date`; bằng nhau nghĩa là ERPNext chưa có
+Payment Terms, tức *không biết hạn*, không phải "đến hạn ngay hôm xuất") → chưa
+khai. Hai nguồn lệch nhau thì **giương cờ** `due_conflict`, không tự chọn rồi giấu.
+
+Patch `v0_0_16` chỉ **vớt** hạn từ `due_date` đã ghi sổ khi khách có ≥3 hóa đơn
+và **mọi** hóa đơn cách ngày hóa đơn đúng cùng một số ngày. Lệch nhau → để trống,
+kế toán tự khai. Patch không đoán số ngày cho ai.

@@ -18,3 +18,4 @@ ketoan.patches.v0_0_12.mt_customer_chain
 ketoan.patches.v0_0_13.mt_chain_options
 ketoan.patches.v0_0_14.mt_je_custom_fields
 ketoan.patches.v0_0_15.mt_account_map_seed
+ketoan.patches.v0_0_16.mt_credit_days
