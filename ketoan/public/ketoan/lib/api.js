@@ -188,6 +188,23 @@ export const api = {
   mtJeDeleteDrafts: (names) => callMethod(NS + "mt_je.delete_draft_journal_entries",
                                           withCompany({ names: JSON.stringify(names) })),
 
+  // Chiều CHIẾT KHẤU — mình xuất hóa đơn CK theo quy trình BKCK (§3 SOP).
+  // Đọc file doanh số của chuỗi -> lập bảng kê -> chốt (cấp số) -> ghi số hóa
+  // đơn đã xuất trên MISA -> sinh bút toán.
+  mtDiscountRead: (content, chain) => callMethod(NS + "mt_discount_read.preview", { content, chain }),
+  mtDiscountPreview: (a) => callMethod(NS + "mt_discount.preview_sheets", withCompany(a)),
+  mtDiscountCommit: (a) => callMethod(NS + "mt_discount.commit_sheets", withCompany(a)),
+  // `expected_hash` đi kèm trong `a` — backend từ chối lập nếu thiếu hoặc lệch.
+  mtDiscountSheets: (a) => callMethod(NS + "mt_discount.list_sheets", withCompany(a)),
+  mtDiscountSheet: (name) => callMethod(NS + "mt_discount.get_sheet", withCompany({ name })),
+  // CHỐT mới cấp số NNN/BKCK/HG-MT — nháp bị xóa mà đã ăn số là dãy thủng lỗ.
+  mtDiscountFinalize: (name, sheet_date) => callMethod(NS + "mt_discount.finalize_sheet",
+                                                       withCompany({ name, sheet_date })),
+  mtDiscountSetInvoice: (a) => callMethod(NS + "mt_discount.set_invoice", withCompany(a)),
+  mtDiscountJePreview: (name) => callMethod(NS + "mt_discount.preview_journal_entry",
+                                            withCompany({ name })),
+  mtDiscountJeCreate: (a) => callMethod(NS + "mt_discount.create_journal_entry", withCompany(a)),
+
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
 

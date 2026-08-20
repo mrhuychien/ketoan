@@ -1,0 +1,374 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-08-20 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "sheet_no",
+  "sheet_seq",
+  "sheet_date",
+  "status",
+  "column_break_head",
+  "chain",
+  "company",
+  "period_label",
+  "period_from",
+  "period_to",
+  "section_buyer",
+  "customer",
+  "store",
+  "address",
+  "column_break_buyer",
+  "buyer_name",
+  "buyer_tax_id",
+  "buyer_address",
+  "section_calc",
+  "mode",
+  "rate",
+  "vat_rate",
+  "column_break_calc",
+  "source_file",
+  "discount_term",
+  "section_total",
+  "total_base",
+  "total_vat",
+  "total_gross",
+  "column_break_total",
+  "discount_base",
+  "discount_vat",
+  "discount_gross",
+  "section_invoice",
+  "discount_invoice_series",
+  "discount_invoice_no",
+  "discount_invoice_date",
+  "column_break_invoice",
+  "je_state",
+  "note",
+  "section_lines",
+  "lines"
+ ],
+ "fields": [
+  {
+   "default": "MT-BKCK-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Chuỗi số",
+   "options": "MT-BKCK-.#####",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "bold": 1,
+   "description": "Dạng NNN/BKCK/HG-MT. MỘT dãy chung toàn công ty, không tách theo chuỗi — quan sát mẫu thật: 261 của BigC nằm xen giữa dãy của LOTTE.",
+   "fieldname": "sheet_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Số bảng kê",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sheet_seq",
+   "fieldtype": "Int",
+   "label": "Số thứ tự",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sheet_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày bảng kê",
+   "reqd": 1
+  },
+  {
+   "default": "Nháp",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trạng thái",
+   "options": "\nNháp\nĐã chốt\nĐã xuất hóa đơn",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "chain",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Chuỗi siêu thị",
+   "options": "\nWinCommerce\nCentral Retail\nLOTTE\nEmart\nSaigon Co.op\nAEON\nFuji\nMega Market",
+   "reqd": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Công ty",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "description": "Nhãn in trên bảng kê, ví dụ '07.2026'.",
+   "fieldname": "period_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Kỳ"
+  },
+  {
+   "fieldname": "period_from",
+   "fieldtype": "Date",
+   "label": "Từ ngày"
+  },
+  {
+   "fieldname": "period_to",
+   "fieldtype": "Date",
+   "label": "Đến ngày"
+  },
+  {
+   "fieldname": "section_buyer",
+   "fieldtype": "Section Break",
+   "label": "Đơn vị mua hàng"
+  },
+  {
+   "description": "Pháp nhân ký bảng kê. TUYỆT ĐỐI không lấy từ cột SUPPLIERNAME của file chuỗi — cột đó là tên CỦA MÌNH.",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Khách hàng",
+   "options": "Customer",
+   "reqd": 1
+  },
+  {
+   "description": "LOTTE tách 1 bảng kê / chi nhánh; thông tin bên mua lấy từ địa chỉ của điểm.",
+   "fieldname": "store",
+   "fieldtype": "Link",
+   "label": "Điểm siêu thị (chi nhánh)",
+   "options": "MT Store"
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Link",
+   "label": "Địa chỉ bên mua",
+   "options": "Address"
+  },
+  {
+   "fieldname": "column_break_buyer",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "buyer_name",
+   "fieldtype": "Data",
+   "label": "Tên bên mua (in trên bảng kê)"
+  },
+  {
+   "fieldname": "buyer_tax_id",
+   "fieldtype": "Data",
+   "label": "MST bên mua"
+  },
+  {
+   "fieldname": "buyer_address",
+   "fieldtype": "Small Text",
+   "label": "Địa chỉ bên mua (in)"
+  },
+  {
+   "fieldname": "section_calc",
+   "fieldtype": "Section Break",
+   "label": "Cách tính"
+  },
+  {
+   "fieldname": "mode",
+   "fieldtype": "Select",
+   "label": "Cách tính chiết khấu",
+   "options": "\nCộng chiết khấu từng dòng\nTỷ lệ × tổng doanh số",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rate",
+   "fieldtype": "Percent",
+   "label": "Tỷ lệ chiết khấu (%)"
+  },
+  {
+   "default": "8",
+   "fieldname": "vat_rate",
+   "fieldtype": "Percent",
+   "label": "Thuế suất GTGT (%)"
+  },
+  {
+   "fieldname": "column_break_calc",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "source_file",
+   "fieldtype": "Data",
+   "label": "File nguồn",
+   "read_only": 1
+  },
+  {
+   "fieldname": "discount_term",
+   "fieldtype": "Link",
+   "label": "Điều khoản áp dụng",
+   "options": "MT Discount Term",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_total",
+   "fieldtype": "Section Break",
+   "label": "Tổng hợp"
+  },
+  {
+   "fieldname": "total_base",
+   "fieldtype": "Currency",
+   "label": "Tổng cộng — trước thuế",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_vat",
+   "fieldtype": "Currency",
+   "label": "Tổng cộng — thuế GTGT",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_gross",
+   "fieldtype": "Currency",
+   "label": "Tổng cộng — thanh toán",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_total",
+   "fieldtype": "Column Break"
+  },
+  {
+   "bold": 1,
+   "fieldname": "discount_base",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Chiết khấu — trước thuế",
+   "read_only": 1
+  },
+  {
+   "fieldname": "discount_vat",
+   "fieldtype": "Currency",
+   "label": "Chiết khấu — thuế GTGT",
+   "read_only": 1
+  },
+  {
+   "bold": 1,
+   "fieldname": "discount_gross",
+   "fieldtype": "Currency",
+   "label": "Chiết khấu — tổng cộng",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_invoice",
+   "fieldtype": "Section Break",
+   "label": "Hóa đơn chiết khấu"
+  },
+  {
+   "fieldname": "discount_invoice_series",
+   "fieldtype": "Data",
+   "label": "Ký hiệu HĐ chiết khấu"
+  },
+  {
+   "description": "Điền sau khi xuất hóa đơn trên MISA. Snapshot MISA sẽ tự vớt về.",
+   "fieldname": "discount_invoice_no",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Số HĐ chiết khấu"
+  },
+  {
+   "fieldname": "discount_invoice_date",
+   "fieldtype": "Date",
+   "label": "Ngày HĐ chiết khấu"
+  },
+  {
+   "fieldname": "column_break_invoice",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Tính lại từ docstatus của Journal Entry mang custom_mt_source_name = bảng kê này. KHÔNG sửa tay.",
+   "fieldname": "je_state",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Bút toán",
+   "options": "\nChưa sinh\nĐã sinh nháp\nĐã duyệt một phần\nĐã duyệt đủ",
+   "read_only": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú của kế toán"
+  },
+  {
+   "fieldname": "section_lines",
+   "fieldtype": "Section Break",
+   "label": "Chi tiết hóa đơn"
+  },
+  {
+   "fieldname": "lines",
+   "fieldtype": "Table",
+   "label": "Dòng bảng kê",
+   "options": "MT Discount Sheet Line"
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Discount Sheet",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan Truong",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "write": 1
+  },
+  {
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan MT"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "search_fields": "sheet_no,customer,period_label",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "title_field": "sheet_no",
+ "track_changes": 1
+}

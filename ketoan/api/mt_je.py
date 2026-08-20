@@ -201,7 +201,7 @@ def _has_mixed_signs(rows):
     return any(v > 0 for v in vals) and any(v < 0 for v in vals)
 
 
-def _fingerprint(source_name, kind, posting_date, total):
+def _fingerprint(source_name, kind, posting_date, total, source_dt=SOURCE_DT):
     """Vân tay CHỐNG SINH TRÙNG của một bút toán.
 
     (nguồn, loại, ngày, tổng tiền) đã đủ định danh: mỗi bảng kê có ĐÚNG một bút
@@ -210,7 +210,7 @@ def _fingerprint(source_name, kind, posting_date, total):
     """
     h = hashlib.sha1()
     h.update("MTJE|{}|{}|{}|{}|{:.2f}\n".format(
-        SOURCE_DT, source_name, kind, cstr(posting_date), flt(total)).encode())
+        source_dt, source_name, kind, cstr(posting_date), flt(total)).encode())
     return h.hexdigest()
 
 
@@ -568,15 +568,21 @@ def _plan_hash(plan):
 # Trạng thái bút toán của bảng kê
 # ─────────────────────────────────────────────────────────────────────────
 
-def compute_je_state(advice):
-    """`je_state` suy từ docstatus của các JE mang `custom_mt_source_name = advice`."""
+# Các DocType có thể là NGUỒN của bút toán MT. `je_state` của chúng đều do máy
+# tính từ docstatus của Journal Entry, và hook `on_submit`/`on_cancel` phải cập
+# nhật đúng bản ghi nguồn — dù kế toán bấm duyệt trên portal hay thẳng trên Desk.
+SOURCE_DOCTYPES = (SOURCE_DT, "MT Discount Sheet")
+
+
+def compute_je_state(source_name, source_dt=SOURCE_DT):
+    """`je_state` suy từ docstatus của các JE trỏ về bản ghi nguồn này."""
     rows = frappe.db.sql("""
         SELECT docstatus, COUNT(*) AS n
         FROM `tabJournal Entry`
         WHERE custom_mt_source_dt = %(dt)s AND custom_mt_source_name = %(name)s
           AND docstatus != 2
         GROUP BY docstatus
-    """, {"dt": SOURCE_DT, "name": advice}, as_dict=True)
+    """, {"dt": source_dt, "name": source_name}, as_dict=True)
     n_draft = sum(cint(r.n) for r in rows if cint(r.docstatus) == 0)
     n_sub = sum(cint(r.n) for r in rows if cint(r.docstatus) == 1)
     if not (n_draft or n_sub):
@@ -586,7 +592,7 @@ def compute_je_state(advice):
     return JE_STATE_ALL if not n_draft else JE_STATE_PARTIAL
 
 
-def _set_je_state(advice):
+def _set_je_state(source_name, source_dt=SOURCE_DT):
     """Ghi `je_state` bằng `db_set`, KHÔNG `save()`.
 
     VÌ SAO: `save()` chạy lại toàn bộ `validate()` của bảng kê — trong đó có chốt
@@ -596,14 +602,17 @@ def _set_je_state(advice):
     hoàn toàn hợp lệ. `update_modified=False` để không đụng vào dấu vết sửa đổi
     của kế toán.
     """
-    state = compute_je_state(advice)
-    if frappe.db.get_value(SOURCE_DT, advice, "je_state") != state:
-        frappe.db.set_value(SOURCE_DT, advice, "je_state", state, update_modified=False)
+    state = compute_je_state(source_name, source_dt)
+    if frappe.db.get_value(source_dt, source_name, "je_state") != state:
+        frappe.db.set_value(source_dt, source_name, "je_state", state, update_modified=False)
     return state
 
 
 def sync_advice_state(doc, method=None):
-    """Hook `Journal Entry.on_submit` / `on_cancel` -> cập nhật `je_state` của bảng kê.
+    """Hook `Journal Entry.on_submit` / `on_cancel` -> cập nhật `je_state` của NGUỒN.
+
+    Nguồn có thể là `MT Payment Advice` (bảng kê thanh toán) hoặc
+    `MT Discount Sheet` (bảng kê chiết khấu) — xem `SOURCE_DOCTYPES`.
 
     VÌ SAO cần hook chứ không chỉ cập nhật trong portal: kế toán hoàn toàn có thể
     submit/cancel bút toán THẲNG TRÊN DESK, không qua portal. Thiếu hook thì bảng
@@ -613,12 +622,13 @@ def sync_advice_state(doc, method=None):
     nguyên tắc với `misa_sync.ensure_ref_id`.
     """
     try:
-        if cstr(getattr(doc, "custom_mt_source_dt", "")) != SOURCE_DT:
+        src_dt = cstr(getattr(doc, "custom_mt_source_dt", ""))
+        if src_dt not in SOURCE_DOCTYPES:
             return
         name = cstr(getattr(doc, "custom_mt_source_name", ""))
-        if not name or not frappe.db.exists(SOURCE_DT, name):
+        if not name or not frappe.db.exists(src_dt, name):
             return
-        _set_je_state(name)
+        _set_je_state(name, src_dt)
     except Exception:
         frappe.log_error(frappe.get_traceback(), "ketoan: mt_je.sync_advice_state")
 
@@ -886,6 +896,19 @@ def create_journal_entries(advice, expected_hash=None, company=None):
 MAX_BATCH = 100
 
 
+def _source_is_settled(source_dt, source_name):
+    """Bản ghi nguồn đã được người CHỐT chưa? Hai loại nguồn, hai cách chốt.
+
+      · `MT Payment Advice`  -> đã tick 'Đã đối chiếu khớp'
+      · `MT Discount Sheet`  -> đã CHỐT (ăn số, đem đi ký), không còn là nháp
+
+    Chưa chốt mà ghi sổ là ghi một khoản con người chưa xác nhận.
+    """
+    if cstr(source_dt) == SOURCE_DT:
+        return bool(cint(frappe.db.get_value(SOURCE_DT, source_name, "reconciled") or 0))
+    return cstr(frappe.db.get_value(source_dt, source_name, "status") or "") not in ("", "Nháp")
+
+
 def _je_names(names):
     """Bóc danh sách tên JE từ tham số client (JSON hoặc list). Chuẩn hóa + chặn trần."""
     if isinstance(names, str):
@@ -925,7 +948,7 @@ def _load_mt_jes(names, company, docstatus=0):
         r = found.get(n)
         if not r:
             bad.append({"name": n, "error": _("Không tìm thấy bút toán")})
-        elif cstr(r.custom_mt_source_dt) != SOURCE_DT:
+        elif cstr(r.custom_mt_source_dt) not in SOURCE_DOCTYPES:
             # Chốt số 3: tên gửi lên từ client không được phép chạm vào chứng từ
             # của phân hệ khác.
             bad.append({"name": n, "error": _("Không phải bút toán của kênh MT")})
@@ -956,9 +979,9 @@ def list_draft_journal_entries(from_date=None, to_date=None, chain=None, kind=No
     page = max(1, cint(page) or 1)
     page_size = min(100, max(1, cint(page_size) or 20))
 
-    where = ["je.custom_mt_source_dt = %(dt)s", "je.company = %(company)s",
+    where = ["je.custom_mt_source_dt IN %(dts)s", "je.company = %(company)s",
              "je.docstatus = %(docstatus)s"]
-    params = {"dt": SOURCE_DT, "company": company, "docstatus": cint(docstatus)}
+    params = {"dts": SOURCE_DOCTYPES, "company": company, "docstatus": cint(docstatus)}
     if from_date and to_date:
         where.append("je.posting_date BETWEEN %(fd)s AND %(td)s")
         params["fd"], params["td"] = from_date, to_date
@@ -1029,18 +1052,41 @@ def get_journal_entry(name, company=None):
     # `_load_mt_jes` ở đây; hàm này đọc CẢ bút toán đã ghi sổ để soi lại.
     head = frappe.db.sql("""
         SELECT je.name, je.docstatus, je.posting_date, je.total_debit, je.total_credit,
-               je.custom_mt_kind AS kind, je.custom_mt_source_name AS advice,
+               je.custom_mt_kind AS kind, je.custom_mt_source_name AS source_name,
+               je.custom_mt_source_dt AS source_dt,
                je.custom_mt_fingerprint AS fingerprint,
-               je.remark, je.user_remark,
-               a.chain, a.customer, a.advice_no, a.reconciled, a.je_state, a.file_name
+               je.remark, je.user_remark
         FROM `tabJournal Entry` je
-        LEFT JOIN `tabMT Payment Advice` a ON a.name = je.custom_mt_source_name
-        WHERE je.name = %(name)s AND je.custom_mt_source_dt = %(dt)s
+        WHERE je.name = %(name)s AND je.custom_mt_source_dt IN %(dts)s
           AND je.company = %(company)s
-    """, {"name": cstr(name), "dt": SOURCE_DT, "company": company}, as_dict=True)
+    """, {"name": cstr(name), "dts": SOURCE_DOCTYPES, "company": company}, as_dict=True)
     if not head:
         frappe.throw(_("Không tìm thấy bút toán {0} của kênh MT trong công ty này").format(name))
     doc = head[0]
+
+    # Thông tin bảng kê nguồn — HAI loại nguồn, hai bộ field khác nhau. Đọc
+    # riêng thay vì join cứng vào một bảng: join cứng thì bút toán chiết khấu
+    # hiện ra với mọi ô nguồn TRỐNG mà không có gì báo vì sao.
+    doc["advice"] = doc.source_name
+    if doc.source_dt == SOURCE_DT:
+        src = frappe.db.get_value(SOURCE_DT, doc.source_name,
+                                  ["chain", "customer", "advice_no", "reconciled",
+                                   "je_state", "file_name"], as_dict=True) or {}
+        doc.update(src)
+        doc["source_label"] = _("Bảng kê thanh toán")
+    else:
+        src = frappe.db.get_value(doc.source_dt, doc.source_name,
+                                  ["chain", "customer", "sheet_no", "status",
+                                   "je_state", "source_file"], as_dict=True) or {}
+        doc["chain"] = src.get("chain")
+        doc["customer"] = src.get("customer")
+        doc["advice_no"] = src.get("sheet_no")
+        doc["file_name"] = src.get("source_file")
+        doc["je_state"] = src.get("je_state")
+        # Bảng kê chiết khấu không có ô 'đã đối chiếu khớp'; tương đương của nó
+        # là ĐÃ CHỐT (đã ăn số, đã đem đi ký).
+        doc["reconciled"] = 1 if cstr(src.get("status")) != "Nháp" else 0
+        doc["source_label"] = _("Bảng kê chiết khấu")
 
     lines = frappe.db.sql("""
         SELECT jea.idx, jea.account, jea.debit_in_account_currency AS debit,
@@ -1081,7 +1127,7 @@ def submit_journal_entries(names, force_unreconciled=0, company=None):
     if not cint(force_unreconciled):
         unrec = []
         for r in jes:
-            if not cint(frappe.db.get_value(SOURCE_DT, r.custom_mt_source_name, "reconciled") or 0):
+            if not _source_is_settled(r.custom_mt_source_dt, r.custom_mt_source_name):
                 unrec.append({"name": r.name, "advice": r.custom_mt_source_name,
                               "kind": r.custom_mt_kind, "amount": flt(r.total_debit)})
         if unrec:

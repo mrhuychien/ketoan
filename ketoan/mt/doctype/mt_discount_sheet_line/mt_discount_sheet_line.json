@@ -1,0 +1,138 @@
+{
+ "actions": [],
+ "creation": "2026-08-20 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "inv_series",
+  "inv_no",
+  "inv_no_norm",
+  "inv_date",
+  "column_break_inv",
+  "store_code",
+  "note",
+  "section_amount",
+  "amount_before_vat",
+  "vat_amount",
+  "column_break_amount",
+  "total_amount",
+  "discount_amount",
+  "section_match",
+  "sales_invoice",
+  "match_note",
+  "column_break_match",
+  "source_row"
+ ],
+ "fields": [
+  {
+   "fieldname": "inv_series",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Ký hiệu"
+  },
+  {
+   "fieldname": "inv_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Số hóa đơn",
+   "reqd": 1
+  },
+  {
+   "fieldname": "inv_no_norm",
+   "fieldtype": "Data",
+   "label": "Số hóa đơn (chuẩn hóa)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "inv_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày hóa đơn"
+  },
+  {
+   "fieldname": "column_break_inv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "store_code",
+   "fieldtype": "Data",
+   "label": "Mã điểm"
+  },
+  {
+   "description": "Central Retail: số PO. In vào cột 'Ghi chú' của bảng kê.",
+   "fieldname": "note",
+   "fieldtype": "Data",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "section_amount",
+   "fieldtype": "Section Break",
+   "label": "Số tiền"
+  },
+  {
+   "description": "GIỮ NGUYÊN DẤU — dòng hàng trả là số âm.",
+   "fieldname": "amount_before_vat",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Thành tiền trước thuế"
+  },
+  {
+   "fieldname": "vat_amount",
+   "fieldtype": "Currency",
+   "label": "Tiền thuế GTGT"
+  },
+  {
+   "fieldname": "column_break_amount",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "label": "Tổng cộng thanh toán"
+  },
+  {
+   "description": "Chỉ có khi chuỗi in chiết khấu từng dòng (Central Retail). Trống = tính bằng tỷ lệ trên tổng.",
+   "fieldname": "discount_amount",
+   "fieldtype": "Currency",
+   "label": "Tiền chiết khấu của dòng"
+  },
+  {
+   "fieldname": "section_match",
+   "fieldtype": "Section Break",
+   "label": "Đối chiếu"
+  },
+  {
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Hóa đơn ERPNext",
+   "options": "Sales Invoice"
+  },
+  {
+   "fieldname": "match_note",
+   "fieldtype": "Data",
+   "label": "Ghi chú đối chiếu",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_match",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "source_row",
+   "fieldtype": "Int",
+   "label": "Dòng trong file",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Discount Sheet Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

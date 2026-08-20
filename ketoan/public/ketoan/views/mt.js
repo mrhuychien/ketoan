@@ -25,6 +25,8 @@ const TABS = [
     hint: "Gộp theo chuỗi siêu thị. Ánh xạ khách hàng → chuỗi lấy từ bảng kê kế toán đã chốt; hệ thống KHÔNG tự đoán từ tên khách." },
   { key: "but-toan", label: "Bút toán", icon: "fa-file-invoice-dollar",
     hint: "Sinh bút toán NHÁP từ bảng kê. Hệ thống không bao giờ tự ghi sổ — người duyệt mới ghi. Tài khoản lấy từ cấu hình, không hardcode." },
+  { key: "bkck", label: "Bảng kê chiết khấu", icon: "fa-file-signature",
+    hint: "Chiều MÌNH xuất hóa đơn: nạp file doanh số của chuỗi → lập bảng kê (BKCK) → chốt lấy số → xuất hóa đơn CK trên MISA → ghi số về → sinh bút toán." },
 ];
 
 // Rổ hóa đơn của tab 1 — đúng khóa mà backend nhận (mt.get_invoices).
@@ -107,6 +109,7 @@ export async function render({ container, query }) {
     // Bút toán đang tick để duyệt/xóa hàng loạt.
     jePicked: new Set(),
     jeKind: query?.je_kind || "",
+    bkckStatus: query?.bkck_status || "",
     // '0' = nháp chờ duyệt (mặc định), '1' = đã ghi sổ.
     jeDocstatus: query?.je_docstatus === "1" ? "1" : "0",
   };
@@ -298,6 +301,7 @@ async function loadTab(container, state) {
   setHTML(body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
 
   if (state.tab === "chuoi") return loadChains(container, state);
+  if (state.tab === "bkck") return loadBkck(container, state);
   if (state.tab === "but-toan") {
     return state.jeView === "duyet"
       ? loadJeApproval(container, state)
@@ -2554,5 +2558,434 @@ async function openJeDetail(container, state, name) {
     modal.close();
     state.jePicked = new Set([name]);
     await doSubmitJes(container, state, [{ name, amount: d.total_debit }]);
+  });
+}
+
+
+// ── Tab 5: Bảng kê chiết khấu (BKCK) ───────────────────────────────────────
+//
+// Chiều MÌNH XUẤT HÓA ĐƠN — ngược với tab 'Quản lý chiết khấu' (khoản chuỗi trừ
+// lại). Năm bước §3 SOP: nạp file doanh số → lập bảng kê → CHỐT lấy số →
+// xuất hóa đơn CK trên MISA rồi ghi số về → sinh bút toán.
+//
+// BẢNG KÊ LÀ CHỨNG TỪ HAI BÊN KÝ và dẫn tới một hóa đơn GTGT. Số bảng kê chỉ
+// được cấp khi CHỐT — nháp bị xóa mà đã ăn số là dãy thủng lỗ.
+
+const BKCK_TONE = { "Nháp": "gray", "Đã chốt": "yellow", "Đã xuất hóa đơn": "green" };
+
+async function loadBkck(container, state) {
+  const body = container.querySelector("#mt-body");
+  let res;
+  try {
+    res = await api.mtDiscountSheets({
+      from_date: state.from, to_date: state.to,
+      chain: state.chain || undefined,
+      status: state.bkckStatus || undefined,
+      search: state.search || undefined,
+      page: state.page, page_size: 20,
+    });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = res.rows || [];
+
+  setHTML(body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label class="kt-label" style="margin:0">Chuỗi</label>
+      <select class="kt-input kt-input--sm" id="mt-chain">
+        <option value="">Tất cả chuỗi</option>
+        ${(res.chains || []).map((c) => html`<option value="${c}" ${state.chain === c ? "selected" : ""}>${c}</option>`)}
+      </select>
+      <select class="kt-input kt-input--sm" id="bk-status">
+        <option value="">Mọi trạng thái</option>
+        ${(res.statuses || []).map((x) => html`<option value="${x}" ${state.bkckStatus === x ? "selected" : ""}>${x}</option>`)}
+      </select>
+      <span class="kt-sub">${res.total} bảng kê · chiết khấu ${formatVND(res.total_amount)}</span>
+      ${res.can_manage
+        ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="bk-new" style="margin-left:auto">
+            <i class="fas fa-file-import"></i> Nạp file doanh số → lập bảng kê
+          </button>`
+        : ""}
+    </div></div>
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-file-signature"></i>
+          <p>Chưa có bảng kê chiết khấu nào trong khoảng này.</p>
+          ${res.can_manage
+            ? html`<div class="kt-sub">Bấm <b>Nạp file doanh số</b> — hệ thống đọc file của chuỗi,
+                   gộp theo pháp nhân/chi nhánh và dựng bảng kê cho từng bên mua.</div>`
+            : ""}
+        </div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr>
+              <th>Số bảng kê</th><th>Chuỗi</th><th>Bên mua</th><th>Kỳ</th>
+              <th class="num">Doanh số</th><th class="num">Chiết khấu</th>
+              <th>HĐ chiết khấu</th><th>Trạng thái</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((r) => html`<tr>
+                <td>${r.sheet_no
+                  ? html`<code>${r.sheet_no}</code>`
+                  : html`<span class="kt-sub">chưa cấp số</span>`}
+                  <div class="kt-sub">${formatDate(r.sheet_date)} · ${r.n_lines} HĐ</div></td>
+                <td><span class="kt-badge kt-badge--gray">${r.chain}</span></td>
+                <td>${r.buyer_name || r.customer}
+                  ${r.buyer_tax_id ? html`<div class="kt-sub">MST ${r.buyer_tax_id}</div>` : ""}</td>
+                <td>${r.period_label || "—"}</td>
+                <td class="num">${formatVND(r.total_base)}</td>
+                <td class="num"><b>${formatVND(r.discount_gross)}</b>
+                  <div class="kt-sub">${r.rate ? `${r.rate}%` : r.mode}</div></td>
+                <td>${r.discount_invoice_no
+                  ? html`<code>${r.discount_invoice_series || ""} ${r.discount_invoice_no}</code>`
+                  : html`<span class="kt-sub">—</span>`}</td>
+                <td><span class="kt-badge kt-badge--${BKCK_TONE[r.status] || "gray"}">${r.status}</span>
+                  <div class="kt-sub">${r.je_state}</div></td>
+                <td><button class="kt-btn kt-btn--outline kt-btn--sm bk-open" data-name="${r.name}">
+                  <i class="fas fa-eye"></i></button></td>
+              </tr>`)}
+            </tbody>
+          </table></div>
+          ${pager(res, "bảng kê")}
+        </div></div>`}
+  `);
+
+  bindChainFilter(container, state);
+  bindPager(container, state);
+  const st = container.querySelector("#bk-status");
+  if (st) st.addEventListener("change", (e) => {
+    state.bkckStatus = e.target.value; state.page = 1; loadTab(container, state);
+  });
+  const nw = container.querySelector("#bk-new");
+  if (nw) nw.addEventListener("click", () => pickBkckFile(container, state));
+  container.querySelectorAll(".bk-open").forEach((b) => {
+    b.addEventListener("click", () => openBkckDetail(container, state, b.dataset.name));
+  });
+}
+
+// ── Nạp file doanh số → xem trước → lập ────────────────────────────────────
+function pickBkckFile(container, state) {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".xlsx,.xls,.xlsm";
+  inp.addEventListener("change", () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    const fr = new FileReader();
+    fr.onload = () => {
+      const b64 = String(fr.result).split(",").pop();
+      openBkckPreview(container, state, b64, f.name);
+    };
+    fr.readAsDataURL(f);
+  });
+  inp.click();
+}
+
+async function openBkckPreview(container, state, content, filename, chain, period, sheetDate) {
+  const modal = openModal({
+    title: "Lập bảng kê chiết khấu từ " + filename,
+    icon: "fa-file-signature",
+    maxWidth: 1040,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  await renderBkckPreview(container, state, modal, content, filename, chain, period, sheetDate);
+}
+
+async function renderBkckPreview(container, state, modal, content, filename, chain, period, sheetDate) {
+  setHTML(modal.body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  const today = new Date().toISOString().slice(0, 10);
+  let res;
+  try {
+    res = await api.mtDiscountPreview({
+      content, chain: chain || undefined, filename,
+      period_label: period || undefined, sheet_date: sheetDate || today,
+    });
+  } catch (e) {
+    setHTML(modal.body, html`
+      <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+        <b style="color:var(--kt-danger)">Không lập được bảng kê</b>
+        <div class="kt-sub" style="margin-top:6px;white-space:pre-wrap">${e.message}</div>
+      </div></div>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div><label class="kt-label">Chọn chuỗi rồi thử lại</label>
+          <select class="kt-input kt-input--sm" id="bp-chain">
+            <option value="">— tự nhận —</option>
+            <option value="Central Retail">Central Retail</option>
+            <option value="LOTTE">LOTTE</option>
+            <option value="Mega Market">Mega Market</option>
+          </select></div>
+        <button class="kt-btn kt-btn--outline" id="bp-retry"><i class="fas fa-rotate"></i> Đọc lại</button>
+      </div>`);
+    modal.body.querySelector("#bp-retry").addEventListener("click", () => {
+      renderBkckPreview(container, state, modal, content, filename,
+        modal.body.querySelector("#bp-chain").value, period, sheetDate);
+    });
+    return;
+  }
+
+  const sheets = res.sheets || [];
+  const bt = res.basis_totals || {};
+
+  setHTML(modal.body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span class="kt-badge kt-badge--gray">${res.chain}</span>
+        <span class="kt-sub">${res.mode_label}${res.file_rate ? ` · ${res.file_rate}% (từ file)` : ""}</span>
+        <span class="kt-sub">· ${bt.n_rows} dòng doanh số · cơ sở ${formatVND(bt.base_amount)}</span>
+        ${res.reconciled
+          ? html`<span class="kt-badge kt-badge--green">số kiểm tra khớp</span>`
+          : html`<span class="kt-badge kt-badge--yellow">file không có số kiểm tra</span>`}
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:10px">
+        <div><label class="kt-label">Kỳ (in trên bảng kê)</label>
+          <input class="kt-input kt-input--sm" id="bp-period" placeholder="07.2026" value="${period || ""}"></div>
+        <div><label class="kt-label">Ngày bảng kê</label>
+          <input type="date" class="kt-input kt-input--sm" id="bp-date" value="${sheetDate || today}"></div>
+        <button class="kt-btn kt-btn--outline kt-btn--sm" id="bp-refresh">
+          <i class="fas fa-rotate"></i> Áp dụng</button>
+      </div>
+    </div></div>
+
+    ${(res.excluded || []).length
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <b>Khoản KHÔNG vào bảng kê</b>
+          ${res.excluded.map((x) => html`<div class="kt-sub">• <b>${x.row_kind}</b> —
+            ${x.n_rows} dòng, ${formatVND(x.amount)}</div>`)}
+          <div class="kt-sub" style="margin-top:6px">
+            Nhóm phí/hỗ trợ do chuỗi xuất hóa đơn, và hàng chưa nhận — cả hai đều không
+            thuộc phần mình xuất chiết khấu.
+          </div>
+        </div></div>`
+      : ""}
+
+    ${(res.warnings || []).length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body">
+          ${res.warnings.map((w) => html`<div class="kt-sub">• ${w}</div>`)}
+        </div></div>`
+      : ""}
+
+    ${(res.blocked || []).length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)">${res.blocked.length} nhóm CHƯA lập được bảng kê</b>
+          ${res.blocked.map((b) => html`<div class="kt-sub" style="margin-top:6px">
+            • <code>${b.key}</code> ${b.group_label || ""} — ${b.n_rows} dòng,
+            ${formatVND(b.base_amount)}<br>${b.reason}</div>`)}
+        </div></div>`
+      : ""}
+
+    ${!sheets.length
+      ? html`<div class="kt-empty"><i class="fas fa-ban"></i><p>Không dựng được bảng kê nào.</p></div>`
+      : html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <div class="kt-table-wrap" style="max-height:340px;overflow:auto"><table class="kt-table">
+            <thead><tr>
+              <th>Bên mua</th><th>MST</th><th class="num">HĐ</th><th class="num">Doanh số</th>
+              <th class="num">Chiết khấu</th><th>Cách tính</th><th>Đối chiếu</th>
+            </tr></thead>
+            <tbody>${sheets.map((p) => html`<tr>
+              <td>${p.buyer_name}
+                ${p.group_label ? html`<div class="kt-sub">${p.group_label}</div>` : ""}</td>
+              <td>${p.buyer_tax_id || html`<span class="kt-badge kt-badge--red">thiếu MST</span>`}</td>
+              <td class="num">${p.n_lines}</td>
+              <td class="num">${formatVND(p.total_base)}</td>
+              <td class="num"><b>${formatVND(p.discount_gross)}</b></td>
+              <td class="kt-sub">${p.mode}${p.rate ? ` ${p.rate}%` : ""}
+                <div>tỷ lệ từ ${p.rate_source}</div>
+                ${p.term_is_default ? html`<div>điều khoản mặc định của chuỗi</div>` : ""}</td>
+              <td class="kt-sub">${p.n_matched}/${p.n_lines} khớp HĐ
+                ${p.n_mismatch ? html`<div style="color:var(--kt-warning)">${p.n_mismatch} lệch tiền</div>` : ""}
+                ${p.existing ? html`<div style="color:var(--kt-danger)">đã có: ${p.existing}</div>` : ""}</td>
+            </tr>`)}</tbody>
+          </table></div>
+          <div class="kt-sub" style="margin-top:8px">${res.note || ""}</div>
+        </div></div>`}
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="kt-btn kt-btn--outline" id="bp-close">Đóng</button>
+      <button class="kt-btn kt-btn--primary" id="bp-commit" ${!res.can_commit ? "disabled" : ""}>
+        <i class="fas fa-check"></i> Lập ${sheets.length} bảng kê nháp
+      </button>
+    </div>
+    <div id="bp-msg"></div>`);
+
+  const reload = () => renderBkckPreview(container, state, modal, content, filename, chain,
+    modal.body.querySelector("#bp-period").value.trim(),
+    modal.body.querySelector("#bp-date").value);
+  modal.body.querySelector("#bp-refresh").addEventListener("click", reload);
+  modal.body.querySelector("#bp-close").addEventListener("click", () => modal.close());
+
+  const btn = modal.body.querySelector("#bp-commit");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      const out = await api.mtDiscountCommit({
+        content, chain: chain || undefined, filename,
+        period_label: modal.body.querySelector("#bp-period").value.trim() || undefined,
+        sheet_date: modal.body.querySelector("#bp-date").value,
+        expected_hash: res.plan_hash,
+      });
+      toast(out.message, "success");
+      modal.close();
+      await loadTab(container, state);
+    } catch (e) {
+      btn.disabled = false;
+      setHTML(modal.body.querySelector("#bp-msg"), html`
+        <div class="kt-card" style="border-left:4px solid var(--kt-danger);margin-top:10px">
+          <div class="kt-card-body"><div class="kt-sub" style="white-space:pre-wrap">${e.message}</div></div>
+        </div>`);
+    }
+  });
+}
+
+// ── Một bảng kê: soi, chốt, ghi số hóa đơn, sinh bút toán ──────────────────
+async function openBkckDetail(container, state, name) {
+  const modal = openModal({
+    title: "Bảng kê chiết khấu",
+    icon: "fa-file-signature",
+    maxWidth: 960,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  await renderBkckDetail(container, state, modal, name);
+}
+
+async function renderBkckDetail(container, state, modal, name) {
+  setHTML(modal.body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let res;
+  try {
+    res = await api.mtDiscountSheet(name);
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+  const d = res.doc || {};
+  const lines = res.lines || [];
+  const draft = d.status === "Nháp";
+  const can = res.can_manage;
+
+  setHTML(modal.body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${d.sheet_no
+          ? html`<b><code>${d.sheet_no}</code></b>`
+          : html`<span class="kt-badge kt-badge--gray">chưa cấp số</span>`}
+        <span class="kt-badge kt-badge--${BKCK_TONE[d.status] || "gray"}">${d.status}</span>
+        <span class="kt-badge kt-badge--gray">${d.chain}</span>
+        ${d.period_label ? html`<span class="kt-sub">kỳ ${d.period_label}</span>` : ""}
+        <span class="kt-sub">· ngày ${formatDate(d.sheet_date)}</span>
+        <b style="margin-left:auto">CK ${formatVND(d.discount_gross)}</b>
+      </div>
+      <div class="kt-sub" style="margin-top:8px">
+        <b>Bên mua:</b> ${d.buyer_name || d.customer}
+        ${d.buyer_tax_id ? ` · MST ${d.buyer_tax_id}` : html` · <span style="color:var(--kt-danger)">THIẾU MST</span>`}
+        ${d.buyer_address ? html`<br>${d.buyer_address}` : ""}
+      </div>
+      <div class="kt-sub" style="margin-top:4px">
+        ${d.mode}${d.rate ? ` ${d.rate}%` : ""} · thuế ${d.vat_rate}% ·
+        doanh số ${formatVND(d.total_base)} → chiết khấu ${formatVND(d.discount_base)}
+        + thuế ${formatVND(d.discount_vat)}
+      </div>
+    </div></div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div class="kt-table-wrap" style="max-height:300px;overflow:auto"><table class="kt-table">
+        <thead><tr><th>Số HĐ</th><th>Ký hiệu</th><th>Ngày</th>
+          <th class="num">Trước thuế</th><th class="num">Thuế</th><th class="num">Tổng</th>
+          <th>Ghi chú</th><th>Đối chiếu</th></tr></thead>
+        <tbody>${lines.map((l) => html`<tr>
+          <td>${l.inv_no}</td><td>${l.inv_series || ""}</td>
+          <td>${l.inv_date ? formatDate(l.inv_date) : ""}</td>
+          <td class="num">${formatVND(l.amount_before_vat)}</td>
+          <td class="num">${formatVND(l.vat_amount)}</td>
+          <td class="num">${formatVND(l.total_amount)}</td>
+          <td class="kt-sub">${l.note || ""}</td>
+          <td class="kt-sub">${l.sales_invoice || l.match_note || ""}</td>
+        </tr>`)}</tbody>
+      </table></div>
+    </div></div>
+
+    ${!draft
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <div class="kt-sub" style="margin-bottom:6px">Hóa đơn chiết khấu đã xuất trên MISA</div>
+          <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+            <div><label class="kt-label">Ký hiệu</label>
+              <input class="kt-input kt-input--sm" id="bd-series" value="${d.discount_invoice_series || ""}" style="width:120px"></div>
+            <div><label class="kt-label">Số hóa đơn</label>
+              <input class="kt-input kt-input--sm" id="bd-no" value="${d.discount_invoice_no || ""}" style="width:150px"></div>
+            <div><label class="kt-label">Ngày</label>
+              <input type="date" class="kt-input kt-input--sm" id="bd-date" value="${d.discount_invoice_date || ""}"></div>
+            ${can ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="bd-save-inv">
+              <i class="fas fa-check"></i> Ghi số hóa đơn</button>` : ""}
+          </div>
+        </div></div>`
+      : ""}
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;flex-wrap:wrap">
+      ${!draft ? html`<a class="kt-btn kt-btn--outline kt-btn--sm" href="${res.print_url}" target="_blank">
+        <i class="fas fa-print"></i> In bảng kê</a>` : ""}
+      <a class="kt-btn kt-btn--outline kt-btn--sm" href="/app/mt-discount-sheet/${d.name}" target="_blank">
+        <i class="fas fa-arrow-up-right-from-square"></i> Desk</a>
+      <button class="kt-btn kt-btn--outline" id="bd-close">Đóng</button>
+      ${draft && can
+        ? html`<button class="kt-btn kt-btn--primary" id="bd-final">
+            <i class="fas fa-stamp"></i> Chốt &amp; cấp số</button>`
+        : ""}
+      ${!draft && can
+        ? html`<button class="kt-btn kt-btn--primary" id="bd-je">
+            <i class="fas fa-file-invoice-dollar"></i> Sinh bút toán</button>`
+        : ""}
+    </div>
+    <div id="bd-msg"></div>`);
+
+  const msg = (e, tone) => setHTML(modal.body.querySelector("#bd-msg"), html`
+    <div class="kt-card" style="border-left:4px solid var(--kt-${tone});margin-top:10px">
+      <div class="kt-card-body"><div class="kt-sub" style="white-space:pre-wrap">${e}</div></div>
+    </div>`);
+
+  modal.body.querySelector("#bd-close").addEventListener("click", () => modal.close());
+
+  const fin = modal.body.querySelector("#bd-final");
+  if (fin) fin.addEventListener("click", async () => {
+    fin.disabled = true;
+    try {
+      const out = await api.mtDiscountFinalize(name, d.sheet_date);
+      toast(out.message, "success");
+      await renderBkckDetail(container, state, modal, name);
+      await loadTab(container, state);
+    } catch (e) { fin.disabled = false; msg(e.message, "danger"); }
+  });
+
+  const sv = modal.body.querySelector("#bd-save-inv");
+  if (sv) sv.addEventListener("click", async () => {
+    sv.disabled = true;
+    try {
+      const out = await api.mtDiscountSetInvoice({
+        name,
+        invoice_no: modal.body.querySelector("#bd-no").value.trim(),
+        invoice_series: modal.body.querySelector("#bd-series").value.trim(),
+        invoice_date: modal.body.querySelector("#bd-date").value || undefined,
+      });
+      toast(out.message, "success");
+      await renderBkckDetail(container, state, modal, name);
+      await loadTab(container, state);
+    } catch (e) { sv.disabled = false; msg(e.message, "danger"); }
+  });
+
+  const je = modal.body.querySelector("#bd-je");
+  if (je) je.addEventListener("click", async () => {
+    je.disabled = true;
+    try {
+      const pv = await api.mtDiscountJePreview(name);
+      const e0 = (pv.entries || [])[0] || {};
+      if (e0.duplicate) {
+        msg(`Bút toán ${e0.duplicate} đã sinh cho bảng kê này — không sinh lại.`, "warning");
+        je.disabled = false;
+        return;
+      }
+      const out = await api.mtDiscountJeCreate({ name, expected_hash: pv.plan_hash });
+      toast(out.message, "success");
+      await renderBkckDetail(container, state, modal, name);
+      await loadTab(container, state);
+    } catch (e) { je.disabled = false; msg(e.message, "danger"); }
   });
 }
