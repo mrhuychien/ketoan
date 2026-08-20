@@ -317,3 +317,119 @@ lỗi rõ ràng chứ **không** đọc bừa bằng parser chuỗi khác: parse
 
 ⚠️ `create_custom_fields` **chỉ TẠO** field lần đầu, **không cập nhật** `options`
 của field đã có → thêm chuỗi vào `MT_CHAINS` **bắt buộc** kèm một patch mới.
+
+---
+
+# PHỤ LỤC L — CHIỀU CHIẾT KHẤU: file cơ sở tính CK (MT2-B, 20/08/2026)
+
+Chiều **ngược lại** với phụ lục A–K: ở kia chuỗi báo *"tôi đã trả anh bao nhiêu"*,
+ở đây chuỗi báo *"doanh số của anh bao nhiêu"* — và **mình** là bên xuất hóa đơn
+chiết khấu (§3 SOP, quy trình BKCK).
+
+Bản đọc: `ketoan/api/mt_discount_read.py` · Bộ kiểm:
+`python3 docs/mt/verified/discount_basis_check.py` · Chi tiết BƯỚC 0:
+`docs/mt/BUOC0_MT2B_findings.md`.
+
+## L.1 Ba file, ba hình dạng
+
+| Chuỗi | File | Khóa hóa đơn | Chiết khấu |
+|---|---|---|---|
+| Central Retail | `Chi tiết doanh số BigC.xlsx` · `Data` · 1.770×17 | `INVOICENO` = `C26THG\|6320` | **có sẵn** cột `RB_VALUE` |
+| LOTTE | `7466- chi tiết doanh số Lotte.xlsx` · 227×17 | `Invoice No` = `00000984` | **không có** — tỷ lệ hợp đồng |
+| Mega Market | `Chi tiết doanh số Mega Market.xlsx` · 6×7 | `Invoice No & PO.` = `1C26THG_00004450` | **không có** — chỉ `Base Amount` |
+
+Emart: `Chi tiết doanh số Emart.PDF` là **PDF**. Chưa viết parser — đúng quy tắc
+"chưa có mẫu máy đọc được thì chưa viết".
+
+**Dấu phân cách ký hiệu│số nay có BỐN loại**: `#` WinCommerce · `|` Central
+Retail · `-` AEON · `_` Mega Market. Dùng regex chung "ký tự không phải chữ số"
+là nuốt nhầm — mỗi chuỗi truyền dấu tường minh (§F).
+
+## L.2 🚨 HAI CÁCH TÍNH CHIẾT KHẤU, KHÔNG THAY NHAU ĐƯỢC
+
+| Mode | Chuỗi | Phép tính |
+|---|---|---|
+| `per_line` | Central Retail | **cộng từng dòng** `RB_VALUE` |
+| `rate_on_total` | LOTTE, Mega | **tỷ lệ × tổng** |
+
+Đo trên mẫu BKCK 261 của BigC:
+
+```
+Tổng Cộng                   715.000.265
+'Số tiền chiết khấu 3.35%'   23.952.537    ← BigC in ra
+715.000.265 × 3,35%        = 23.952.508,88 ← tự tính lại      LỆCH 28,12đ
+```
+
+Trên file doanh số 07.2026 cũng vậy: `Σ RB_VALUE` = 25.324.144 vs
+`Σ IM_VALUE × 3,35%` = 25.324.111,44 — **lệch 32,56đ**. BigC làm tròn **từng
+dòng**.
+
+LOTTE thì ngược lại: `tỷ lệ × tổng` khớp **0đ trên cả 7 kỳ** mẫu (BKCK 155, 172,
+229, 243, 260, 280, 300 — tỷ lệ 10%).
+
+⇒ `mode` là **thuộc tính cấu hình của từng chuỗi**, không phải hằng số trong mã.
+
+## L.3 Bẫy
+
+1. **Central Retail có BỐN nhóm, chỉ MỘT là của mình.**
+
+   | `RB_GROUP` | Dòng | `RB_VALUE` | Ai xuất hóa đơn |
+   |---|---|---|---|
+   | `Discount for store` | 177 | 25.324.144 | **MÌNH** → BKCK |
+   | `Fee for EBS` | 177 | 7.559.436 | EB |
+   | `Fee for store` | 531 | 62.365.380 | EB |
+   | `Support for store` | 885 | 29.859.815 | EB |
+
+   Lấy nhầm = xuất hóa đơn cho khoản mình không được xuất, **và** ghi nhận hai
+   lần (ba nhóm kia đã vào sổ ở MT2-D dưới dạng dòng `D1`).
+
+2. **`IM_VALUE` LẶP LẠI ở mọi nhóm** — cộng toàn file là nhân doanh số **6 lần**
+   (7.559.436.250 thay vì 755.943.625). Phải LỌC NHÓM TRƯỚC rồi mới cộng.
+
+3. **LOTTE `Fill in date = NOT RECEIVE` là hàng CHƯA NHẬN** — 35/227 dòng,
+   25.621.900đ. Tính vào là xuất hóa đơn chiết khấu cho hàng chưa giao. Chính 35
+   dòng đó cũng là 35 dòng **không có `Invoice No`**; tầng đọc chốt bằng **cả
+   hai** dấu hiệu và báo lệch nếu chúng không còn trùng nhau.
+
+4. **LOTTE `Pur fg = hàng trả lại` thì GIỮ** — 10 dòng, −20.586.100đ, số âm sẵn,
+   trừ thẳng vào cơ sở.
+
+5. **`SUPPLIERNAME` / `Supplier Name` là TÊN CỦA MÌNH**, không phải bên mua. Điền
+   nó vào ô *"Đơn vị mua hàng"* của BKCK là sai trên một chứng từ hai bên ký. Tên
+   bên mua lấy từ `Customer` / `MT Store.address`.
+
+6. **Mega Market không có số kiểm tra nào** — không dòng tổng, không tỷ lệ, không
+   cột chiết khấu. `reconciled = False` ở đây là câu trả lời **đúng**: "không
+   kiểm được" khác hẳn "đã kiểm và khớp".
+
+## L.4 Cấu trúc BKCK (bản in, giống nhau ở cả hai chuỗi)
+
+```
+Số: NNN/BKCK/HG-MT   ·   Ngày … tháng … năm …
+Đơn vị bán: Hoàng Giang · MST 0800280839 · địa chỉ · đại diện
+Đơn vị mua: pháp nhân / chi nhánh · MST · địa chỉ · đại diện
+Số hóa đơn | Ký hiệu | Ngày | Trước thuế | Thuế GTGT | Tổng cộng | Ghi chú
+…                                                    (Ghi chú = số PO ở CR)
+Tổng Cộng:                       (3 cột tiền)
+Số tiền [cần] chiết khấu [X%]:   (3 cột tiền)
+```
+
+- Thuế của chiết khấu = **8%** (kiểm: 23.952.537 × 8% = 1.916.202,96 = đúng ô in).
+- **Một dãy số duy nhất toàn công ty**, không tách theo chuỗi: 141 · 155 · 172 ·
+  229 · 243 · 260 · **261 (BigC)** · 280 · 300 — số của BigC nằm xen giữa dãy LOTTE.
+- Central Retail gộp **1 bảng kê / pháp nhân EB**; LOTTE tách **1 bảng kê / chi
+  nhánh** (bên mua = MST chi nhánh, lấy từ `MT Store.address`).
+- **Dòng tiền ÂM có thật** trong BKCK (LOTTE 3.2026 có 2 dòng hàng trả).
+
+## L.5 Hồ sơ thanh toán WinCommerce
+
+`Mẫu bảng kê ghi nhận hồ sơ thanh toán Winmart.xlsx` — header ở **r2**:
+`STT | Code | PO VCM | Ký hiệu HĐ | Số hóa đơn | Ngày hóa đơn | Số Tiền trước VAT
+| VAT | Tổng tiền thanh toán | Tên File PDF`
+
+- `Code` = **2007766** (mã NCC của Hoàng Giang tại Win) ở mọi dòng.
+- Tên file PDF mẫu thật: **`20260817_2007766_01_PF`** — tức
+  `YYYYMMDD_<mã NCC>_<stt hồ sơ>_PF`, **có hậu tố `_PF`** mà §2.2 SOP viết gọn
+  đã bỏ mất.
+- `STT` trong file **không theo thứ tự** (3,4,5,6,9,10,1,2,7,8,11…) — đó là số
+  thứ tự hồ sơ của Win, không phải thứ tự dòng. Đừng đánh lại.
