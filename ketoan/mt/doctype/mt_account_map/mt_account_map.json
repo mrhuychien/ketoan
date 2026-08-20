@@ -1,0 +1,170 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-08-20 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "event",
+  "chain",
+  "company",
+  "column_break_head",
+  "active",
+  "note",
+  "section_acc",
+  "debit_account",
+  "tax_account",
+  "column_break_acc",
+  "credit_account",
+  "tax_rate"
+ ],
+ "fields": [
+  {
+   "default": "MT-ACC-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Chuỗi số",
+   "options": "MT-ACC-.#####",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "description": "Bút toán nào sinh ra từ bảng kê MT. Mỗi sự kiện một bộ tài khoản.",
+   "fieldname": "event",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Sự kiện",
+   "options": "\nNhận thanh toán\nChiết khấu mình xuất\nPhí chuỗi xuất",
+   "reqd": 1
+  },
+  {
+   "description": "ĐỂ TRỐNG = dòng mặc định, áp cho mọi chuỗi chưa có dòng riêng.",
+   "fieldname": "chain",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Chuỗi siêu thị",
+   "options": "\nWinCommerce\nCentral Retail\nLOTTE\nEmart\nSaigon Co.op\nAEON\nFuji\nMega Market"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Công ty",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Đang dùng"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "section_acc",
+   "fieldtype": "Section Break",
+   "label": "Tài khoản"
+  },
+  {
+   "description": "Nhận thanh toán: 112 · Chiết khấu: 5211 · Phí: 6411",
+   "fieldname": "debit_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "TK Nợ chính",
+   "options": "Account"
+  },
+  {
+   "description": "Chiết khấu: 33311 · Phí: 1331. ĐỂ TRỐNG = bút toán không tách dòng thuế.",
+   "fieldname": "tax_account",
+   "fieldtype": "Link",
+   "label": "TK Nợ thuế",
+   "options": "Account"
+  },
+  {
+   "fieldname": "column_break_acc",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Luôn là TK phải thu khách hàng (131) ở cả ba sự kiện.",
+   "fieldname": "credit_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "TK Có",
+   "options": "Account"
+  },
+  {
+   "description": "Chỉ dùng khi bảng kê KHÔNG in tách tiền thuế. Để 0 = không tự tách.",
+   "fieldname": "tax_rate",
+   "fieldtype": "Percent",
+   "label": "Thuế suất mặc định (%)"
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Account Map",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan Truong",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan MT"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "search_fields": "event,chain,company",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

@@ -40,6 +40,22 @@ doc_events = {
     "Sales Invoice": {
         "before_submit": "ketoan.api.misa_sync.ensure_ref_id",
     },
+    # ═══════════════════════════════════════════════════════════════════════
+    # Kênh MT — đồng bộ trạng thái bút toán về bảng kê nguồn.
+    #
+    # VÌ SAO cần: `MT Payment Advice.je_state` suy từ docstatus của các Journal
+    # Entry mang `custom_mt_source_name`. Kế toán hoàn toàn có thể submit/cancel
+    # bút toán THẲNG TRÊN DESK, không qua portal — thiếu hook thì bảng kê đứng
+    # mãi ở "Đã sinh nháp" trong khi bút toán đã ghi sổ, và màn hình nói dối.
+    #
+    # Hàm bọc try/except toàn bộ: tích hợp MT hỏng KHÔNG được chặn việc ghi sổ.
+    # Nó dùng db_set chứ không save() — save() sẽ chạy lại validate() của bảng
+    # kê và ném lỗi ngược vào chính giao dịch submit đang chạy.
+    # ═══════════════════════════════════════════════════════════════════════
+    "Journal Entry": {
+        "on_submit": "ketoan.api.mt_je.sync_advice_state",
+        "on_cancel": "ketoan.api.mt_je.sync_advice_state",
+    },
 }
 
 # Job hỏi số hóa đơn. Đăng ký sẵn nhưng BẤT HOẠT: hàm dừng ở dòng đầu khi

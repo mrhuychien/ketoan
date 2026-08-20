@@ -369,6 +369,25 @@ doc_events = {
 }
 ```
 
+> **Ghi nhận khi build MT2-D (20/08/2026) — MỘT LỖI TIỀN ĐÃ BỊ CHẶN**
+>
+> `MT Payment Advice Line.total_amount` lưu số **GIỮ NGUYÊN DẤU** (xem
+> `mt._map_rows`), không phải độ lớn. Bản đầu của `mt_je` cộng `abs()` từng dòng
+> cho nhóm khoản trừ — đúng với dòng thanh toán (mỗi dòng một hóa đơn riêng)
+> nhưng **sai với nhóm gộp**, vì `Sub-Total` mà chuỗi in ra là tổng **đại số**.
+> Đo trên file thật, ba nhóm có cả dòng trừ lẫn dòng hoàn:
+>
+> | Chuỗi · loại | Tổng đại số (đúng) | Cộng độ lớn (sai) | Ghi khống |
+> |---|---|---|---|
+> | Saigon Co.op · Chiết khấu | 1.338.010.941 | 1.662.373.817 | **324.362.876** |
+> | AEON · Phí | 10.424.817 | 11.023.025 | 598.208 |
+> | LOTTE · Ghi giảm *(không sinh JE)* | 809.335 | 11.868.813 | 11.059.478 |
+>
+> Bút toán sai vẫn **CÂN**, con số vẫn trông hợp lý, và không tổng nào trên màn
+> hình phát hiện ra — chỉ lộ khi đối chiếu sao kê ngân hàng. Nay `_group_amount`
+> dùng `|Σ đại số|`, nhóm dấu lẫn lộn được **gắn cờ** ra tận màn duyệt, và
+> `docs/mt/verified/je_plan_check.py` khóa cả ba con số lại.
+
 **Vì sao cần**: `je_state` và `status='Đã ghi nhận'` của advice suy từ docstatus
 của các JE. Kế toán hoàn toàn có thể submit/cancel JE **thẳng trên Desk**, không
 qua portal. Thiếu hook thì advice đứng mãi ở "Đã sinh nháp" trong khi JE đã ghi
@@ -384,11 +403,12 @@ việc ghi sổ**. Cùng nguyên tắc `misa_sync.ensure_ref_id`.
 
 | Method | Guard | Việc |
 |---|---|---|
-| `mt.preview_journal_entries(advice)` | `guard_mt` | Xem trước JE sẽ sinh: từng dòng, TK, tiền, SI reference. **KHÔNG ghi** |
-| `mt.create_journal_entries(advice, expected_hash)` | `guard_manager` | Sinh JE Draft. Bắt buộc vân tay từ preview |
-| `mt.list_draft_journal_entries(...)` | `guard_mt` | Danh sách JE Draft do MT sinh, lọc chuỗi/kỳ, có chia trang |
-| `mt.submit_journal_entries(names)` | `guard_manager` | Duyệt. **try/except từng JE**, trả kết quả per-JE |
-| `mt.get_account_map(company)` | `guard_mt` | Bảng TK đang áp dụng — để màn xem trước nói rõ bút toán vào TK nào |
+| `mt_je.preview_journal_entries(advice)` | `guard_mt` | Xem trước JE sẽ sinh: từng dòng, TK, tiền, SI reference. **KHÔNG ghi** |
+| `mt_je.create_journal_entries(advice, expected_hash)` | `guard_manager` | Sinh JE Draft. Bắt buộc vân tay từ preview |
+| `mt_je.list_advices(...)` | `guard_mt` | Bảng kê + `je_state` của từng cái, lọc chuỗi/kỳ/trạng thái, chia trang |
+| `mt_je.list_draft_journal_entries(...)` | `guard_mt` | *(MT2-E)* Danh sách JE Draft do MT sinh |
+| `mt_je.submit_journal_entries(names)` | `guard_manager` | *(MT2-E)* Duyệt. **try/except từng JE**, trả kết quả per-JE |
+| `mt_je.get_account_map(company)` | `guard_mt` | Bảng TK đang áp dụng — để màn xem trước nói rõ bút toán vào TK nào |
 | `mt_store.preview_seed()` | `guard_mt` | Xem trước danh sách store dựng được |
 | `mt_store.commit_seed(expected_hash)` | `guard_manager` | Tạo `MT Store` |
 | `mt_store.list_stores(...)` | `guard_mt` | Danh sách điểm, lọc chuỗi/khách/trạng thái, chia trang |
@@ -396,7 +416,8 @@ việc ghi sổ**. Cùng nguyên tắc `misa_sync.ensure_ref_id`.
 | `mt_store.search_addresses(txt, customer)` | `guard_mt` | Gợi ý địa chỉ để gán, LỌC theo khách |
 
 > **Điều chỉnh khi build (20/08/2026)**: nhóm điểm siêu thị nằm ở module riêng
-> `ketoan/api/mt_store.py` thay vì nhét thêm vào `mt.py` — mt.py đã ~2.500 dòng
+> `ketoan/api/mt_store.py` và nhóm bút toán ở `ketoan/api/mt_je.py`, thay vì
+> nhét thêm vào `mt.py` — mt.py đã ~2.500 dòng
 > và lo một việc khác hẳn (đối chiếu bảng kê với hóa đơn). Đúng quy ước
 > "1 file = 1 chức năng" của repo. Ba endpoint cuối là bổ sung: seed mà không
 > có màn xem/sửa thì master không dùng được, và `save_store` là đường GHI duy

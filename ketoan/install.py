@@ -292,6 +292,89 @@ def setup_mt_fields():
         frappe.log_error(frappe.get_traceback(), "ketoan: setup_mt_fields")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Custom field trên Journal Entry — TRUY NGƯỢC bút toán MT về bảng kê nguồn.
+#
+# VÌ SAO `Data` chứ không `Link` cho `custom_mt_source_name`: Journal Entry là
+# DocType CORE. Đặt Link trỏ vào DocType của app sẽ khóa việc xóa/đổi tên bản
+# ghi MT (ERPNext chặn xóa khi còn link tới) và tạo phụ thuộc ngược không cần
+# thiết giữa core và app. Ở đây chỉ cần TRA NGƯỢC ĐƯỢC — Data + search_index đủ.
+#
+# `custom_mt_fingerprint` là chốt CHỐNG SINH TRÙNG: bấm "sinh bút toán" hai lần
+# (mạng chậm, người sốt ruột) mà không có nó là hai bộ JE cùng nội dung, và khi
+# duyệt cả hai thì công nợ khách bị trừ gấp đôi.
+# ═══════════════════════════════════════════════════════════════════════════
+
+MT_JE_KIND_OPTIONS = "\n".join(("", "Thanh toán", "Chiết khấu", "Phí"))
+
+MT_JE_CUSTOM_FIELDS = {
+    "Journal Entry": [
+        {
+            "fieldname": "custom_mt_section",
+            "label": "Kênh MT",
+            "fieldtype": "Section Break",
+            "collapsible": 1,
+            "insert_after": "user_remark",
+        },
+        {
+            "fieldname": "custom_mt_kind",
+            "label": "Loại bút toán MT",
+            "fieldtype": "Select",
+            "options": MT_JE_KIND_OPTIONS,
+            "in_standard_filter": 1,
+            "read_only": 1,
+            "description": "Do portal MT sinh ra. Trống = bút toán không thuộc kênh MT.",
+            "insert_after": "custom_mt_section",
+        },
+        {
+            "fieldname": "custom_mt_source_dt",
+            "label": "Nguồn MT (DocType)",
+            "fieldtype": "Data",
+            "read_only": 1,
+            "insert_after": "custom_mt_kind",
+        },
+        {
+            "fieldname": "custom_mt_column",
+            "fieldtype": "Column Break",
+            "insert_after": "custom_mt_source_dt",
+        },
+        {
+            "fieldname": "custom_mt_source_name",
+            "label": "Nguồn MT (bản ghi)",
+            "fieldtype": "Data",
+            "read_only": 1,
+            "search_index": 1,
+            "description": "Tên bảng kê MT đã sinh ra bút toán này.",
+            "insert_after": "custom_mt_column",
+        },
+        {
+            "fieldname": "custom_mt_fingerprint",
+            "label": "Vân tay chống trùng",
+            "fieldtype": "Data",
+            "read_only": 1,
+            "search_index": 1,
+            "description": "sha1 của nội dung bút toán. Trùng vân tay = đã sinh rồi, không sinh lại.",
+            "insert_after": "custom_mt_source_name",
+        },
+    ]
+}
+
+MT_JE_FIELDNAMES = tuple(
+    f["fieldname"] for f in MT_JE_CUSTOM_FIELDS["Journal Entry"]
+    if f["fieldtype"] not in ("Section Break", "Column Break")
+)
+
+
+def setup_mt_je_fields():
+    """Tạo custom field MT trên Journal Entry. Idempotent."""
+    from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+
+    try:
+        create_custom_fields(MT_JE_CUSTOM_FIELDS, ignore_validate=True)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "ketoan: setup_mt_je_fields")
+
+
 MISA_CUSTOM_FIELDS = {
     "Sales Invoice": [
         {
@@ -605,6 +688,9 @@ def after_install():
     grant_settings_permissions()
     grant_business_permissions()
     setup_misa_integration()
+    # Site cài mới cũng phải có sẵn field MT: patch chỉ chạy cho site đã tồn tại.
+    setup_mt_fields()
+    setup_mt_je_fields()
 
 
 def create_portal_roles():

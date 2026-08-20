@@ -23,6 +23,8 @@ const TABS = [
     hint: "Các khoản chuỗi TRỪ LẠI: chiết khấu, phí dịch vụ, hàng trả lại, khoản khác. Phần lớn không gắn với hóa đơn nào nên đây là danh sách DÒNG bảng kê, không phải danh sách hóa đơn." },
   { key: "chuoi", label: "Công nợ chung của chuỗi", icon: "fa-store",
     hint: "Gộp theo chuỗi siêu thị. Ánh xạ khách hàng → chuỗi lấy từ bảng kê kế toán đã chốt; hệ thống KHÔNG tự đoán từ tên khách." },
+  { key: "but-toan", label: "Bút toán", icon: "fa-file-invoice-dollar",
+    hint: "Sinh bút toán NHÁP từ bảng kê. Hệ thống không bao giờ tự ghi sổ — người duyệt mới ghi. Tài khoản lấy từ cấu hình, không hardcode." },
 ];
 
 // Rổ hóa đơn của tab 1 — đúng khóa mà backend nhận (mt.get_invoices).
@@ -97,6 +99,8 @@ export async function render({ container, query }) {
     // Chốt tay liên kết đi qua guard_manager ở backend. Hiện nút cho người không
     // có quyền chỉ tạo ra một cú bấm để nhận lỗi — nên ẩn hẳn.
     canManage: false,
+    // Tab 'Bút toán': lọc theo trạng thái bút toán của bảng kê.
+    jeState: query?.je_state || "",
   };
 
   let ov;
@@ -286,6 +290,7 @@ async function loadTab(container, state) {
   setHTML(body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
 
   if (state.tab === "chuoi") return loadChains(container, state);
+  if (state.tab === "but-toan") return loadJournals(container, state);
 
   const bucket = state.tab === "chiet-khau" ? "chiet_khau" : state.bucket;
   let res;
@@ -1811,4 +1816,335 @@ async function openStoreSeed(container, state, parent, st) {
         </div>`);
     }
   });
+}
+
+
+// ── Tab 4: Bút toán ────────────────────────────────────────────────────────
+//
+// RÀNG BUỘC P0 — "KHÔNG GHI SỔ": màn hình này chỉ sinh Journal Entry ở trạng
+// thái NHÁP. Không có nút nào ghi sổ ở đây; duyệt là việc riêng, có guard riêng.
+//
+// Tài khoản hạch toán lấy từ cấu hình (MT Account Map), KHÔNG hardcode: số hiệu
+// là 112/5211/6411 nhưng TÀI KHOẢN CON cụ thể khác nhau theo công ty.
+
+const JE_STATE_TONE = {
+  "Chưa sinh": "gray",
+  "Đã sinh nháp": "yellow",
+  "Đã duyệt một phần": "yellow",
+  "Đã duyệt đủ": "green",
+};
+
+async function loadJournals(container, state) {
+  const body = container.querySelector("#mt-body");
+  let res;
+  try {
+    res = await api.mtJeAdvices({
+      from_date: state.from, to_date: state.to,
+      chain: state.chain || undefined,
+      je_state: state.jeState || undefined,
+      search: state.search || undefined,
+      page: state.page, page_size: 20,
+    });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = res.rows || [];
+
+  setHTML(body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label class="kt-label" style="margin:0">Chuỗi</label>
+      <select class="kt-input kt-input--sm" id="mt-chain">
+        <option value="">Tất cả chuỗi</option>
+        ${chainOptionHTML(state, state.chain)}
+      </select>
+      <label class="kt-label" style="margin:0 0 0 8px">Bút toán</label>
+      <select class="kt-input kt-input--sm" id="je-state">
+        <option value="">Mọi trạng thái</option>
+        ${(res.je_states || []).map((s) => html`<option value="${s}" ${state.jeState === s ? "selected" : ""}>${s}</option>`)}
+      </select>
+      <button class="kt-btn kt-btn--outline kt-btn--sm" id="je-accmap" style="margin-left:auto">
+        <i class="fas fa-sliders"></i> Cấu hình tài khoản
+      </button>
+    </div></div>
+
+    ${!res.can_create
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body">
+          <b>Chưa cấu hình tài khoản hạch toán cho kênh MT.</b>
+          <div class="kt-sub" style="margin-top:4px">
+            Bấm <b>Cấu hình tài khoản</b> để xem và điền. Hệ thống <b>không</b> lấy tài khoản
+            mặc định đoán — sinh bút toán vào sai tài khoản còn tệ hơn không sinh.
+          </div>
+        </div></div>`
+      : ""}
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-file-invoice"></i>
+          <p>Chưa có bảng kê nào trong khoảng ngày này.</p></div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr>
+              <th>Bảng kê</th><th>Chuỗi</th><th>Khách hàng</th><th>Ngày TT</th>
+              <th class="num">Thanh toán</th><th class="num">Chiết khấu</th><th class="num">Phí</th>
+              <th>Bút toán</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((a) => html`<tr>
+                <td><code>${a.name}</code>
+                  ${a.advice_no ? html`<div class="kt-sub">${a.advice_no}</div>` : ""}</td>
+                <td><span class="kt-badge kt-badge--gray">${a.chain || "—"}</span></td>
+                <td>${a.customer_name || a.customer || html`<span class="kt-badge kt-badge--yellow">chưa gán khách</span>`}</td>
+                <td>${a.payment_date ? formatDate(a.payment_date) : html`<span class="kt-badge kt-badge--red">thiếu ngày</span>`}</td>
+                <td class="num">${formatVND(Math.abs(a.total_payment || 0))}</td>
+                <td class="num">${formatVND(Math.abs(a.total_discount || 0))}</td>
+                <td class="num">${formatVND(Math.abs(a.total_fee || 0))}</td>
+                <td>
+                  <span class="kt-badge kt-badge--${JE_STATE_TONE[a.je_state] || "gray"}">${a.je_state}</span>
+                  ${a.je_draft ? html`<div class="kt-sub">${a.je_draft} nháp${a.je_submitted ? ` · ${a.je_submitted} đã duyệt` : ""}</div>`
+                    : (a.je_submitted ? html`<div class="kt-sub">${a.je_submitted} đã duyệt</div>` : "")}
+                </td>
+                <td><button class="kt-btn kt-btn--outline kt-btn--sm je-open" data-advice="${a.name}">
+                  <i class="fas fa-eye"></i> Xem bút toán</button></td>
+              </tr>`)}
+            </tbody>
+          </table></div>
+          ${pager(res, "bảng kê")}
+          <div class="kt-sub" style="margin-top:8px">
+            Bút toán sinh ra ở trạng thái <b>Nháp</b>. Hệ thống không bao giờ tự ghi sổ.
+            Bảng kê <b>thiếu ngày thanh toán</b> (Fuji không in ngày trong file) phải điền ngày trước —
+            bút toán không có ngày sẽ rơi vào sai kỳ kế toán.
+          </div>
+        </div></div>`}
+  `);
+
+  bindChainFilter(container, state);
+  bindPager(container, state);
+  const js = container.querySelector("#je-state");
+  if (js) js.addEventListener("change", (e) => {
+    state.jeState = e.target.value;
+    state.page = 1;
+    loadTab(container, state);
+  });
+  const am = container.querySelector("#je-accmap");
+  if (am) am.addEventListener("click", () => openAccountMap());
+  container.querySelectorAll(".je-open").forEach((b) => {
+    b.addEventListener("click", () => openJePreview(container, state, b.dataset.advice));
+  });
+}
+
+// ── Cấu hình tài khoản (chỉ xem — sửa trên Desk) ───────────────────────────
+async function openAccountMap() {
+  const modal = openModal({
+    title: "Tài khoản hạch toán kênh MT",
+    icon: "fa-sliders",
+    maxWidth: 900,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  let res;
+  try {
+    res = await api.mtJeAccountMap({});
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = res.rows || [];
+  const acc = (name, no, label) => name
+    ? html`<div><code>${no || "?"}</code> ${label || name}</div>`
+    : html`<span class="kt-badge kt-badge--red">chưa khai</span>`;
+
+  setHTML(modal.body, html`
+    ${(res.incomplete || []).length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)">${res.incomplete.length} dòng còn thiếu tài khoản.</b>
+          <div class="kt-sub">Sinh bút toán sẽ DỪNG ở những sự kiện đó — hệ thống không lấy tài khoản đoán.</div>
+        </div></div>`
+      : ""}
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div class="kt-table-wrap"><table class="kt-table">
+        <thead><tr><th>Sự kiện</th><th>Chuỗi</th><th>TK Nợ chính</th><th>TK Nợ thuế</th><th>TK Có</th><th></th></tr></thead>
+        <tbody>
+          ${rows.map((r) => html`<tr>
+            <td>${r.event}${!r.active ? html` <span class="kt-badge kt-badge--gray">tắt</span>` : ""}</td>
+            <td>${r.chain || html`<span class="kt-sub">mặc định (mọi chuỗi)</span>`}</td>
+            <td>${acc(r.debit_account, r.debit_no, r.debit_name)}</td>
+            <td>${r.tax_account
+              ? acc(r.tax_account, r.tax_no, r.tax_name)
+              : html`<span class="kt-sub">không tách thuế</span>`}</td>
+            <td>${acc(r.credit_account, r.credit_no, r.credit_name)}</td>
+            <td><a class="kt-btn kt-btn--outline kt-btn--sm" href="/app/mt-account-map/${r.name}" target="_blank">
+              <i class="fas fa-pen"></i></a></td>
+          </tr>`)}
+        </tbody>
+      </table></div>
+      <div class="kt-sub" style="margin-top:8px">${res.note || ""}</div>
+    </div></div>`);
+}
+
+// ── Xem trước bút toán của một bảng kê ─────────────────────────────────────
+async function openJePreview(container, state, advice) {
+  const modal = openModal({
+    title: "Bút toán từ bảng kê " + advice,
+    icon: "fa-file-invoice-dollar",
+    maxWidth: 1000,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  await renderJePreview(container, state, modal, advice);
+}
+
+async function renderJePreview(container, state, modal, advice) {
+  setHTML(modal.body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let res;
+  try {
+    res = await api.mtJePreview(advice, {});
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-card" style="border-left:4px solid var(--kt-danger)">
+      <div class="kt-card-body"><div class="kt-sub" style="white-space:pre-wrap">${e.message}</div></div></div>`);
+    return;
+  }
+  const entries = res.entries || [];
+
+  setHTML(modal.body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span class="kt-badge kt-badge--gray">${res.chain || "—"}</span>
+        ${res.customer ? html`<span class="kt-sub">${res.customer}</span>` : ""}
+        ${res.payment_date ? html`<span class="kt-sub">· ngày ${formatDate(res.payment_date)}</span>` : ""}
+        <span class="kt-badge kt-badge--${JE_STATE_TONE[res.je_state] || "gray"}">${res.je_state}</span>
+        ${!res.reconciled ? html`<span class="kt-badge kt-badge--yellow">chưa tick đối chiếu khớp</span>` : ""}
+      </div>
+      <div class="kt-sub" style="margin-top:8px">${res.note || ""}</div>
+    </div></div>
+
+    ${(res.warnings || []).length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body">
+          ${res.warnings.map((w) => html`<div class="kt-sub">• ${w}</div>`)}
+        </div></div>`
+      : ""}
+
+    ${(res.not_posted || []).length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body">
+          <b>Khoản KHÔNG sinh bút toán</b>
+          ${res.not_posted.map((n) => html`<div class="kt-sub" style="margin-top:6px">
+            • <b>${n.row_kind}</b> — ${n.n_rows} dòng, ${formatVND(n.amount)}
+            ${n.mixed_signs
+              ? html`<br><b>Nhóm có cả khoản trừ lẫn khoản hoàn:</b> số trên là RÒNG;
+                     cộng độ lớn từng dòng ra ${formatVND(n.amount_gross)}.`
+              : ""}
+            <br>${n.reason}</div>`)}
+        </div></div>`
+      : ""}
+
+    ${!entries.length
+      ? html`<div class="kt-empty"><i class="fas fa-ban"></i><p>Bảng kê này không sinh được bút toán nào.</p></div>`
+      : entries.map((e) => jeCard(e))}
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:10px">
+      <button class="kt-btn kt-btn--outline" id="jp-close">Đóng</button>
+      ${state.canManage
+        ? html`<button class="kt-btn kt-btn--primary" id="jp-create" ${!res.can_create ? "disabled" : ""}>
+            <i class="fas fa-file-circle-plus"></i> Sinh ${entries.filter((e) => !e.duplicate).length} bút toán nháp
+          </button>`
+        : html`<span class="kt-sub">Chỉ Kế toán trưởng mới sinh được bút toán.</span>`}
+    </div>
+    <div id="jp-msg"></div>`);
+
+  modal.body.querySelector("#jp-close").addEventListener("click", () => modal.close());
+  const btn = modal.body.querySelector("#jp-create");
+  if (btn) btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      // `expected_hash` là vân tay của ĐÚNG bản vừa xem — backend từ chối nếu
+      // liên kết hóa đơn hoặc cấu hình tài khoản đã đổi giữa xem và sinh.
+      const out = await api.mtJeCreate(advice, { expected_hash: res.plan_hash });
+      toast(out.message || `Đã sinh ${(out.created || []).length} bút toán nháp`, "success");
+      await renderJePreview(container, state, modal, advice);
+      await loadTab(container, state);
+    } catch (e) {
+      btn.disabled = false;
+      setHTML(modal.body.querySelector("#jp-msg"), html`
+        <div class="kt-card" style="border-left:4px solid var(--kt-danger);margin-top:10px">
+          <div class="kt-card-body"><div class="kt-sub" style="white-space:pre-wrap">${e.message}</div></div>
+        </div>`);
+    }
+  });
+}
+
+function jeCard(e) {
+  const a = e.accounts || {};
+  return html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-${e.duplicate ? "warning" : "primary"})">
+      <div class="kt-card-body">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <b>${e.kind}</b>
+          <span class="kt-badge kt-badge--gray">${e.event}</span>
+          <span class="kt-sub">ngày ${formatDate(e.posting_date)}</span>
+          <b style="margin-left:auto">${formatVND(e.total)}</b>
+        </div>
+        ${e.duplicate
+          ? html`<div class="kt-sub" style="margin-top:6px">
+              <span class="kt-badge kt-badge--yellow">đã sinh rồi</span>
+              Bút toán <code>${e.duplicate}</code> mang cùng vân tay — sẽ <b>không</b> sinh lại.
+              Sinh lại rồi duyệt cả hai là trừ công nợ khách gấp đôi.
+            </div>`
+          : ""}
+        ${a.is_default_row
+          ? html`<div class="kt-sub" style="margin-top:4px">Dùng dòng cấu hình <b>mặc định</b> (không có dòng riêng cho chuỗi ${a.chain || "này"}).</div>`
+          : ""}
+        ${e.note_no_reference
+          ? html`<div class="kt-sub" style="margin-top:6px;color:var(--kt-warning)"><b>${e.note_no_reference}</b></div>`
+          : ""}
+        ${e.mixed_signs
+          ? html`<div class="kt-sub" style="margin-top:4px">
+              Nhóm này có cả dòng <b>trừ</b> lẫn dòng <b>hoàn lại</b>. Bút toán ghi số
+              <b>ròng</b> ${formatVND(e.total)} — đúng bằng số chuỗi thật sự trừ. Cộng độ lớn
+              từng dòng sẽ ra ${formatVND(e.amount_gross)}, tức ghi khống
+              ${formatVND(e.amount_gross - e.total)}đ.
+            </div>`
+          : ""}
+
+        <div class="kt-table-wrap" style="margin-top:10px;max-height:260px;overflow:auto">
+          <table class="kt-table">
+            <thead><tr><th>Tài khoản</th><th>Đối tượng</th><th>Hóa đơn</th><th class="num">Nợ</th><th class="num">Có</th></tr></thead>
+            <tbody>
+              ${(e.debit_lines || []).map((l) => html`<tr>
+                <td><code>${l.account}</code></td>
+                <td class="kt-sub">${l.label || ""}</td>
+                <td></td>
+                <td class="num">${formatVND(l.amount)}</td>
+                <td></td>
+              </tr>`)}
+              ${(e.credit_lines || []).map((l) => html`<tr>
+                <td><code>${l.account}</code></td>
+                <td>${l.party_name || l.party || ""}</td>
+                <td>${l.reference_name
+                  ? html`<code>${l.reference_name}</code>${l.over_outstanding
+                      ? html` <span class="kt-badge kt-badge--red" title="Trả vượt số còn nợ của hóa đơn">vượt ${formatVNDShort(l.over_outstanding)}</span>`
+                      : ""}`
+                  : html`<span class="kt-badge kt-badge--yellow">gộp — không gắn hóa đơn</span>`}</td>
+                <td></td>
+                <td class="num">${formatVND(l.amount)}</td>
+              </tr>`)}
+            </tbody>
+          </table>
+        </div>
+
+        ${(e.skipped_rows || []).length
+          ? html`<div class="kt-sub" style="margin-top:8px;color:var(--kt-danger)">
+              <b>${e.skipped_rows.length} dòng KHÔNG vào bút toán</b> vì chưa nối được hóa đơn
+              (${formatVND(e.skipped_rows.reduce((s, x) => s + (x.amount || 0), 0))}).
+              Dòng Có 131 bắt buộc phải gắn hóa đơn, nếu không thì công nợ của hóa đơn đó không giảm.
+            </div>`
+          : ""}
+        ${e.n_review
+          ? html`<div class="kt-sub" style="margin-top:4px">
+              ${e.n_review} dòng nối hóa đơn ở mức <b>Cần review</b> — vẫn nằm trong bút toán, phải soi tay trước khi duyệt.
+            </div>`
+          : ""}
+        <details style="margin-top:8px">
+          <summary class="kt-sub" style="cursor:pointer">Diễn giải ghi vào bút toán</summary>
+          <pre class="kt-sub" style="white-space:pre-wrap;margin:6px 0 0">${e.remark}</pre>
+        </details>
+      </div>
+    </div>`;
 }

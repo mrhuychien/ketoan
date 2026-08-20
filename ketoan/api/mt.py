@@ -476,7 +476,7 @@ def get_overview(company=None, from_date=None, to_date=None):
     advices = frappe.db.sql("""
         SELECT a.name, a.chain, a.customer, a.advice_no, a.payment_date, a.status,
                a.total_payment, a.total_discount, a.total_fee, a.total_other,
-               a.declared_total_payment, a.reconciled, a.file_name
+               a.declared_total_payment, a.reconciled, a.file_name, a.je_state
         FROM `tabMT Payment Advice` a
         WHERE a.company = %(company)s
           AND a.payment_date BETWEEN %(fd)s AND %(td)s

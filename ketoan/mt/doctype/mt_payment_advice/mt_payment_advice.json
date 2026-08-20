@@ -23,6 +23,7 @@
   "declared_total_payment",
   "declared_total_discount",
   "reconciled",
+  "je_state",
   "note",
   "lines_section",
   "lines"
@@ -154,6 +155,16 @@
    "fieldname": "reconciled",
    "fieldtype": "Check",
    "label": "Đã đối chiếu khớp"
+  },
+  {
+   "description": "Tính lại từ docstatus của các Journal Entry mang custom_mt_source_name = bảng kê này. KHÔNG sửa tay.",
+   "fieldname": "je_state",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Bút toán",
+   "options": "\nChưa sinh\nĐã sinh nháp\nĐã duyệt một phần\nĐã duyệt đủ",
+   "read_only": 1
   },
   {
    "fieldname": "note",

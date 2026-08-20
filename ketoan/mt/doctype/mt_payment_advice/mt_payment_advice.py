@@ -28,6 +28,15 @@ _KIND_TO_TOTAL = {
 
 _TOTAL_FIELDS = ("total_payment", "total_discount", "total_fee", "total_other")
 
+# Trạng thái bút toán — do MÁY tính từ docstatus của các Journal Entry mang
+# `custom_mt_source_name` = tên bảng kê này. Kế toán không sửa tay được
+# (`read_only` trên field), và `ketoan.api.mt_je.sync_advice_state` tính lại mỗi
+# lần JE được submit/cancel — kể cả khi thao tác thẳng trên Desk, không qua portal.
+JE_STATE_NONE = "Chưa sinh"
+JE_STATE_DRAFT = "Đã sinh nháp"
+JE_STATE_PARTIAL = "Đã duyệt một phần"
+JE_STATE_ALL = "Đã duyệt đủ"
+
 
 class MTPaymentAdvice(Document):
     def validate(self):
@@ -139,3 +148,15 @@ class MTPaymentAdvice(Document):
         """
         if self.status == "Đã ghi nhận" and not self.reconciled:
             frappe.throw(_("Chưa tick 'Đã đối chiếu khớp' thì không được chuyển trạng thái 'Đã ghi nhận'."))
+
+        # 'Đã ghi nhận' phải có nghĩa ĐÃ VÀO SỔ, không phải "kế toán tick cho xong".
+        #
+        # VÌ SAO chặn ở đây: màn hình Công nợ MT và báo cáo đọc trạng thái này để
+        # nói "kỳ này xong rồi". Đặt tay trên Desk trong khi bút toán vẫn còn nháp
+        # là màn hình nói dối — và người phát hiện ra sẽ là kiểm toán, không phải
+        # kế toán. `je_state` do máy tính, nên chốt này không cãi được.
+        if self.status == "Đã ghi nhận" and self.je_state != JE_STATE_ALL:
+            frappe.throw(_(
+                "Bút toán của bảng kê này đang ở '{0}'. 'Đã ghi nhận' chỉ đặt được khi "
+                "MỌI bút toán liên quan đã được duyệt (ghi sổ)."
+            ).format(self.je_state or JE_STATE_NONE))

@@ -169,6 +169,15 @@ export const api = {
   mtStoreSave: (a) => callMethod(NS + "mt_store.save_store", a),
   mtStoreAddresses: (txt, customer) => callMethod(NS + "mt_store.search_addresses", { txt, customer }),
 
+  // Bút toán kênh MT — sinh Journal Entry NHÁP từ bảng kê. Hệ thống KHÔNG bao
+  // giờ tự ghi sổ: không có tham số nào bật submit tự động.
+  mtJeAdvices: (a) => callMethod(NS + "mt_je.list_advices", withCompany(a)),
+  mtJeAccountMap: (a) => callMethod(NS + "mt_je.get_account_map", withCompany(a)),
+  // Xem trước BẮT BUỘC — nó trả `plan_hash` mà lệnh sinh đòi.
+  mtJePreview: (advice, a) => callMethod(NS + "mt_je.preview_journal_entries", withCompany({ advice, ...a })),
+  mtJeCreate: (advice, a) => callMethod(NS + "mt_je.create_journal_entries", withCompany({ advice, ...a })),
+  // `expected_hash` đi kèm trong `a` — backend từ chối sinh nếu thiếu hoặc lệch.
+
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
 
