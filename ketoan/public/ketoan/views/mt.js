@@ -1168,6 +1168,9 @@ async function loadCustomers(container, state) {
       <button class="kt-btn kt-btn--outline kt-btn--sm" id="mt-assign-chain">
         <i class="fas fa-diagram-project"></i> Sửa chuỗi của khách
       </button>
+      <button class="kt-btn kt-btn--outline kt-btn--sm" id="mt-stores">
+        <i class="fas fa-store"></i> Điểm siêu thị
+      </button>
       <input class="kt-input kt-input--sm" id="mt-cus-search" placeholder="Tìm khách hàng…"
              value="${state.search}" style="margin-left:auto;min-width:220px">
     </div></div>
@@ -1237,6 +1240,8 @@ async function loadCustomers(container, state) {
   bindDrill(container, state);
   const asg = container.querySelector("#mt-assign-chain");
   if (asg) asg.addEventListener("click", () => openChainAssign(container, state));
+  const stores = container.querySelector("#mt-stores");
+  if (stores) stores.addEventListener("click", () => openStores(container, state));
 
   const box = container.querySelector("#mt-cus-search");
   if (box) {
@@ -1445,4 +1450,365 @@ async function fillCustomerSelect(modal, p) {
     ${other.length ? html`<optgroup label="${same.length ? "Khách khác của kênh MT" : "Khách kênh MT"}">
       ${other.map(opt)}</optgroup>` : ""}
   `);
+}
+
+
+// ── Điểm siêu thị (master) ─────────────────────────────────────────────────
+//
+// VÌ SAO cần màn hình riêng: mã điểm trên bảng kê chỉ là một chuỗi ký tự, còn
+// cái kế toán thật sự cần là "điểm này thuộc PHÁP NHÂN nào" (đi đòi nợ theo pháp
+// nhân, không theo chuỗi — riêng Co.op có ~120 siêu thị thành viên) và "xuất hóa
+// đơn cho điểm này thì lấy địa chỉ/MST ở đâu".
+//
+// Điểm được DỰNG TỪ CÁC BẢNG KÊ ĐÃ NẠP, không từ file mẫu: file mẫu là ảnh chụp
+// một kỳ, còn site luôn mới hơn.
+
+const STORE_STATUS_TONE = { moi: "green", da_co: "gray", lech: "yellow" };
+
+async function openStores(container, state) {
+  const modal = openModal({
+    title: "Điểm siêu thị",
+    icon: "fa-store",
+    maxWidth: 1000,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  const st = { chain: state.chain || "", search: "", page: 1, active: "" };
+  await renderStores(container, state, modal, st);
+}
+
+async function renderStores(container, state, modal, st) {
+  setHTML(modal.body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let res;
+  try {
+    res = await api.mtStores({ chain: st.chain || undefined, search: st.search || undefined,
+                               active: st.active === "" ? undefined : st.active,
+                               page: st.page, page_size: 50 });
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = res.rows || [];
+
+  setHTML(modal.body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label class="kt-label" style="margin:0">Chuỗi</label>
+      <select class="kt-input kt-input--sm" id="ms-chain">
+        <option value="">Tất cả</option>
+        ${(res.chains || []).map((c) => html`<option value="${c}" ${st.chain === c ? "selected" : ""}>${c}</option>`)}
+      </select>
+      <select class="kt-input kt-input--sm" id="ms-active">
+        <option value="" ${st.active === "" ? "selected" : ""}>Mọi trạng thái</option>
+        <option value="1" ${st.active === "1" ? "selected" : ""}>Đang hoạt động</option>
+        <option value="0" ${st.active === "0" ? "selected" : ""}>Đã đóng</option>
+      </select>
+      <input class="kt-input kt-input--sm" id="ms-search" placeholder="Tìm mã / tên điểm / khách…"
+             value="${st.search}" style="min-width:220px">
+      ${state.canManage
+        ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="ms-seed" style="margin-left:auto">
+            <i class="fas fa-wand-magic-sparkles"></i> Dựng từ bảng kê đã nạp
+          </button>`
+        : ""}
+    </div></div>
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-store-slash"></i>
+          <p>Chưa có điểm siêu thị nào${st.search || st.chain ? " khớp bộ lọc" : ""}.</p>
+          ${state.canManage && !st.search && !st.chain
+            ? html`<div class="kt-sub">Bấm <b>Dựng từ bảng kê đã nạp</b> để hệ thống lấy mã điểm
+                từ các bảng kê đã có trên site. Chuỗi chưa nạp bảng kê nào thì chưa dựng được điểm nào.</div>`
+            : ""}
+        </div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr>
+              <th>Chuỗi</th><th>Mã điểm</th><th>Tên điểm</th><th>Khách hàng</th>
+              <th>Địa chỉ xuất HĐ</th><th>Mã NCC</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((r) => html`<tr>
+                <td><span class="kt-badge kt-badge--gray">${r.chain}</span></td>
+                <td><code>${r.store_code}</code></td>
+                <td>${r.store_name}
+                  ${!r.active ? html` <span class="kt-badge kt-badge--red">đã đóng</span>` : ""}</td>
+                <td>${r.customer
+                  ? html`${r.customer_name || r.customer}`
+                  : html`<span class="kt-badge kt-badge--yellow">chưa gán pháp nhân</span>`}</td>
+                <td class="kt-sub">${r.address || "—"}</td>
+                <td class="kt-sub">${r.vendor_code || "—"}</td>
+                <td>${state.canManage
+                  ? html`<button class="kt-btn kt-btn--outline kt-btn--sm ms-edit" data-name="${r.name}">
+                      <i class="fas fa-pen"></i></button>`
+                  : ""}</td>
+              </tr>`)}
+            </tbody>
+          </table></div>
+          ${storePager(res)}
+          <div class="kt-sub" style="margin-top:8px">
+            Điểm <b>chưa gán pháp nhân</b> vẫn hiện công nợ theo chuỗi, nhưng không đi đòi nợ
+            theo pháp nhân được và không xuất được bảng kê chiết khấu có MST người mua.
+          </div>
+        </div></div>`}
+  `);
+
+  const rerender = () => renderStores(container, state, modal, st);
+  const ch = modal.body.querySelector("#ms-chain");
+  if (ch) ch.addEventListener("change", (e) => { st.chain = e.target.value; st.page = 1; rerender(); });
+  const ac = modal.body.querySelector("#ms-active");
+  if (ac) ac.addEventListener("change", (e) => { st.active = e.target.value; st.page = 1; rerender(); });
+  const sb = modal.body.querySelector("#ms-search");
+  if (sb) {
+    let timer = null;
+    sb.addEventListener("input", (e) => {
+      st.search = e.target.value.trim();
+      st.page = 1;
+      clearTimeout(timer);
+      timer = setTimeout(rerender, 350);
+    });
+  }
+  modal.body.querySelectorAll(".ms-page").forEach((b) => {
+    b.addEventListener("click", () => { st.page = Number(b.dataset.page); rerender(); });
+  });
+  modal.body.querySelectorAll(".ms-edit").forEach((b) => {
+    b.addEventListener("click", () => {
+      const row = rows.find((r) => r.name === b.dataset.name);
+      if (row) openStoreEdit(container, state, modal, st, row);
+    });
+  });
+  const seed = modal.body.querySelector("#ms-seed");
+  if (seed) seed.addEventListener("click", () => openStoreSeed(container, state, modal, st));
+}
+
+function storePager(res) {
+  if (!res || (res.pages || 1) <= 1) return "";
+  const p = res.page || 1;
+  return html`
+    <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:10px">
+      <span class="kt-sub">${res.total} điểm · trang ${p}/${res.pages}</span>
+      <button class="kt-btn kt-btn--outline kt-btn--sm ms-page" data-page="${p - 1}"
+              ${p <= 1 ? "disabled" : ""}><i class="fas fa-chevron-left"></i></button>
+      <button class="kt-btn kt-btn--outline kt-btn--sm ms-page" data-page="${p + 1}"
+              ${p >= res.pages ? "disabled" : ""}><i class="fas fa-chevron-right"></i></button>
+    </div>`;
+}
+
+// ── Sửa một điểm ───────────────────────────────────────────────────────────
+async function openStoreEdit(container, state, parent, st, row) {
+  const modal = openModal({
+    title: `${row.chain} · ${row.store_code}`,
+    icon: "fa-pen",
+    maxWidth: 620,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+
+  let customers = [];
+  try {
+    customers = (await api.mtCustomers({ chain: row.chain })).rows || [];
+  } catch (_) { /* vẫn sửa được các field khác */ }
+
+  setHTML(modal.body, html`
+    <div style="display:grid;gap:12px">
+      <div>
+        <label class="kt-label">Tên điểm</label>
+        <input class="kt-input" id="se-name" value="${row.store_name || ""}">
+      </div>
+      <div>
+        <label class="kt-label">Khách hàng (pháp nhân xuất hóa đơn)</label>
+        <select class="kt-input" id="se-customer">
+          <option value="">— chưa gán —</option>
+          ${customers.map((c) => html`<option value="${c.customer}" ${row.customer === c.customer ? "selected" : ""}>${
+            c.customer_name || c.customer}${c.chain ? ` · ${c.chain}` : ""}</option>`)}
+        </select>
+        <div class="kt-sub" style="margin-top:4px">
+          Gán sai pháp nhân là cả kỳ công nợ chạy sang khách khác — và không tổng nào phát hiện ra.
+        </div>
+      </div>
+      <div>
+        <label class="kt-label">Địa chỉ xuất hóa đơn</label>
+        <select class="kt-input" id="se-address">
+          <option value="">— chưa gán —</option>
+          ${row.address ? html`<option value="${row.address}" selected>${row.address}</option>` : ""}
+        </select>
+        <div class="kt-sub" style="margin-top:4px">
+          Chỉ liệt kê địa chỉ của đúng khách đã chọn. Dùng địa chỉ của pháp nhân khác là
+          in hóa đơn sai MST người mua.
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:180px">
+          <label class="kt-label">MST riêng của điểm</label>
+          <input class="kt-input" id="se-tax" value="${row.tax_id || ""}"
+                 placeholder="để trống nếu dùng MST của địa chỉ">
+        </div>
+        <div style="flex:1;min-width:180px">
+          <label class="kt-label">Mã NCC của mình tại chuỗi</label>
+          <input class="kt-input" id="se-vendor" value="${row.vendor_code || ""}">
+        </div>
+      </div>
+      <label style="display:flex;gap:8px;align-items:center">
+        <input type="checkbox" id="se-active" ${row.active ? "checked" : ""}>
+        <span>Đang hoạt động</span>
+      </label>
+      <div>
+        <label class="kt-label">Ghi chú</label>
+        <textarea class="kt-input" id="se-note" rows="2">${row.note || ""}</textarea>
+      </div>
+      ${row.seeded_from ? html`<div class="kt-sub">Nguồn dựng: ${row.seeded_from}</div>` : ""}
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="kt-btn kt-btn--outline" id="se-cancel">Hủy</button>
+        <button class="kt-btn kt-btn--primary" id="se-save"><i class="fas fa-check"></i> Lưu</button>
+      </div>
+      <div id="se-msg"></div>
+    </div>`);
+
+  const cusSel = modal.body.querySelector("#se-customer");
+  const addrSel = modal.body.querySelector("#se-address");
+
+  async function loadAddresses() {
+    const cus = cusSel.value;
+    if (!cus) {
+      setHTML(addrSel, html`<option value="">— chọn khách hàng trước —</option>`);
+      return;
+    }
+    let list = [];
+    try { list = await api.mtStoreAddresses("", cus); } catch (_) { /* để trống */ }
+    setHTML(addrSel, html`
+      <option value="">— chưa gán —</option>
+      ${list.map((a) => html`<option value="${a.name}" ${row.address === a.name ? "selected" : ""}>${
+        a.address_title || a.name}${a.tax_id ? ` · MST ${a.tax_id}` : ""}</option>`)}`);
+  }
+  cusSel.addEventListener("change", loadAddresses);
+  if (row.customer) await loadAddresses();
+
+  modal.body.querySelector("#se-cancel").addEventListener("click", () => modal.close());
+  modal.body.querySelector("#se-save").addEventListener("click", async () => {
+    const btn = modal.body.querySelector("#se-save");
+    btn.disabled = true;
+    try {
+      await api.mtStoreSave({
+        name: row.name,
+        store_name: modal.body.querySelector("#se-name").value.trim(),
+        // Gửi CHUỖI RỖNG (không phải null) khi muốn gỡ: backend hiểu rỗng là
+        // "cố ý xóa", còn thiếu field là "giữ nguyên".
+        customer: cusSel.value,
+        address: addrSel.value,
+        tax_id: modal.body.querySelector("#se-tax").value.trim(),
+        vendor_code: modal.body.querySelector("#se-vendor").value.trim(),
+        active: modal.body.querySelector("#se-active").checked ? 1 : 0,
+        note: modal.body.querySelector("#se-note").value,
+      });
+      toast("Đã lưu điểm " + row.store_code, "success");
+      modal.close();
+      await renderStores(container, state, parent, st);
+    } catch (e) {
+      btn.disabled = false;
+      setHTML(modal.body.querySelector("#se-msg"), html`
+        <div class="kt-card" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <div class="kt-sub" style="white-space:pre-wrap">${e.message}</div>
+        </div></div>`);
+    }
+  });
+}
+
+// ── Dựng master từ bảng kê đã nạp ──────────────────────────────────────────
+//
+// XEM TRƯỚC LÀ BẮT BUỘC. Điểm dựng bằng suy luận (Central Retail không in mã nên
+// mã do hệ thống sinh từ tên; địa chỉ dò theo cụm trong ngoặc cuối), nên người
+// phải nhìn trước khi ghi master. Backend đòi vân tay của đúng bản vừa xem.
+async function openStoreSeed(container, state, parent, st) {
+  const modal = openModal({
+    title: "Dựng điểm siêu thị từ bảng kê đã nạp",
+    icon: "fa-wand-magic-sparkles",
+    maxWidth: 1000,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+
+  let res;
+  try {
+    res = await api.mtStoreSeedPreview({});
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+  const s = res.summary || {};
+  const stores = res.stores || [];
+
+  setHTML(modal.body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span class="kt-badge kt-badge--green">${s.moi || 0} sẽ tạo mới</span>
+        <span class="kt-badge kt-badge--gray">${s.da_co || 0} đã có — bỏ qua</span>
+        ${s.lech ? html`<span class="kt-badge kt-badge--yellow">${s.lech} lệch — KHÔNG đè</span>` : ""}
+        ${s.thieu_khach ? html`<span class="kt-badge kt-badge--yellow">${s.thieu_khach} chưa rõ pháp nhân</span>` : ""}
+      </div>
+      <div class="kt-sub" style="margin-top:8px">${res.note || ""}</div>
+    </div></div>
+
+    ${(res.warnings || []).length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body">
+          ${res.warnings.map((w) => html`<div class="kt-sub">• ${w}</div>`)}
+        </div></div>`
+      : ""}
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div class="kt-table-wrap" style="max-height:380px;overflow:auto"><table class="kt-table">
+        <thead><tr>
+          <th>Chuỗi</th><th>Mã điểm</th><th>Tên điểm</th><th>Khách hàng</th>
+          <th class="num">Dòng</th><th>Trạng thái</th>
+        </tr></thead>
+        <tbody>
+          ${stores.map((p) => html`<tr>
+            <td><span class="kt-badge kt-badge--gray">${p.chain}</span></td>
+            <td><code>${p.store_code}</code>
+              ${p.code_synthesized
+                ? html` <span class="kt-badge kt-badge--yellow" title="Chuỗi không in mã điểm — mã này do hệ thống sinh từ tên">mã tự sinh</span>`
+                : ""}</td>
+            <td>${p.store_name}</td>
+            <td>${p.customer || html`<span class="kt-sub">—</span>`}</td>
+            <td class="num">${p.n_lines}</td>
+            <td>
+              <span class="kt-badge kt-badge--${STORE_STATUS_TONE[p.status] || "gray"}">${p.status_label}</span>
+              ${(p.issues || []).map((i) => html`<div class="kt-sub">• ${i}</div>`)}
+            </td>
+          </tr>`)}
+        </tbody>
+      </table></div>
+    </div></div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
+      <button class="kt-btn kt-btn--outline" id="ss-cancel">Đóng</button>
+      <button class="kt-btn kt-btn--primary" id="ss-commit" ${!s.moi ? "disabled" : ""}>
+        <i class="fas fa-check"></i> Tạo ${s.moi || 0} điểm
+      </button>
+    </div>
+    <div id="ss-msg"></div>`);
+
+  modal.body.querySelector("#ss-cancel").addEventListener("click", () => modal.close());
+  const btn = modal.body.querySelector("#ss-commit");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      // `expected_hash` là vân tay của ĐÚNG bản vừa xem — backend từ chối nếu
+      // dữ liệu đã đổi (bảng kê mới nạp, điểm vừa tạo tay) giữa xem và tạo.
+      const out = await api.mtStoreSeedCommit({ expected_hash: res.plan_hash });
+      toast(out.message || `Đã tạo ${out.created} điểm`, "success");
+      if ((out.failed || []).length) {
+        setHTML(modal.body.querySelector("#ss-msg"), html`
+          <div class="kt-card" style="border-left:4px solid var(--kt-warning);margin-top:10px">
+            <div class="kt-card-body">
+              <b>${out.failed.length} điểm KHÔNG tạo được</b>
+              ${out.failed.map((f) => html`<div class="kt-sub">• ${f.chain} ${f.store_code}: ${f.error}</div>`)}
+            </div></div>`);
+      } else {
+        modal.close();
+      }
+      await renderStores(container, state, parent, st);
+    } catch (e) {
+      btn.disabled = false;
+      setHTML(modal.body.querySelector("#ss-msg"), html`
+        <div class="kt-card" style="border-left:4px solid var(--kt-danger);margin-top:10px">
+          <div class="kt-card-body"><div class="kt-sub" style="white-space:pre-wrap">${e.message}</div></div>
+        </div>`);
+    }
+  });
 }

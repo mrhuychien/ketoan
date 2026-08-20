@@ -389,8 +389,18 @@ việc ghi sổ**. Cùng nguyên tắc `misa_sync.ensure_ref_id`.
 | `mt.list_draft_journal_entries(...)` | `guard_mt` | Danh sách JE Draft do MT sinh, lọc chuỗi/kỳ, có chia trang |
 | `mt.submit_journal_entries(names)` | `guard_manager` | Duyệt. **try/except từng JE**, trả kết quả per-JE |
 | `mt.get_account_map(company)` | `guard_mt` | Bảng TK đang áp dụng — để màn xem trước nói rõ bút toán vào TK nào |
-| `mt.preview_store_seed()` | `guard_mt` | Xem trước danh sách store dựng được |
-| `mt.commit_store_seed(expected_hash)` | `guard_manager` | Tạo `MT Store` |
+| `mt_store.preview_seed()` | `guard_mt` | Xem trước danh sách store dựng được |
+| `mt_store.commit_seed(expected_hash)` | `guard_manager` | Tạo `MT Store` |
+| `mt_store.list_stores(...)` | `guard_mt` | Danh sách điểm, lọc chuỗi/khách/trạng thái, chia trang |
+| `mt_store.save_store(...)` | `guard_manager` | Sửa một điểm (gán pháp nhân, địa chỉ, đóng điểm) |
+| `mt_store.search_addresses(txt, customer)` | `guard_mt` | Gợi ý địa chỉ để gán, LỌC theo khách |
+
+> **Điều chỉnh khi build (20/08/2026)**: nhóm điểm siêu thị nằm ở module riêng
+> `ketoan/api/mt_store.py` thay vì nhét thêm vào `mt.py` — mt.py đã ~2.500 dòng
+> và lo một việc khác hẳn (đối chiếu bảng kê với hóa đơn). Đúng quy ước
+> "1 file = 1 chức năng" của repo. Ba endpoint cuối là bổ sung: seed mà không
+> có màn xem/sửa thì master không dùng được, và `save_store` là đường GHI duy
+> nhất cho kế toán trưởng (Desk vẫn chỉ-đọc với `Ke Toan MT` đúng như §3.1).
 
 Mọi method **guard ở DÒNG ĐẦU**, `_require_tables()` ngay sau — đúng lối MT-1.
 

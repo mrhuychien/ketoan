@@ -157,6 +157,18 @@ export const api = {
   // `expected_hash` đi kèm trong `a` — backend từ chối nạp nếu thiếu hoặc lệch.
   mtRelinkLine: (line, sales_invoice, note) => callMethod(NS + "mt.relink_line", { line, sales_invoice, note }),
 
+  // Điểm siêu thị (master) — trả lời hai câu: điểm này thuộc PHÁP NHÂN nào, và
+  // xuất hóa đơn cho điểm này thì lấy địa chỉ/MST ở đâu. Riêng Co.op có ~120
+  // siêu thị thành viên nên không thể quản theo chuỗi.
+  mtStores: (a) => callMethod(NS + "mt_store.list_stores", withCompany(a)),
+  // Dựng từ CÁC BẢNG KÊ ĐÃ NẠP trên site, không từ file mẫu. Xem trước BẮT BUỘC
+  // (mã của Central Retail do hệ thống sinh từ tên, người phải nhìn trước).
+  mtStoreSeedPreview: (a) => callMethod(NS + "mt_store.preview_seed", withCompany(a)),
+  mtStoreSeedCommit: (a) => callMethod(NS + "mt_store.commit_seed", withCompany(a)),
+  // `expected_hash` đi kèm trong `a` — backend từ chối tạo nếu thiếu hoặc lệch.
+  mtStoreSave: (a) => callMethod(NS + "mt_store.save_store", a),
+  mtStoreAddresses: (txt, customer) => callMethod(NS + "mt_store.search_addresses", { txt, customer }),
+
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
 

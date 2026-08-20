@@ -1,0 +1,173 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-08-20 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "chain",
+  "store_code",
+  "store_name",
+  "column_break_head",
+  "customer",
+  "address",
+  "tax_id",
+  "vendor_code",
+  "section_state",
+  "active",
+  "seeded_from",
+  "note"
+ ],
+ "fields": [
+  {
+   "default": "MT-STORE-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Chuỗi số",
+   "options": "MT-STORE-.#####",
+   "reqd": 1,
+   "set_only_once": 1
+  },
+  {
+   "description": "Danh sách khai ở ketoan/install.py: MT_CHAINS (nguồn duy nhất).",
+   "fieldname": "chain",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Chuỗi siêu thị",
+   "options": "\nWinCommerce\nCentral Retail\nLOTTE\nEmart\nSaigon Co.op\nAEON\nFuji\nMega Market",
+   "reqd": 1
+  },
+  {
+   "description": "GIỮ NGUYÊN VĂN kể cả số 0 ở đầu ('01019', '001'). Ép sang số là hỏng khớp.",
+   "fieldname": "store_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mã điểm",
+   "reqd": 1
+  },
+  {
+   "fieldname": "store_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên điểm",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Pháp nhân xuất hóa đơn cho điểm này. Gán sai là cả kỳ công nợ chạy sang khách khác.",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Khách hàng",
+   "options": "Customer"
+  },
+  {
+   "description": "Nguồn buyer info khi xuất bảng kê chiết khấu (MST chi nhánh).",
+   "fieldname": "address",
+   "fieldtype": "Link",
+   "label": "Địa chỉ / thông tin xuất HĐ",
+   "options": "Address"
+  },
+  {
+   "description": "Chỉ điền khi điểm có MST RIÊNG. Để trống thì đọc từ Address — tránh hai nguồn sự thật.",
+   "fieldname": "tax_id",
+   "fieldtype": "Data",
+   "label": "MST của điểm"
+  },
+  {
+   "description": "Mã chuỗi cấp cho Hoàng Giang. Giống nhau cho mọi điểm trong một chuỗi.",
+   "fieldname": "vendor_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Mã NCC của mình tại chuỗi"
+  },
+  {
+   "fieldname": "section_state",
+   "fieldtype": "Section Break",
+   "label": "Trạng thái"
+  },
+  {
+   "default": "1",
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Đang hoạt động"
+  },
+  {
+   "description": "Bản ghi này được dựng từ đâu (bảng kê đã nạp / địa chỉ ERPNext / nhập tay).",
+   "fieldname": "seeded_from",
+   "fieldtype": "Data",
+   "label": "Nguồn dựng",
+   "read_only": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-20 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Store",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan Truong",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "write": 1
+  },
+  {
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan MT"
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User"
+  }
+ ],
+ "search_fields": "store_code,store_name,vendor_code",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "title_field": "store_name",
+ "track_changes": 1
+}
