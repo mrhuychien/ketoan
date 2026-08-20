@@ -21,20 +21,51 @@ import types
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 SAMPLES = os.path.join(REPO, "docs", "mt", "samples")
 
-# Số ĐÚNG đã xác minh ở MT-1 (xem §J của mt_payment_advice_contract.md).
+# Số ĐÚNG đã xác minh trên file mẫu thật (xem §J của mt_payment_advice_contract.md).
+#
+# `reconciled` được kiểm như một số ĐÚNG chứ không chỉ in ra: một parser đọc
+# thiếu tiền mà vẫn báo `reconciled=True` là ca hỏng nguy hiểm nhất của module —
+# kế toán nhìn thấy chữ "đã đối chiếu khớp" rồi nạp thẳng vào sổ.
 EXPECTED = {
     "Chi tiết thanh toán Winmart.xlsx": {
-        "chain": "wincommerce", "thanh_toan": 245795904, "pay_lines": 36, "periods": 1},
+        "chain": "wincommerce", "thanh_toan": 245795904, "pay_lines": 36, "periods": 1,
+        "reconciled": True},
     "Chi tiết thanh toán BigC.xlsx": {
         "chain": "central_retail", "thanh_toan": -721996632, "phi": 134708790,
-        "chiet_khau": 27240347, "ghi_giam": 5119605, "pay_lines": 184, "periods": 1},
+        "chiet_khau": 27240347, "ghi_giam": 5119605, "pay_lines": 184, "periods": 1,
+        "reconciled": True},
     "Chi tiết thanh toán Lotte.xls": {
-        "chain": "lotte", "thanh_toan": 276933600, "pay_lines": 45, "periods": 2},
+        "chain": "lotte", "thanh_toan": 276933600, "pay_lines": 45, "periods": 2,
+        "reconciled": True},
     "Chi tiết thanh toán Emart.xls": {
         "chain": "emart", "thanh_toan": -191554740, "chiet_khau": 5266245,
-        "phi": 27388670, "pay_lines": 26, "periods": 1},
+        "phi": 27388670, "pay_lines": 26, "periods": 1, "reconciled": True},
     "Chi tiết thanh toán Coopmart.xlsx": {
-        "chain": "coop", "thanh_toan": 8451787806, "pay_lines": 443, "periods": 8},
+        "chain": "coop", "thanh_toan": 8451787806, "pay_lines": 443, "periods": 8,
+        "reconciled": True},
+
+    # ── MT-2 ────────────────────────────────────────────────────────────────
+    # AEON: NET = 61.884.000 − 2.545.560 − 10.424.817 = 48.913.623, đúng bằng
+    # 'NET PAYMENT' mà file in ở HAI nơi độc lập (khối tổng sheet Doc + sheet
+    # Summary). `phi` KHÔNG được là −12.937.039: cộng thêm 2.512.222 nghĩa là
+    # sheet DcCharges đã bị cộng trùng với dòng mã DC của Costdet.
+    # Tên file có \xa0 (non-breaking space) THẬT — giữ nguyên, đừng "sửa" thành
+    # dấu cách thường, file trên đĩa mang đúng ký tự đó.
+    "chi tiet thanh to\xa0n AEON.xls": {
+        "chain": "aeon", "thanh_toan": 61884000, "ghi_giam": -2545560,
+        "phi": -10424817, "net": 48913623, "pay_lines": 21, "periods": 1,
+        "rows": 53, "reconciled": True, "needs_review": 0},
+
+    # Fuji: 90.010.980 − 8.191.071 − 10.126.136 = 71.693.773.
+    # `thanh_toan` KHÔNG được là 180.021.960: nhân đôi nghĩa là khối 1 (theo
+    # phiếu nhập kho) đã bị sinh dòng tiền cùng khối 2 (theo hóa đơn) — cùng một
+    # số tiền nhìn từ hai phía.
+    # `periods` = 0 vì file KHÔNG in ngày thanh toán ở bất kỳ đâu.
+    "CHI TIẾT THANH TOÁN FUJI.Xls": {
+        "chain": "fuji", "thanh_toan": 90010980, "ghi_giam": -8191071,
+        "chiet_khau": -2618419, "phi": -7507717, "net": 71693773,
+        "pay_lines": 10, "periods": 0, "rows": 23, "reconciled": True,
+        "needs_review": 7},
 }
 
 
@@ -160,21 +191,64 @@ def main():
         for key in ("thanh_toan", "chiet_khau", "phi", "ghi_giam"):
             if key in exp and round(tot.get(key, 0)) != exp[key]:
                 errs.append(f"{key}: mong {exp[key]:,} thực {round(tot.get(key, 0)):,}")
+        if "net" in exp and round(sum(tot.values())) != exp["net"]:
+            errs.append(f"NET: mong {exp['net']:,} thực {round(sum(tot.values())):,}")
         if pay_lines != exp["pay_lines"]:
             errs.append(f"dòng TT: mong {exp['pay_lines']} thực {pay_lines}")
+        if "rows" in exp and len(rows) != exp["rows"]:
+            errs.append(f"tổng dòng: mong {exp['rows']} thực {len(rows)}")
         if periods != exp["periods"]:
             errs.append(f"số kỳ: mong {exp['periods']} thực {periods}")
+        if "reconciled" in exp and bool(res.get("reconciled")) != exp["reconciled"]:
+            errs.append(f"reconciled: mong {exp['reconciled']} thực {res.get('reconciled')}")
+        if "needs_review" in exp:
+            nr = sum(1 for r in rows if r.get("needs_review"))
+            if nr != exp["needs_review"]:
+                errs.append(f"dòng cần review: mong {exp['needs_review']} thực {nr}")
+        # Số kiểm tra nào KHÔNG khớp thì phải kéo `reconciled` xuống False; nếu
+        # có check hỏng mà vẫn reconciled=True thì chính lá chắn đã hỏng.
+        n_bad_checks = sum(1 for c in (res.get("checks") or []) if not c.get("ok"))
+        if n_bad_checks and res.get("reconciled"):
+            errs.append(f"{n_bad_checks} số kiểm tra lệch mà vẫn reconciled=True")
 
+        n_ok = sum(1 for c in (res.get("checks") or []) if c.get("ok"))
         mark = "✅" if not errs else "❌"
         print(f"  {mark} {exp['chain']:16} dòng={len(rows):5} tt={pay_lines:4} "
-              f"kỳ={periods} reconciled={res.get('reconciled')}")
+              f"kỳ={periods} check={n_ok}/{len(res.get('checks') or [])} "
+              f"reconciled={res.get('reconciled')}")
         for e in errs:
             print(f"       └─ {e}")
         bad += bool(errs)
 
+    bad += _check_chain_options()
+
     print("=" * 78)
-    print("KẾT QUẢ:", "ĐẠT — mọi chuỗi ra đúng từng đồng" if not bad else f"HỎNG {bad} chuỗi")
+    print("KẾT QUẢ:", "ĐẠT — mọi chuỗi ra đúng từng đồng" if not bad else f"HỎNG {bad} mục")
     return 1 if bad else 0
+
+
+def _check_chain_options():
+    """Danh sách chuỗi siêu thị phải KHỚP ở cả ba nơi. Trả 1 nếu lệch.
+
+    Lệch thì bảng kê của chuỗi mới nạp xong sẽ bị Frappe từ chối ở tầng validate,
+    hoặc ghi được nhưng màn hình lọc theo chuỗi không thấy — tiền vào sổ mà không
+    ai nhìn ra. Rẻ để kiểm, đắt để phát hiện muộn.
+    """
+    print("-" * 78)
+    try:
+        from ketoan.install import MT_CHAINS, check_chain_options
+    except Exception as e:  # noqa: BLE001
+        print(f"  ❌ không import được ketoan.install: {type(e).__name__}: {e}")
+        return 1
+    problems = check_chain_options()
+    if problems:
+        print("  ❌ danh sách chuỗi LỆCH giữa ba nơi:")
+        for pb in problems:
+            print(f"       └─ {pb}")
+        return 1
+    print(f"  ✅ danh sách chuỗi khớp ở cả 3 nơi ({len(MT_CHAINS)} chuỗi): "
+          f"{', '.join(MT_CHAINS)}")
+    return 0
 
 
 if __name__ == "__main__":

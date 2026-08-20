@@ -32,9 +32,32 @@ const INV_BUCKETS = [
   { key: "tat_ca", label: "Tất cả" },
 ];
 
-// Đúng options của field `chain` trên DocType MT Payment Advice. Không tự thêm
-// chuỗi mới ở đây: chuỗi nào chưa có parser đã xác minh thì chưa được nạp file.
-const CHAINS = ["WinCommerce", "Central Retail", "LOTTE", "Emart", "Saigon Co.op"];
+// Danh sách chuỗi siêu thị đến TỪ BACKEND (`get_overview.chain_options`), khai
+// gốc ở ketoan/install.py: MT_CHAINS.
+//
+// VÌ SAO không khai lại ở đây: đã có ba nơi phải khớp nhau (install.py, mt.py,
+// DocType JSON) và bản sao thứ tư trong JS là bản chắc chắn bị quên nhất — thêm
+// AEON ở Python mà quên ở đây thì kế toán không chọn được chuỗi để nạp lại khi
+// tự nhận diện trượt, và họ sẽ tưởng file hỏng.
+//
+// `state.chainOptions` được nạp trong render(); mảng dưới đây CHỈ là lưới an
+// toàn cho trường hợp backend cũ chưa trả field này — không phải nguồn thật.
+const CHAINS_FALLBACK = ["WinCommerce", "Central Retail", "LOTTE", "Emart", "Saigon Co.op"];
+
+const chainsOf = (state) =>
+  (state && state.chainOptions && state.chainOptions.length)
+    ? state.chainOptions
+    : CHAINS_FALLBACK;
+
+// Chuỗi CÓ trong danh sách nhưng CHƯA có tầng đọc bảng kê (ví dụ Mega Market:
+// gán khách được, nạp file thì chưa). Đánh dấu ngay trên ô chọn để kế toán
+// không mất công thử rồi nhận lỗi.
+const chainOptionHTML = (state, selected) =>
+  chainsOf(state).map((c) => {
+    const noParser = state && state.chainParsers && state.chainParsers.length
+      && !state.chainParsers.includes(c);
+    return html`<option value="${c}" ${selected === c ? "selected" : ""}>${c}${noParser ? " (chưa đọc được file)" : ""}</option>`;
+  });
 
 // Nhãn row_kind (tiếng Việt, đúng options DocType) → màu badge.
 // 'Ghi giảm' tô đỏ vì nó làm GIẢM tiền về; 'Khác' tô xám vì máy KHÔNG hiểu loại
@@ -85,6 +108,9 @@ export async function render({ container, query }) {
   }
 
   state.canManage = !!ov.can_import;   // backend: is_chief()
+  // Danh sách chuỗi lấy từ backend — xem chú thích ở CHAINS_FALLBACK.
+  state.chainOptions = Array.isArray(ov.chain_options) ? ov.chain_options : [];
+  state.chainParsers = Array.isArray(ov.chain_parsers) ? ov.chain_parsers : [];
   setHTML(container, shell(state, ov));
   bind(container, state, ov);
   await loadTab(container, state);
@@ -434,7 +460,7 @@ function deductionTable(state, res) {
       <label class="kt-label" style="margin:0">Chuỗi</label>
       <select class="kt-input kt-input--sm" id="mt-chain">
         <option value="">Tất cả chuỗi</option>
-        ${CHAINS.map((c) => html`<option value="${c}" ${state.chain === c ? "selected" : ""}>${c}</option>`)}
+        ${chainOptionHTML(state, state.chain)}
       </select>
       <span class="kt-sub">
         Đây là các khoản chuỗi <b>trừ lại</b> khi thanh toán. Chúng KHÔNG được nối vào hóa đơn bán ra —
@@ -656,7 +682,7 @@ function openRelinkModal(container, state, line, currentSI) {
 }
 
 // ── Nạp bảng kê thanh toán của chuỗi ───────────────────────────────────────
-// LUÔN xem trước rồi mới nạp. Năm chuỗi năm khuôn file khác nhau, ba quy ước dấu
+// LUÔN xem trước rồi mới nạp. Mỗi chuỗi một khuôn file khác nhau, ba quy ước dấu
 // khác nhau; nạp mù là ghi nhận sai loại dòng hoặc nhân đôi tiền mà không ai thấy.
 function pickFile(container, state) {
   const input = document.createElement("input");
@@ -702,7 +728,7 @@ async function showAdvicePreview(container, state, modal, content, filename, cha
           <label class="kt-label">Chọn chuỗi rồi thử lại</label>
           <select class="kt-input kt-input--sm" id="ma-chain">
             <option value="">— tự nhận —</option>
-            ${CHAINS.map((c) => html`<option value="${c}" ${chain === c ? "selected" : ""}>${c}</option>`)}
+            ${chainOptionHTML(state, chain)}
           </select>
         </div>
         <button class="kt-btn kt-btn--outline" id="ma-retry"><i class="fas fa-rotate"></i> Đọc lại</button>
@@ -995,7 +1021,7 @@ function riskBlocks(advices) {
           <b style="color:var(--kt-danger)"><i class="fas fa-shuffle"></i>
             ${cross.length} dòng nối vào hóa đơn của CHUỖI KHÁC hoặc hóa đơn đã hủy/đã thay thế</b>
           <div class="kt-sub" style="margin:6px 0">
-            Cả 5 chuỗi dùng chung dải ký hiệu, nên đọc lệch một chữ số là tiền của chuỗi này
+            Mọi chuỗi dùng chung dải ký hiệu, nên đọc lệch một chữ số là tiền của chuỗi này
             được ghi vào hóa đơn của chuỗi kia — hai bên lệch công nợ ngược chiều nhau.
             Những dòng này đã bị hạ xuống <b>Cần review</b>, kiểm trước khi nạp.
           </div>

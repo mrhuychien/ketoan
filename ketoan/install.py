@@ -196,9 +196,76 @@ MISA_RELATION_OPTIONS = "\n".join(
 # gán được NGAY, trước khi có đồng thanh toán nào.
 #
 # Suy từ bảng kê vẫn giữ làm lớp dự phòng cho dữ liệu cũ (mt._customer_chain_map).
-MT_CHAIN_OPTIONS = "\n".join(
-    ("", "WinCommerce", "Central Retail", "LOTTE", "Emart", "Saigon Co.op")
+# ═══════════════════════════════════════════════════════════════════════════
+# DANH SÁCH CHUỖI SIÊU THỊ — NGUỒN DUY NHẤT.
+#
+# Ba nơi phải khớp nhau tuyệt đối:
+#   1. `MT_CHAINS` ở đây                       -> options của Customer.custom_mt_chain
+#   2. `ketoan/api/mt.py: CHAIN_OPTIONS`       -> lọc/kiểm đầu vào của API
+#   3. `mt_payment_advice.json: chain.options` -> Select trên DocType
+#
+# VÌ SAO nguy hiểm khi lệch: gán khách vào chuỗi 'AEON' mà DocType chưa có option
+# đó thì bảng kê AEON nạp xong bị Frappe từ chối lặng lẽ ở tầng validate, hoặc
+# tệ hơn là ghi được nhưng màn hình Công nợ MT lọc theo chuỗi lại không thấy —
+# tiền có trong sổ mà không ai nhìn ra. `check_chain_options()` bên dưới đối
+# chiếu cả ba, và bộ hồi quy docs/mt/verified/regression_check.py chạy nó.
+#
+# `Mega Market` có trong danh sách để GÁN KHÁCH được ngay, nhưng CHƯA có parser
+# bảng kê (chưa có file mẫu thật). Nạp file Mega Market sẽ báo lỗi rõ ràng chứ
+# không đọc bừa bằng parser của chuỗi khác.
+MT_CHAINS = (
+    "WinCommerce",
+    "Central Retail",
+    "LOTTE",
+    "Emart",
+    "Saigon Co.op",
+    "AEON",
+    "Fuji",
+    "Mega Market",
 )
+
+# Option của Select bắt đầu bằng dòng RỖNG: khách ngoài kênh MT phải để trống được.
+MT_CHAIN_OPTIONS = "\n".join(("",) + MT_CHAINS)
+
+# Đường dẫn tương đối tới DocType JSON có field `chain` — dùng cho phép kiểm ba nơi.
+MT_ADVICE_DOCTYPE_JSON = "mt/doctype/mt_payment_advice/mt_payment_advice.json"
+
+
+def check_chain_options():
+    """Đối chiếu danh sách chuỗi ở CẢ BA nơi. Trả danh sách sai lệch (rỗng = khớp).
+
+    Thuần đọc, không sửa gì — gọi được cả trong patch lẫn trong script hồi quy
+    chạy ngoài bench (không có `frappe` khởi tạo).
+    """
+    import json
+    import os
+
+    problems = []
+
+    try:
+        from ketoan.api.mt import CHAIN_OPTIONS as api_chains
+    except Exception as e:                                   # noqa: BLE001
+        problems.append("Không import được ketoan.api.mt.CHAIN_OPTIONS: %s" % e)
+    else:
+        if tuple(api_chains) != MT_CHAINS:
+            problems.append("ketoan/api/mt.py CHAIN_OPTIONS lệch: %s != %s"
+                            % (list(api_chains), list(MT_CHAINS)))
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), MT_ADVICE_DOCTYPE_JSON)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            meta = json.load(fh)
+    except Exception as e:                                   # noqa: BLE001
+        problems.append("Không đọc được %s: %s" % (MT_ADVICE_DOCTYPE_JSON, e))
+    else:
+        field = next((f for f in meta.get("fields") or [] if f.get("fieldname") == "chain"), None)
+        if not field:
+            problems.append("%s không có field `chain`" % MT_ADVICE_DOCTYPE_JSON)
+        elif field.get("options") != MT_CHAIN_OPTIONS:
+            problems.append("mt_payment_advice.json chain.options lệch: %r != %r"
+                            % (field.get("options"), MT_CHAIN_OPTIONS))
+
+    return problems
 
 MT_CUSTOM_FIELDS = {
     "Customer": [

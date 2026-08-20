@@ -15,3 +15,4 @@ ketoan.patches.v0_0_9.misa_link_field
 ketoan.patches.v0_0_10.misa_lifecycle_fields
 ketoan.patches.v0_0_11.misa_relation_enum
 ketoan.patches.v0_0_12.mt_customer_chain
+ketoan.patches.v0_0_13.mt_chain_options

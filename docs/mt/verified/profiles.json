@@ -820,5 +820,250 @@
    "Quan hệ giữa 'Mã cung cấp: 012556' / 'Nhà cung cấp: 233-Cty CP Hoang Giang' với Supplier/Customer của ERPNext.",
    "Chưa xác minh khả năng đọc file này qua ketoan.misa_import._rows() — đây là .xlsx nên openpyxl đọc được, nhưng _rows() hiện chỉ trả sheet đầu tiên (theo mô tả hợp đồng); với file 8 sheet thì phải sửa _rows() hoặc viết reader riêng cho kênh MT."
   ]
+ },
+ {
+  "chain": "aeon",
+  "verified": true,
+  "sheet": "SÁU sheet: Summary(00_265294) · Doc(00E30_265294) · Costsumm · Rebsumm · Costdet · DcCharges. Khối header r1–r11 LẶP Y HỆT ở cả 6 sheet. CHỈ 'Doc' và 'Costdet' sinh dòng tiền.",
+  "header_row": 13,
+  "columns": {
+   "_sheet_Doc": "1 SLIP TYPE | 2 CONTRACT NO. | 3 SLIP NO. | 4 SUPPLIER INVOICE / CN NO. | 5 STORE CODE | 6 DELIVERY / RETURN DATE | 7 AMOUNT | 8 DEPT CODE | 9 DEPT DESCRIPTION | 10 REMARKS",
+   "_sheet_Costdet": "1 DEDUCTION CODE | 2 DEDUCTION DESCRIPTION | 3 TYPE | 4 CONTRACT NO. | 5 SLIP NO | 6 TAX INVOICE | 7 STORE CODE | 8 SLIP DATE | 9 AMOUNT | 10 REMARKS",
+   "row_kind_source": "sheet Doc: cột 'SLIP TYPE' (311 = hàng bán, 312 = hàng trả). sheet Costdet: mọi dòng có 'DEDUCTION CODE' đều là phí.",
+   "inv_series": "sheet Doc cột 4, dạng '1-C26THG-00004246' -> bỏ cụm ĐẦU (số mẫu hóa đơn) -> 'C26THG'. HAI dấu '-', không dùng split_invoice_ref được.",
+   "inv_no": "sheet Doc cột 4, cụm cuối: '00004246' (norm_inv_no cắt số 0 đầu -> '4246').",
+   "inv_date": "sheet Doc cột 6 'DELIVERY / RETURN DATE', dạng TEXT ISO '2026-06-01'.",
+   "store_code": "sheet Doc cột 5 / Costdet cột 7. Mã 4 chữ số: 8001, 8003, 8004, 8005, 8007, 8008.",
+   "doc_no": "sheet Doc: cột 2 'CONTRACT NO.' (= 'OS-001' mọi dòng). sheet Costdet: cột 6 'TAX INVOICE' — hóa đơn AEON XUẤT CHO MÌNH ('1-K26TBE-…'), KHÔNG phải hóa đơn bán ra.",
+   "payment_date": "khối header r8: nhãn ở cột 6 'PAYMENT DATE:', giá trị ở cột 7 = '17/08/2026' (dd/mm/yyyy).",
+   "advice_no": "khối header r11 cột 2 'PAYMENT NO:' = '265294'. KHÔNG có trên sheet Summary.",
+   "credit_term": "khối header r10 cột 2 = 'E30'.",
+   "vendor_code": "khối header r5 cột 2 'SUPPLIER:' = '0000003114' (mã NCC tại AEON).",
+   "amount_before_vat": "KHÔNG CÓ trong file",
+   "vat_amount": "KHÔNG CÓ trong file",
+   "store_name": "KHÔNG CÓ trong file (chỉ có mã)"
+  },
+  "row_types": [
+   {
+    "kind": "thanh_toan",
+    "label": "SLIP TYPE = 311 (PO — hàng bán)",
+    "count": 21,
+    "sign": "DƯƠNG",
+    "rule": "sheet Doc, r14–r34, cột 1 == '311'. Tổng 61.884.000, khớp dòng 'TOTAL PO' và dòng '311' của khối tổng."
+   },
+   {
+    "kind": "ghi_giam",
+    "label": "SLIP TYPE = 312 (GRN — hàng trả)",
+    "count": 7,
+    "sign": "LƯU DƯƠNG trong bảng, IN ÂM ở khối tổng (−2.545.560)",
+    "rule": "sheet Doc, r37–r43, cột 1 == '312'. PHẢI đảo dấu; PHẢI phân loại theo cột chứ không theo dấu."
+   },
+   {
+    "kind": "phi",
+    "label": "Mọi dòng có DEDUCTION CODE ở sheet Costdet",
+    "count": 25,
+    "sign": "phần lớn DƯƠNG, có 8 dòng ÂM (hoàn lại)",
+    "rule": "5 mã × 5 dòng: DC, RBGPA, RBGPD, RBGPOS, RBPS. signed_amount = −amt (KHÔNG −abs): dòng gốc âm là khoản hoàn lại. Tổng −10.424.817."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Khối tổng cuối sheet Doc (r46 header 'Slip Type' + r47–r51)",
+    "count": 6,
+    "sign": "-",
+    "rule": "MỞ ĐẦU BẰNG ĐÚNG NHÃN 'Slip Type', và r47/r48 cũng mang mã 311/312. Phải dừng ở r46, không thì cộng đôi (123.768.000 thay vì 61.884.000)."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng cộng giữa bảng: 'Total Contract PO'/'TOTAL PO' (r35/r36), 'Total Contract GRN'/'TOTAL GRN' (r44/r45)",
+    "count": 4,
+    "sign": "-",
+    "rule": "cột 1 (SLIP TYPE) RỖNG, nhãn nằm ở cột 6, số ở cột 7."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng 'Sub-Total' của từng mã + 'Total' cuối sheet Costdet",
+    "count": 6,
+    "sign": "-",
+    "rule": "cột 1 RỖNG. Dùng làm SỐ KIỂM TRA cho từng mã — chốt mạnh nhất của sheet này."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Sheet Costsumm + Rebsumm — DANH MỤC mã khoản trừ",
+    "count": 2,
+    "sign": "gần như toàn 0",
+    "rule": "bảng BA khối cột song song (mã, mô tả, tiền). Không sinh dòng; chỉ soát: mã có tiền mà không thấy trong Costdet -> cảnh báo."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Sheet DcCharges — CHI TIẾT của đúng dòng mã 'DC' trong Costdet",
+    "count": 1,
+    "sign": "dương",
+    "rule": "bảng ĐÔI hai khối cột song song. Tổng r26 = 2.512.222 = ĐÚNG dòng DC của Costdet. Sinh dòng tiền từ đây là CỘNG TRÙNG 2.512.222 mà 'Net Payment' vẫn khớp."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Khối header NCC r1–r11 (lặp ở cả 6 sheet)",
+    "count": 11,
+    "sign": "-",
+    "rule": "chứa PAYMENT DATE / PAYMENT NO / CREDIT TERM / SUPPLIER — phải đọc, không nạp thành dòng tiền."
+   }
+  ],
+  "totals": {
+   "parser_thanh_toan_311": 61884000,
+   "parser_ghi_giam_312": -2545560,
+   "parser_phi_Costdet": -10424817,
+   "parser_NET": 48913623,
+   "file_check_TOTAL_PO": 61884000,
+   "file_check_TOTAL_GRN": -2545560,
+   "file_check_Net_Purchase": 59338440,
+   "file_check_Deduction": -10424817,
+   "file_check_Net_Payment_khoi_tong_Doc": 48913623,
+   "file_check_NET_PAYMENT_sheet_Summary": 48913623,
+   "file_check_Costdet_Total": 10424817,
+   "file_check_DcCharges_Total": 2512222,
+   "file_check_so_slip": "311 = 21 · 312 = 7 · Net Purchase = 28 · Deduction = 25 · Net Payment = 53",
+   "lech": 0,
+   "khop": "KHỚP TUYỆT ĐỐI 16/16 số kiểm tra, lệch 0 đồng. Tiền AEON thực chuyển = 48.913.623 VND."
+  },
+  "payment_dates": [
+   "2026-08-17"
+  ],
+  "invoice_parse": "C",
+  "date_parse": "Hai định dạng trong CÙNG file: khối header dùng dd/mm/yyyy ('17/08/2026' — PAYMENT DATE r8c7), còn cột ngày trong bảng dùng TEXT ISO ('2026-06-01' ở Doc cột 6, '2026-07-31' ở Costdet cột 8). Không có ô ctype DATE nào, nên datemode không dùng tới.",
+  "amount_parse": "Mọi ô tiền là ctype=2 (number thuần), không dấu phân cách text, không ngoặc đơn âm. GIỮ NGUYÊN DẤU khi cộng để đối chiếu với khối tổng. Slip 312 lưu DƯƠNG nhưng khối tổng in ÂM -> đảo dấu theo SLIP TYPE. Costdet có 8 dòng âm thật (−8.683; −15.196; −18.452; −42.228; −73.899; −89.735 …) và Sub-Total là tổng ĐẠI SỐ -> dùng −amt, KHÔNG −abs(amt).",
+  "pitfalls": [
+   "Khối tổng nằm TRONG bảng và mở đầu bằng đúng nhãn 'Slip Type' -> phải dừng ở đó, không thì cộng đôi 61.884.000.",
+   "Sheet DcCharges là CHI TIẾT của dòng mã DC ở Costdet -> sinh tiền từ cả hai là cộng trùng 2.512.222 mà 'Net Payment' VẪN khớp.",
+   "Slip 312 lưu dương, in âm -> phân loại theo cột SLIP TYPE, tuyệt đối không theo dấu.",
+   "Costdet có dòng âm thật -> −amt chứ không −abs(amt), sai chỗ này lệch đúng 2× tổng các dòng âm.",
+   "Khối tổng có cột 'No of Slips' đứng SAU cột 'Amount' -> lấy 'số cuối dòng' làm số kiểm tra sẽ ra 28 thay vì 59.338.440.",
+   "Nhãn cột không đồng nhất trong cùng file: 'SUPPLIER INVOICE / CN NO.' (có chấm) vs 'SLIP NO' (không chấm) -> so nhãn phải bỏ hết ký tự không phải chữ/số.",
+   "Tên file mẫu chứa \\xa0 (non-breaking space) THẬT: 'chi tiet thanh to\\xa0n AEON.xls'.",
+   "Tên sheet mang mã lần thanh toán 'Doc(00E30_265294)' -> tìm sheet theo TIỀN TỐ, không so tên đầy đủ."
+  ],
+  "unverified": [
+   "Tiền trước thuế / tiền thuế — file chỉ có MỘT cột tiền.",
+   "Tên siêu thị — chỉ có mã ('8003', '8005', …).",
+   "File chứa NHIỀU lần thanh toán trong một lần xuất — mẫu chỉ có PAYMENT NO 265294.",
+   "Các mã khoản trừ khác ngoài 5 mã đã gặp (DC, RBGPA, RBGPD, RBGPOS, RBPS) — danh mục Costsumm/Rebsumm liệt kê hàng trăm mã nhưng đều bằng 0."
+  ]
+ },
+ {
+  "chain": "fuji",
+  "verified": true,
+  "sheet": "MỘT sheet duy nhất 'Mẫu in tài liệu kinh doanh', 65 dòng x 14 cột. 13 dòng đầu TRỐNG HOÀN TOÀN — file không có tiêu đề, không có số bảng kê, không có ngày thanh toán. Đuôi file '.Xls' VIẾT HOA.",
+  "header_row": 14,
+  "columns": {
+   "_khoi_1_r14_r15_header_2_tang": "r16–r25 dữ liệu. c1 STT | c2 ngày HĐTC | c3 số HĐTC | c5 ngày PNK | c8 số PNK | c11 mã kho nhập | c14 GIÁ TRỊ TIỀN THEO PNK",
+   "_khoi_2_r27_header": "r28–r37 dữ liệu. c1 STT | c2 NGÀY HÓA ĐƠN | c4 SỐ HÓA ĐƠN | c7 SỐ TIỀN",
+   "_khoi_3_r40_r41_header_2_tang": "r42–r47 dữ liệu. c1 STT | c2 ngày | c4 SỐ PNK/XK | c7 GIÁ TRỊ TIỀN THEO PNK/XK",
+   "_khoi_4_r51_header": "r52–r65, mỗi mục HAI dòng. dòng TÊN: c2 TÊN CHIẾT KHẤU | c12 TIỀN CHIẾT KHẤU. dòng CHI TIẾT: c1 STT | c6 DOANH SỐ BAS | c9 TỶ LỆ | c10 CĂN CỨ TÍNH | c12 TIỀN",
+   "row_kind_source": "KHỐI quyết định loại dòng (không có cột phân loại nào). Riêng khối 4 phân loại theo NHÃN: 'Chiết khấu *' -> chiet_khau, 'Hỗ trợ *' -> phi.",
+   "inv_series": "KHÔNG CÓ trong file — Fuji không in ký hiệu ở bất kỳ đâu (đã soi hết 65x14 ô). BẮT BUỘC None, giống Emart.",
+   "inv_no": "khối 2 cột 4, số trần đệm >20 dấu cách ở đuôi: '4409                            ' -> phải strip.",
+   "inv_date": "khối 2 cột 2, Excel SERIAL (ctype=3, 46174 = 2026-06-01), KHÔNG phải text.",
+   "store_code": "khối 1 cột 11 'MÃ KHO NHẬP' ('129', '303', '209', '279', '224', '001') — gắn sang dòng khối 2 theo số hóa đơn.",
+   "doc_no": "khối 1 cột 8 'SỐ PNK' (18 chữ số) gắn sang dòng khối 2; khối 3 cột 4 'SỐ PNK/XK' (= '2829' cho CẢ 6 dòng).",
+   "payment_date": "KHÔNG CÓ trong file — kế toán phải điền tay sau khi nạp.",
+   "advice_no": "KHÔNG CÓ trong file.",
+   "amount_before_vat": "KHÔNG CÓ trong file",
+   "vat_amount": "KHÔNG CÓ trong file",
+   "store_name": "KHÔNG CÓ trong file"
+  },
+  "row_types": [
+   {
+    "kind": "thanh_toan",
+    "label": "Khối 2 — tổng theo hóa đơn",
+    "count": 10,
+    "sign": "DƯƠNG",
+    "rule": "r28–r37. Tổng 90.010.980, bằng ĐÚNG tổng khối 1 (cùng số tiền nhìn từ phía phiếu nhập kho)."
+   },
+   {
+    "kind": "ghi_giam",
+    "label": "Khối 3 — hàng trả theo phiếu NK/XK",
+    "count": 6,
+    "sign": "ÂM SẴN trong file",
+    "rule": "r42–r47. Tổng −8.191.071. Không có số hóa đơn -> luôn needs_review."
+   },
+   {
+    "kind": "chiet_khau",
+    "label": "Khối 4, mục có nhãn bắt đầu bằng 'Chiết khấu'",
+    "count": 2,
+    "sign": "in DƯƠNG, là khoản TRỪ",
+    "rule": "'Chiết khấu doanh số không điều kiện' 818.199 + 'Chiết khấu thanh toán' 1.800.220 = 2.618.419."
+   },
+   {
+    "kind": "phi",
+    "label": "Khối 4, mục có nhãn bắt đầu bằng 'Hỗ trợ'",
+    "count": 5,
+    "sign": "in DƯƠNG, là khoản TRỪ",
+    "rule": "hợp tác chiến lược 409.100 + thẻ KH thân thiết 1.636.398 + thuê mướn 900.110 + trưng bày 2.475.302 + vận chuyển DC SGW 2.086.807 = 7.507.717."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Khối 1 — hóa đơn ↔ phiếu nhập kho",
+    "count": 10,
+    "sign": "dương",
+    "rule": "CÙNG SỐ TIỀN với khối 2 (90.010.980). Sinh dòng tiền từ đây là NHÂN ĐÔI DOANH THU. Chỉ dùng để đối chiếu chéo + lấy số PNK và mã kho."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng TÊN của mỗi mục khối 4",
+    "count": 7,
+    "sign": "dương",
+    "rule": "in CÙNG số tiền với dòng chi tiết ngay dưới. Đọc gộp cả hai là gấp đôi chiết khấu."
+   },
+   {
+    "kind": "bo_qua",
+    "label": "Dòng header (r14, r15, r27, r40, r41, r51) + 13 dòng trống đầu file",
+    "count": 19,
+    "sign": "-",
+    "rule": "r1–r13 rỗng hoàn toàn."
+   }
+  ],
+  "totals": {
+   "parser_thanh_toan": 90010980,
+   "parser_ghi_giam": -8191071,
+   "parser_chiet_khau": -2618419,
+   "parser_phi": -7507717,
+   "parser_NET": 71693773,
+   "file_check_khoi_1_tong_theo_PNK": 90010980,
+   "file_check_khoi_2_tong_theo_hoa_don": 90010980,
+   "file_check_so_dong_khoi_1_va_2": "10 = 10",
+   "file_check_dong_ten_vs_dong_chi_tiet": 10126136,
+   "file_check_so_muc_theo_STT": 7,
+   "file_check_doanh_so_can_cu_in_trong_file": [
+    69560235,
+    81819909,
+    90010980
+   ],
+   "dang_thuc_1": "khối 1 == khối 2 == 90.010.980",
+   "dang_thuc_2": "khối 2 + khối 3 = 90.010.980 − 8.191.071 = 81.819.909 = doanh số căn cứ của 3 mục CK",
+   "dang_thuc_3": "90.010.980 = doanh số căn cứ của 3 mục CK khác",
+   "dang_thuc_4": "7/7 mục: căn cứ × tỷ lệ = tiền, lệch < 1 đồng (Fuji làm tròn tới đồng)",
+   "lech": 0,
+   "khop": "KHỚP 8/8 số kiểm tra. Fuji KHÔNG in tổng thanh toán ròng — mọi số kiểm tra đều là ĐẲNG THỨC giữa hai số do chính file in ra."
+  },
+  "payment_dates": [],
+  "invoice_parse": "Cột 'SỐ HÓA ĐƠN' (khối 2) và 'SỐ HĐTC' (khối 1) chỉ chứa SỐ TRẦN, đệm hơn 20 dấu cách ở đuôi: '4409                            '. KHÔNG có ký hiệu ở bất kỳ đâu trong file -> inv_series = None BẮT BUỘC. Khớp Sales Invoice phải đi nhánh 'số + ngày + tiền' và LUÔN 'Cần review' (xem SERIESLESS_CHAINS trong ketoan/api/mt.py). 10 số hóa đơn phân biệt: 4409, 4465, 4466, 4547, 4695, 4745, 4907, 5028, 5128, 5184. Khối 3 KHÔNG có số hóa đơn, chỉ có số PNK/XK '2829' lặp cả 6 dòng -> không nối được về hóa đơn nào.",
+  "date_parse": "Mọi ô ngày là Excel SERIAL (ctype=3), datemode=0. 46174 = 2026-06-01. str() ra '46174.0' -> phải qua xldate_as_tuple. Khối 1 có nhãn 'NGÀY/THÁNG' XUẤT HIỆN HAI LẦN ở tầng 2 (c2 dưới nhóm 'THEO HĐTC' = ngày hóa đơn; c5 dưới nhóm 'THEO PHIẾU NK/XK' = ngày nhập kho) -> tra nhãn phẳng là lấy nhầm ngày, mà Fuji không có ký hiệu nên ngày sai là trượt sạch tầng khớp.",
+  "amount_parse": "Mọi ô tiền ctype=2 (number thuần). Khối 3 in số ÂM SẴN -> giữ nguyên dấu, không −abs (kỳ sau có thể có dòng điều chỉnh dương). Khối 4 in DƯƠNG nhưng là khoản TRỪ -> −abs. Cột 'TỶ LỆ' là số thực (0.01; 0.005; 0.0275).",
+  "pitfalls": [
+   "Khối 1 và khối 2 là CÙNG số tiền nhìn từ hai phía -> sinh tiền từ cả hai = nhân đôi doanh thu (180.021.960).",
+   "Mỗi mục khối 4 có HAI dòng in cùng số tiền -> đọc gộp là gấp đôi chiết khấu, và đẳng thức 'dòng tên = dòng chi tiết' KHÔNG bắt được (cả hai vế cùng gấp đôi). Chốt duy nhất là số thứ tự cuối khối (= 7).",
+   "Bỏ sót khối 3 thì 'tổng hóa đơn − hàng trả' tụt về đúng 90.010.980 — mà đó LẠI LÀ một doanh số căn cứ in trong file -> số kiểm tra khớp GIẢ. Phải đếm dòng khối 3 bằng cột STT, độc lập cột tiền.",
+   "'NGÀY/THÁNG' xuất hiện hai lần ở tầng 2 của khối 1 -> phải tra theo NHÓM tầng 1, không tra phẳng.",
+   "Số hóa đơn đệm >20 dấu cách ở đuôi -> bắt buộc strip.",
+   "Ô ngày là serial Excel, không phải text.",
+   "File KHÔNG có ngày thanh toán và KHÔNG có số bảng kê.",
+   "Đuôi file '.Xls' VIẾT HOA -> nhận diện định dạng phải theo CHỮ KÝ FILE (magic bytes), không theo đuôi."
+  ],
+  "unverified": [
+   "Doanh số căn cứ 69.560.235 của mục 'Hỗ trợ vận chuyển qua DC SGW' — không suy ra được từ số nào khác trong file. Luôn gắn cờ cần người xem.",
+   "Ý nghĩa cột 'CĂN CỨ TÍNH' (= '2' ở cả 7 mục).",
+   "Số PNK/XK '2829' lặp ở cả 6 dòng hàng trả — chưa rõ là số phiếu thật hay mã loại.",
+   "File chứa NHIỀU kỳ thanh toán — mẫu chỉ có một kỳ (hóa đơn 01/06 → 30/06/2026).",
+   "Tiền trước thuế / tiền thuế."
+  ]
  }
 ]

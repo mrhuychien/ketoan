@@ -38,13 +38,13 @@
    "set_only_once": 1
   },
   {
-   "description": "Mỗi chuỗi một định dạng file khác nhau — chuỗi quyết định parser nào được dùng.",
+   "description": "Mỗi chuỗi một định dạng file khác nhau — chuỗi quyết định parser nào được dùng. Danh sách khai ở ketoan/install.py: MT_CHAINS (nguồn duy nhất).",
    "fieldname": "chain",
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Chuỗi siêu thị",
-   "options": "\nWinCommerce\nCentral Retail\nLOTTE\nEmart\nSaigon Co.op",
+   "options": "\nWinCommerce\nCentral Retail\nLOTTE\nEmart\nSaigon Co.op\nAEON\nFuji\nMega Market",
    "reqd": 1
   },
   {

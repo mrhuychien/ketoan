@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""mt_advice — tầng ĐỌC bảng kê thanh toán của 5 chuỗi siêu thị (kênh MT).
+"""mt_advice — tầng ĐỌC bảng kê thanh toán của các chuỗi siêu thị (kênh MT).
+
+Bảy chuỗi đã có tầng đọc: WinCommerce · Central Retail · LOTTE · Emart ·
+Saigon Co.op · AEON · Fuji. Mega Market có trong danh sách chuỗi nhưng CHƯA có
+parser (chưa có file bảng kê mẫu thật) — xem `PARSERS` ở cuối module.
 
 VÌ SAO có module riêng, không dùng lại `misa_import._rows()`:
 
@@ -10,7 +14,7 @@ VÌ SAO có module riêng, không dùng lại `misa_import._rows()`:
    dữ liệu bị cắt rời qua Table 5/7/8) và Co.op có 8 sheet (mỗi sheet là MỘT lần
    thanh toán riêng). Đọc sheet đầu là bỏ sót 71% tiền của WinCommerce và 64%
    của Co.op.
-3. MISA có MỘT khuôn cột; MT có **năm khuôn khác hẳn nhau**, ba quy ước dấu khác
+3. MISA có MỘT khuôn cột; MT có **bảy khuôn khác hẳn nhau**, ba quy ước dấu khác
    nhau, và mỗi chuỗi có kiểu dòng rác riêng. Dò cột theo từ khóa chung như MISA
    sẽ gán sai cột tiền.
 
@@ -21,13 +25,14 @@ Con người xem kết quả, đối chiếu số kiểm tra, rồi mới quyế
 NGUYÊN TẮC XUYÊN SUỐT (vi phạm là sai tiền, không phải sai style)
 ═══════════════════════════════════════════════════════════════════════════════
 
-* **Không phân loại dòng bằng DẤU của số tiền.** Ba chuỗi để hàng hóa dương, hai
-  chuỗi để hàng hóa âm, và trong CÙNG một chuỗi vẫn có ngoại lệ (Central Retail
+* **Không phân loại dòng bằng DẤU của số tiền.** Có chuỗi để hàng hóa dương, có
+  chuỗi để hàng hóa âm, và AEON để hàng TRẢ dương trong bảng nhưng in âm ở khối
+  tổng của chính nó, và trong CÙNG một chuỗi vẫn có ngoại lệ (Central Retail
   có dòng `K1` dương là trả hàng; LOTTE có dòng NET OFF cả dương lẫn âm). Luôn
   phân loại bằng cột loại chứng từ / ký hiệu hóa đơn của từng chuỗi.
-* **Không đoán tên cột, không đoán ký hiệu hóa đơn.** Emart không cấp ký hiệu ⇒
-  `inv_series=None` và luôn `needs_review`. Đoán ký hiệu là gán nhầm hóa đơn.
-* **Không tự suy ra tiền trước thuế / tiền thuế.** 4/5 chuỗi chỉ có MỘT cột tiền
+* **Không đoán tên cột, không đoán ký hiệu hóa đơn.** Emart và Fuji không in ký
+  hiệu ⇒ `inv_series=None` và luôn `Cần review`. Đoán ký hiệu là gán nhầm hóa đơn.
+* **Không tự suy ra tiền trước thuế / tiền thuế.** 6/7 chuỗi chỉ có MỘT cột tiền
   (đã gồm thuế). Chia 1.1 hay 1.08 để "suy ra" là bịa số.
 * **Dòng tổng trong file là SỐ KIỂM TRA, không phải tiền phát sinh.** Cộng nhầm
   là nhân đôi tiền. Ở đây chúng được tách sang `declared_totals` + `checks` để
@@ -107,6 +112,11 @@ CHAIN_LABEL = {
     "lotte": "LOTTE",
     "emart": "Emart",
     "coop": "Saigon Co.op",
+    "aeon": "AEON",
+    "fuji": "Fuji",
+    # Có nhãn để `_resolve_chain_key` nhận ra tên chuỗi và báo đúng lý do "chưa
+    # có parser", thay vì báo "không nhận ra chuỗi" làm kế toán tưởng file hỏng.
+    "mega_market": "Mega Market",
 }
 
 # row_kind ASCII -> nhãn đúng option của field `row_kind` trên MT Payment Advice Line.
@@ -347,8 +357,26 @@ def _check(label, declared, computed):
     }
 
 
+def _assert_rows_frozen(rows, n_at_totals, where):
+    """Cấm thêm dòng tiền SAU khi parser đã cộng tổng và dựng số kiểm tra.
+
+    VÌ SAO cần chốt máy móc này: `parse_sheets` cộng LẠI tổng từ `rows` sau khi
+    parser trả về, còn `checks` thì parser đã dựng xong từ trước. Một dòng thêm
+    muộn sẽ vào tổng của DocType mà KHÔNG vào bất kỳ số kiểm tra nào — kế toán
+    thấy `reconciled=True` trong khi tiền đã lệch. Đã đo bằng đột biến: chèn
+    thêm dòng phí sau mục '── Đối chiếu ──' của `parse_aeon` thì 16/16 số kiểm
+    tra vẫn báo khớp.
+
+    Đây là lỗi LẬP TRÌNH, không phải lỗi dữ liệu, nên throw chứ không warning.
+    """
+    if len(rows) != n_at_totals:
+        frappe.throw(_("Lỗi lập trình ở {0}: {1} dòng tiền được thêm SAU khi đã dựng "
+                       "số kiểm tra — tổng sẽ lệch mà không phép kiểm nào phát hiện.")
+                     .format(where, len(rows) - n_at_totals))
+
+
 def _line(**kw):
-    """Tạo một dòng theo BỘ KHÓA CHUẨN dùng chung cho cả 5 chuỗi.
+    """Tạo một dòng theo BỘ KHÓA CHUẨN dùng chung cho mọi chuỗi.
 
     `total_amount` / `amount_before_vat` / `vat_amount` là ĐỘ LỚN (trị tuyệt đối)
     để còn so trực tiếp với `grand_total` của Sales Invoice; chiều tiền đã nằm ở
@@ -615,6 +643,10 @@ _CHAIN_SIGNS = {
         ("so du mang sang trang sau",),         # chân trang bản in
     ],
     "coop": [("so hoa don lh",), ("dien giai", "tri gia")],
+    # AEON: tiêu đề r1 của MỌI sheet. Không chuỗi nào khác in câu này.
+    "aeon": [("payment statement to suppliers",)],
+    # Fuji: nhãn hai tầng của khối 1. 'theo hdtc' là nhãn RIÊNG của Fuji.
+    "fuji": [("theo hdtc",), ("gia tri tien theo pnk",)],
 }
 
 
@@ -1739,18 +1771,854 @@ def parse_coop(sheets):
 # 5. Đầu vào chung
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════
+# 4f. AEON  (.xls BIFF, 6 sheet — khối header LẶP y hệt ở mọi sheet)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# SLIP TYPE -> loại dòng. Phân loại theo CỘT, tuyệt đối không theo dấu tiền:
+# đo trên file thật, dòng 312 (hàng trả) lưu số DƯƠNG trong bảng chi tiết nhưng
+# khối tổng lại in ÂM (-2.545.560). Lấy dấu làm căn cứ là ghi ngược chiều tiền.
+_AE_SLIP_KIND = {"311": ("thanh_toan", "PO"), "312": ("ghi_giam", "GRN")}
+
+_AE_H_DOC = "SLIP TYPE"          # nhãn header bảng chi tiết sheet Doc
+_AE_H_COST = "DEDUCTION CODE"    # nhãn header bảng chi tiết sheet Costdet
+
+
+def _ae_norm(label) -> str:
+    """Nhãn cột -> khóa so khớp: bỏ dấu, bỏ mọi ký tự không phải chữ/số.
+
+    VÌ SAO không so nguyên văn: AEON in 'SUPPLIER INVOICE / CN NO.' (CÓ dấu chấm
+    cuối, CÓ dấu gạch chéo) ở sheet Doc nhưng 'SLIP NO' (KHÔNG chấm) ở Costdet —
+    cùng một file, hai quy ước. So nguyên văn là hụt đúng cột số hóa đơn và cột
+    tiền, parser gãy ngay trên file mẫu thật.
+    """
+    return re.sub(r"[^a-z0-9]+", "", strip_tones(label))
+
+
+def _ae_sheet(sheets, prefix):
+    """Sheet theo TIỀN TỐ tên: tên sheet mang mã lần thanh toán `Doc(00E30_265294)`.
+
+    So khớp đầy đủ tên là hỏng ngay kỳ sau (mã đổi); so tiền tố là đúng bản chất.
+    """
+    for name, grid in sheets:
+        if _ae_norm(name).startswith(_ae_norm(prefix)):
+            return name, grid
+    return None, None
+
+
+def _ae_header_meta(grid):
+    """Đọc khối header r1–r11. Khối này LẶP y hệt ở cả 6 sheet nên đọc ở đâu cũng được.
+
+    Ngoại lệ: sheet Summary KHÔNG có 'PAYMENT NO:' / 'CREDIT TERM:' — vì vậy phải
+    đọc meta trên sheet Doc, đừng đọc trên Summary rồi tưởng file thiếu số bảng kê.
+    """
+    meta = {}
+    for r in range(1, min(12, len(grid) + 1)):
+        texts = _row_texts(grid[r - 1])
+        for i, t in enumerate(texts):
+            key = _ae_norm(t.rstrip(":"))
+            if not key:
+                continue
+            val = next((texts[j] for j in range(i + 1, len(texts)) if texts[j]), "")
+            if not val:
+                continue
+            if key == "paymentdate":
+                meta["payment_date"] = to_date(val)
+            elif key == "paymentno":
+                meta["advice_no"] = val
+            elif key == "supplier":          # 'SUPPLIER NAME' chuẩn hóa ra khóa KHÁC
+                meta["vendor_code"] = val
+            elif key == "creditterm":
+                meta["credit_term"] = val
+    return meta
+
+
+def _ae_find_header(grid, label, start=1):
+    """Dòng header theo NHÃN, không hardcode chỉ số cột. Trả (r 1-based, {khóa: cột}).
+
+    `start` để tìm LẦN XUẤT HIỆN THỨ HAI của cùng một nhãn — sheet Doc dùng đúng
+    nhãn 'Slip Type' cho cả bảng chi tiết (r13) lẫn khối tổng cuối bảng (r46).
+    """
+    tgt = _ae_norm(label)
+    for r in range(start, len(grid) + 1):
+        texts = _row_texts(grid[r - 1])
+        if any(_ae_norm(t) == tgt for t in texts):
+            return r, {_ae_norm(t): c for c, t in enumerate(texts, start=1) if t}
+    return None, {}
+
+
+def _ae_col(cols, *names):
+    """Cột đầu tiên tìm được trong số các tên nhãn ứng viên. Không có -> None."""
+    for n in names:
+        c = cols.get(_ae_norm(n))
+        if c:
+            return c
+    return None
+
+
+def _gv(grid, r, c):
+    """`_g` nhưng chấp nhận cột None (nhãn không có trong file) -> trả None.
+
+    `_g` so sánh `c < 1` nên cột None làm nổ TypeError. Cột thiếu là chuyện BÌNH
+    THƯỜNG (mẫu file đổi, bớt một cột mô tả) và phải suy biến thành "không có dữ
+    liệu", chứ không phải làm hỏng cả lần nạp.
+    """
+    return _g(grid, r, c) if c else None
+
+
+def _ae_split_invoice(raw):
+    """'1-C26THG-00004246' -> ('C26THG', '00004246').
+
+    Bỏ cụm ĐẦU khi nó là số mẫu hóa đơn (đúng 1 chữ số). KHÔNG dùng
+    `split_invoice_ref`: chuỗi này có HAI dấu '-' chứ không phải một, mà hàm kia
+    cắt tại dấu ĐẦU TIÊN nên sẽ trả ký hiệu '1' và số 'C26THG-00004246'.
+    Không đúng khuôn -> trả ký hiệu RỖNG và đưa cả chuỗi vào số: thà không khớp
+    còn hơn bịa ký hiệu rồi ghi tiền vào hóa đơn của người khác.
+    """
+    t = _txt(raw)
+    if not t:
+        return "", ""
+    parts = [p.strip() for p in t.split("-") if p.strip()]
+    if len(parts) == 3 and parts[0].isdigit() and len(parts[0]) == 1:
+        return parts[1], parts[2]
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return "", t
+
+
+def parse_aeon(sheets):
+    """Bảng kê thanh toán AEON Việt Nam.
+
+    Sáu sheet: Summary · Doc · Costsumm · Rebsumm · Costdet · DcCharges.
+    Chỉ `Doc` (hàng bán + hàng trả) và `Costdet` (khoản trừ) SINH DÒNG TIỀN.
+
+    BẪY 1 — KHỐI TỔNG NẰM TRONG CHÍNH BẢNG. Cuối sheet Doc có khối tổng mở đầu
+    bằng ĐÚNG nhãn 'Slip Type' và các dòng của nó cũng mang mã 311/312. Đọc tiếp
+    qua đó là cộng đôi: đo thật ra 123.768.000 thay vì 61.884.000.
+
+    BẪY 2 — CỘNG TRÙNG DcCharges. `DcCharges` KHÔNG phải khoản trừ riêng, nó là
+    CHI TIẾT của đúng một dòng mã 'DC' trong `Costdet`; tổng hai bên bằng nhau
+    tuyệt đối (2.512.222). Sinh dòng tiền từ cả hai sheet là cộng trùng đúng số
+    đó mà 'Net Payment' VẪN khớp, vì Net Payment chỉ đối chiếu với Costdet. Vì
+    vậy DcCharges chỉ dùng làm CHỐT ĐỐI CHIẾU cho riêng dòng 'DC'.
+
+    BẪY 3 — KHOẢN TRỪ CÓ DÒNG ÂM. Trong Costdet, mã RBGPA/RBGPD/RBGPOS/RBPS có
+    cả dòng âm (-8.683) lẫn dương, và Sub-Total là tổng ĐẠI SỐ của chúng. Lấy
+    `-abs(amt)` là đảo dấu 8 dòng hoàn tiền thành 8 dòng bị trừ — lệch đúng hai
+    lần số đó. Phải lấy `-amt`, giữ nguyên độ lớn lẫn chiều.
+
+    `Costsumm`/`Rebsumm` là DANH MỤC mã khoản trừ (gần như toàn 0) — không sinh
+    dòng, chỉ dùng soát: mã có giá trị khác 0 mà không thấy trong Costdet -> cảnh báo.
+    """
+    warnings, rows, checks = [], [], []
+
+    doc_name, doc = _ae_sheet(sheets, "Doc")
+    if not doc:
+        frappe.throw(_("File AEON thiếu sheet 'Doc' — không đọc được hóa đơn nào"))
+
+    meta = _ae_header_meta(doc)
+    pay_date = meta.get("payment_date")
+    advice_no = meta.get("advice_no")
+    if not pay_date:
+        warnings.append("Không đọc được 'PAYMENT DATE' ở khối header — mọi dòng sẽ "
+                        "thiếu ngày thanh toán. Kế toán phải điền tay trước khi nạp.")
+
+    # ── Sheet Doc: hàng bán (311) + hàng trả (312) ──────────────────────────
+    hr, hcols = _ae_find_header(doc, _AE_H_DOC)
+    if not hr:
+        frappe.throw(_("Sheet Doc của AEON không có dòng nhãn '{0}' — mẫu file đã đổi")
+                     .format(_AE_H_DOC))
+    c_slip = _ae_col(hcols, _AE_H_DOC)
+    c_inv = _ae_col(hcols, "SUPPLIER INVOICE / CN NO.")
+    c_amt = _ae_col(hcols, "AMOUNT")
+    c_store = _ae_col(hcols, "STORE CODE")
+    c_date = _ae_col(hcols, "DELIVERY / RETURN DATE")
+    c_contract = _ae_col(hcols, "CONTRACT NO.")
+    c_slipno = _ae_col(hcols, "SLIP NO.")
+    c_remarks = _ae_col(hcols, "REMARKS")
+    if not (c_slip and c_inv and c_amt):
+        frappe.throw(_("Sheet Doc của AEON thiếu cột bắt buộc (SLIP TYPE / SUPPLIER "
+                       "INVOICE / AMOUNT) — mẫu file đã đổi, KHÔNG đọc tiếp"))
+
+    # BẪY 1: dừng ĐÚNG ở dòng nhãn 'Slip Type' lần thứ hai (đầu khối tổng).
+    sr, scols = _ae_find_header(doc, _AE_H_DOC, start=hr + 1)
+    end = sr or (len(doc) + 1)
+
+    for r in range(hr + 1, end):
+        slip = _txt(_gv(doc, r, c_slip)).split(".")[0]
+        if slip not in _AE_SLIP_KIND:
+            continue
+        kind, subtype = _AE_SLIP_KIND[slip]
+        amt = to_number(_gv(doc, r, c_amt))
+        if amt is None:
+            warnings.append("Sheet %s dòng %d: mã slip %s nhưng KHÔNG đọc được AMOUNT "
+                            "— dòng bị bỏ, số kiểm tra bên dưới sẽ lệch." % (doc_name, r, slip))
+            continue
+        series, inv_no = _ae_split_invoice(_gv(doc, r, c_inv))
+        # Hàng trả (312) lưu DƯƠNG trong bảng nhưng bản chất là GIẢM tiền về; đảo
+        # dấu để `signed_amount` đúng chiều. Việc PHÂN LOẠI đã do SLIP TYPE quyết,
+        # không do dấu — đảo dấu ở đây chỉ là chuẩn hóa chiều tiền của một loại
+        # dòng đã biết chắc, không phải suy loại từ dấu.
+        signed = -amt if kind == "ghi_giam" else amt
+        desc = " · ".join(x for x in (
+            "AEON slip %s (%s)" % (slip, subtype),
+            _txt(_gv(doc, r, c_slipno)) and ("slip no %s" % _txt(_gv(doc, r, c_slipno))),
+            _txt(_gv(doc, r, c_remarks)) if c_remarks else "",
+        ) if x)
+        rows.append(_line(
+            row_kind=kind, row_subtype=subtype,
+            inv_series=series, inv_no=inv_no,
+            inv_date=to_date(_gv(doc, r, c_date)) if c_date else None,
+            store_code=_txt(_gv(doc, r, c_store)) if c_store else "",
+            doc_no=_txt(_gv(doc, r, c_contract)) if c_contract else "",
+            description=desc,
+            signed_amount=signed, payment_date=pay_date,
+            # Không bóc được ký hiệu = không khớp được hóa đơn -> phải có người xem.
+            needs_review=not series,
+            source_sheet=doc_name, source_row=r))
+
+    # ── Khối tổng sheet Doc -> số kiểm tra (tiền VÀ số lượng slip) ──────────
+    #
+    # VÌ SAO phải đọc theo CỘT của khối tổng chứ không "số cuối cùng trên dòng":
+    # khối này có cột 'No of Slips' đứng SAU cột 'Amount'. Lấy số cuối dòng thì
+    # 'Net Purchase' ra 28 (số slip) thay vì 59.338.440 — số kiểm tra biến thành
+    # rác mà vẫn trông như một con số hợp lệ.
+    declared, declared_n = {}, {}
+    by_slip, by_slip_n = {}, {}
+    if sr:
+        s_slip = _ae_col(scols, _AE_H_DOC)
+        s_desc = _ae_col(scols, "DESCRIPTION")
+        s_amt = _ae_col(scols, "AMOUNT")
+        s_n = _ae_col(scols, "NO OF SLIPS")
+        for r in range(sr + 1, len(doc) + 1):
+            amt = to_number(_gv(doc, r, s_amt)) if s_amt else None
+            cnt = to_number(_gv(doc, r, s_n)) if s_n else None
+            if amt is None:
+                continue
+            code = _txt(_gv(doc, r, s_slip)).split(".")[0] if s_slip else ""
+            if code in _AE_SLIP_KIND:
+                by_slip[code] = amt
+                by_slip_n[code] = cnt
+                continue
+            key = _ae_norm(_txt(_gv(doc, r, s_desc)) if s_desc else "")
+            if key in ("netpurchase", "deduction", "netpayment"):
+                declared.setdefault(key, amt)
+                declared_n.setdefault(key, cnt)
+    else:
+        warnings.append("Sheet Doc không có khối tổng cuối bảng — mất toàn bộ số "
+                        "kiểm tra Net Purchase / Deduction / Net Payment.")
+
+    # ── Sheet Costdet: khoản AEON trừ, kèm số hóa đơn AEON xuất cho MÌNH ────
+    cost_name, cost = _ae_sheet(sheets, "Costdet")
+    by_code, sub_declared, cd_total_declared = {}, {}, None
+    n_cost_rows = 0
+    if not cost:
+        warnings.append("File thiếu sheet 'Costdet' — KHÔNG có dòng khoản trừ nào "
+                        "được đọc, trong khi khối tổng vẫn khai có khoản trừ.")
+    else:
+        chr_, ccols = _ae_find_header(cost, _AE_H_COST)
+        if not chr_:
+            warnings.append("Sheet Costdet không có dòng nhãn 'DEDUCTION CODE' — "
+                            "bỏ qua TOÀN BỘ khoản trừ, số kiểm tra sẽ báo lệch.")
+        else:
+            k_code = _ae_col(ccols, _AE_H_COST)
+            k_desc = _ae_col(ccols, "DEDUCTION DESCRIPTION")
+            k_tax = _ae_col(ccols, "TAX INVOICE")
+            k_store = _ae_col(ccols, "STORE CODE")
+            k_date = _ae_col(ccols, "SLIP DATE")
+            k_amt = _ae_col(ccols, "AMOUNT")
+            k_slip = _ae_col(ccols, "SLIP NO")
+            k_rem = _ae_col(ccols, "REMARKS")
+            if not (k_code and k_amt):
+                frappe.throw(_("Sheet Costdet của AEON thiếu cột DEDUCTION CODE / AMOUNT"))
+
+            last_code = None
+            for r in range(chr_ + 1, len(cost) + 1):
+                code = _txt(_gv(cost, r, k_code))
+                amt = to_number(_gv(cost, r, k_amt))
+                joined = strip_tones(" ".join(t for t in _row_texts(cost[r - 1]) if t))
+                if not code:
+                    # Dòng 'Sub-Total' của từng mã và dòng 'Total' cuối sheet là SỐ
+                    # KIỂM TRA, không phải khoản trừ. Nhận diện bằng chính nhãn.
+                    if amt is None:
+                        continue
+                    if "sub-total" in joined or "subtotal" in joined:
+                        if last_code:
+                            sub_declared[last_code] = amt
+                    elif joined.startswith("total"):
+                        cd_total_declared = amt
+                    continue
+                if amt is None:
+                    warnings.append("Sheet %s dòng %d: mã trừ %s nhưng KHÔNG đọc được "
+                                    "AMOUNT — dòng bị bỏ." % (cost_name, r, code))
+                    continue
+                last_code = code
+                n_cost_rows += 1
+                by_code[code] = by_code.get(code, 0.0) + amt
+                # `TAX INVOICE` là hóa đơn AEON xuất cho MÌNH (mẫu 1-K26TBE-...),
+                # KHÔNG phải hóa đơn mình bán ra -> vào `doc_no`, tuyệt đối không
+                # vào `inv_no`: vào inv_no là đi khớp nhầm với Sales Invoice.
+                rows.append(_line(
+                    row_kind="phi", row_subtype=code,
+                    doc_no=_txt(_gv(cost, r, k_tax)) if k_tax else "",
+                    store_code=_txt(_gv(cost, r, k_store)) if k_store else "",
+                    inv_date=to_date(_gv(cost, r, k_date)) if k_date else None,
+                    description=" · ".join(x for x in (
+                        _txt(_gv(cost, r, k_desc)) if k_desc else "",
+                        ("slip %s" % _txt(_gv(cost, r, k_slip))) if k_slip and _txt(_gv(cost, r, k_slip)) else "",
+                        _txt(_gv(cost, r, k_rem)) if k_rem else "",
+                    ) if x),
+                    # BẪY 3: `-amt`, KHÔNG `-abs(amt)`. Dòng gốc âm là khoản hoàn
+                    # lại, phải ra dương.
+                    signed_amount=-amt, payment_date=pay_date,
+                    source_sheet=cost_name, source_row=r))
+
+    # ── Đối chiếu ──────────────────────────────────────────────────────────
+    goods = _sum(rows, "signed_amount", {"thanh_toan"})
+    returns = _sum(rows, "signed_amount", {"ghi_giam"})
+    fees = _sum(rows, "signed_amount", {"phi"})
+    n_goods = sum(1 for r in rows if r["row_kind"] == "thanh_toan")
+    n_returns = sum(1 for r in rows if r["row_kind"] == "ghi_giam")
+    # Từ đây trở xuống parser CHỈ được dựng check/warning, KHÔNG được thêm dòng
+    # tiền nữa. `_assert_rows_frozen` ở cuối hàm canh đúng điều đó.
+    n_frozen = len(rows)
+
+    checks.append(_check("Tổng slip 311 (PO)", by_slip.get("311"), goods))
+    checks.append(_check("Tổng slip 312 (GRN)", by_slip.get("312"), returns))
+    checks.append(_check("Net Purchase (khối tổng sheet Doc)",
+                         declared.get("netpurchase"), goods + returns))
+    checks.append(_check("Deduction (khối tổng sheet Doc)",
+                         declared.get("deduction"), fees))
+    checks.append(_check("Net Payment (khối tổng sheet Doc)",
+                         declared.get("netpayment"), goods + returns + fees))
+
+    # SỐ LƯỢNG SLIP — chốt chống "mất dòng trong im lặng". Một dòng bị bỏ vì đọc
+    # hụt cột tiền làm tổng lệch, nhưng một dòng bị bỏ vì trùng khóa/lọc sai có
+    # thể vẫn khớp tổng nếu nó bằng 0. Đếm mới bắt được.
+    checks.append(_check("Số slip 311 (PO)", by_slip_n.get("311"), float(n_goods)))
+    checks.append(_check("Số slip 312 (GRN)", by_slip_n.get("312"), float(n_returns)))
+    checks.append(_check("Số dòng khoản trừ (Deduction)",
+                         declared_n.get("deduction"), float(n_cost_rows)))
+
+    # Sub-Total từng mã khoản trừ — chốt mạnh nhất của sheet Costdet: nó bắt được
+    # cả trường hợp một mã bị đọc nhầm sang mã khác (tổng chung vẫn khớp).
+    for code in sorted(by_code):
+        checks.append(_check("Costdet Sub-Total mã %s" % code,
+                             sub_declared.get(code), by_code[code]))
+    checks.append(_check("Costdet Total", cd_total_declared, sum(by_code.values())))
+
+    # NET PAYMENT ở sheet Summary — nguồn ĐỘC LẬP với khối tổng sheet Doc.
+    _sm_name, summary = _ae_sheet(sheets, "Summary")
+    if summary:
+        sm = None
+        for r in range(1, len(summary) + 1):
+            if "net payment" in strip_tones(" ".join(_row_texts(summary[r - 1]))):
+                for rr in range(r + 1, min(r + 4, len(summary) + 1)):
+                    v = next((to_number(c) for c in summary[rr - 1]
+                              if to_number(c) is not None), None)
+                    if v is not None:
+                        sm = v
+                        break
+                break
+        checks.append(_check("NET PAYMENT (sheet Summary)", sm, goods + returns + fees))
+
+    # CHỐT CHỐNG CỘNG TRÙNG (BẪY 2): tổng sheet DcCharges phải bằng ĐÚNG dòng mã
+    # 'DC' của Costdet. Lệch nghĩa là DcCharges KHÔNG còn là chi tiết của DC nữa,
+    # lúc đó việc bỏ qua sheet này là SAI và phải đọc lại mẫu file trước khi nạp.
+    _dc_name, dcs = _ae_sheet(sheets, "DcCharges")
+    if dcs:
+        dc_total = None
+        for r in range(len(dcs), 0, -1):
+            if "total" in strip_tones(" ".join(_row_texts(dcs[r - 1]))):
+                dc_total = next((to_number(c) for c in reversed(dcs[r - 1])
+                                 if to_number(c) is not None), None)
+                if dc_total is not None:
+                    break
+        checks.append(_check("DcCharges = dòng mã DC của Costdet",
+                             dc_total, by_code.get("DC", 0.0)))
+
+    # Danh mục Costsumm/Rebsumm: mã có tiền mà KHÔNG thấy trong Costdet -> mất khoản trừ.
+    for label, prefix in (("Costsumm", "Costsumm"), ("Rebsumm", "Rebsumm")):
+        _n, grid = _ae_sheet(sheets, prefix)
+        if not grid:
+            continue
+        gr, _gc = _ae_find_header(grid, _AE_H_COST)
+        if not gr:
+            continue
+        # Bảng ĐÔI/BA khối cột song song: mỗi khối là (mã, mô tả, tiền) liền nhau.
+        # Duyệt theo bước 3 cột thay vì đoán vị trí từng khối.
+        for r in range(gr + 1, len(grid) + 1):
+            texts = _row_texts(grid[r - 1])
+            for c0 in range(0, len(texts) - 2, 3):
+                code = texts[c0]
+                amt = to_number(_g(grid, r, c0 + 3))
+                if code and amt not in (None, 0.0) and code not in by_code:
+                    warnings.append("Danh mục %s: mã %s có giá trị %s nhưng KHÔNG có "
+                                    "dòng nào trong Costdet — nghi mất khoản trừ."
+                                    % (label, code, f"{amt:,.0f}"))
+
+    _assert_rows_frozen(rows, n_frozen, "parse_aeon")
+
+    groups = [{
+        "key": pay_date or advice_no or "aeon",
+        "advice_no": advice_no, "payment_date": pay_date, "n_rows": len(rows),
+        "declared_gross": declared.get("netpurchase"),
+        "declared_payment": by_slip.get("311"),
+        "computed_payment": goods,
+        "computed_net": goods + returns + fees,
+        "declared_net": declared.get("netpayment"),
+    }]
+
+    return {
+        "advice_no": advice_no,
+        "payment_dates": [pay_date] if pay_date else [],
+        "declared_totals": {
+            "total_payment": by_slip.get("311"),
+            "total_discount": None,
+            "net_payment": declared.get("netpayment"),
+            "net_purchase": declared.get("netpurchase"),
+            "vendor_code": meta.get("vendor_code"),
+            "credit_term": meta.get("credit_term"),
+        },
+        "rows": rows, "checks": checks, "groups": groups, "warnings": warnings,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 4g. Fuji Mart  (.xls BIFF, đuôi '.Xls' VIẾT HOA, 1 sheet, BỐN khối liên tiếp)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Bốn khối, nhận diện bằng nhãn header — KHÔNG bằng chỉ số dòng (file kỳ sau có
+# số dòng khác hẳn):
+#   K1 'THEO HĐTC'                -> hóa đơn <-> phiếu nhập kho + mã kho  (đối chiếu)
+#   K2 'SỐ HÓA ĐƠN' + 'SỐ TIỀN'   -> tổng theo hóa đơn                   (SINH TIỀN)
+#   K3 'GIÁ TRỊ TIỀN THEO PNK/XK' -> hàng trả, số ÂM sẵn                 (SINH TIỀN)
+#   K4 'TÊN CHIẾT KHẤU'           -> chiết khấu / hỗ trợ, cặp 2 dòng     (SINH TIỀN)
+#
+# K1 và K2 là CÙNG MỘT SỐ TIỀN nhìn từ hai phía (90.010.980). Sinh dòng từ cả
+# hai là nhân đôi doanh thu. Chỉ K2 sinh tiền; K1 dùng để (a) đối chiếu chéo và
+# (b) bổ sung số phiếu nhập kho + mã kho cho từng hóa đơn.
+_FJ_H_B1 = "THEO HĐTC"
+_FJ_H_B2 = "SỐ HÓA ĐƠN"
+_FJ_H_B3 = "GIÁ TRỊ TIỀN THEO PNK/XK"
+_FJ_H_B4 = "TÊN CHIẾT KHẤU"
+
+# Phân loại khoản trừ theo NHÃN (không theo dấu, không theo thứ tự dòng).
+_FJ_DEDUCT_KIND = (
+    ("chiet khau", "chiet_khau"),
+    ("ho tro", "phi"),
+)
+
+# Sai số cho phép khi soát 'căn cứ × tỷ lệ = tiền'. Đây là kiểm HỢP LÝ, không
+# phải số kiểm tra: Fuji làm tròn tới đồng (81.819.909 × 0,5% = 409.099,545 in
+# thành 409.100), nên lệch dưới 1 đồng là chuyện bình thường. Quá 1 đồng mới là
+# dấu hiệu đọc nhầm cột căn cứ hoặc cột tỷ lệ.
+_FJ_RATE_EPS = 1.0
+
+
+def _fj_find(grid, label, start=1):
+    """Dòng header theo NHÃN. Trả (r 1-based, {khóa nhãn: cột})."""
+    tgt = _ae_norm(label)
+    for r in range(start, len(grid) + 1):
+        texts = _row_texts(grid[r - 1])
+        if any(_ae_norm(t) == tgt for t in texts):
+            return r, {_ae_norm(t): c for c, t in enumerate(texts, start=1) if t}
+    return None, {}
+
+
+def _fj_sub(grid, top_row, top_col, next_top_col, label):
+    """Cột của nhãn tầng 2 nằm DƯỚI một nhóm của tầng 1.
+
+    VÌ SAO cần: K1 có nhãn 'NGÀY/THÁNG' xuất hiện HAI LẦN ở tầng 2 — một lần
+    dưới nhóm 'THEO HĐTC' (ngày hóa đơn), một lần dưới nhóm 'THEO PHIẾU NK/XK'
+    (ngày nhập kho). Tra phẳng theo nhãn sẽ lấy nhầm ngày, và ngày sai thì tầng
+    khớp 'số + ngày + tiền' của hóa đơn không ký hiệu sẽ trượt sạch.
+    """
+    if not top_row or top_row + 1 > len(grid):
+        return None
+    tgt = _ae_norm(label)
+    texts = _row_texts(grid[top_row])          # tầng 2 = dòng ngay dưới tầng 1
+    hi = next_top_col or (len(texts) + 1)
+    for c, t in enumerate(texts, start=1):
+        if top_col <= c < hi and _ae_norm(t) == tgt:
+            return c
+    return None
+
+
+def _fj_deduct_kind(name):
+    """Nhãn khoản trừ -> row_kind. Không nhận ra thì 'khac' + để người xem lại."""
+    key = strip_tones(name)
+    for prefix, kind in _FJ_DEDUCT_KIND:
+        if key.startswith(prefix):
+            return kind, False
+    return "khac", True
+
+
+def parse_fuji(sheets):
+    """Bảng kê thanh toán Fuji Mart.
+
+    KHÔNG CÓ NGÀY THANH TOÁN VÀ KHÔNG CÓ SỐ BẢNG KÊ trong file — đã soi hết 65
+    dòng x 14 cột của file mẫu, mười ba dòng đầu trống trơn. Không bịa: trả None
+    và cảnh báo để kế toán điền tay.
+
+    KHÔNG CÓ KÝ HIỆU HÓA ĐƠN — chỉ có số trần ('4409'). Giống Emart, nên tầng
+    khớp phải đi nhánh 'số + ngày + tiền' và luôn để 'Cần review'
+    (xem `_SERIESLESS_CHAINS` trong ketoan/api/mt.py).
+
+    BẪY NHÂN ĐÔI DOANH THU: khối 1 và khối 2 là CÙNG một số tiền nhìn từ hai
+    phía (phiếu nhập kho vs hóa đơn), cùng bằng 90.010.980 trên file mẫu. Sinh
+    dòng tiền từ cả hai là nhân đôi. Chỉ khối 2 sinh tiền.
+    """
+    warnings, rows, checks = [], [], []
+
+    # File một sheet, nhưng vẫn quét MỌI sheet để không bỏ sót (§J.1).
+    grid, sheet_name = None, ""
+    for name, g in sheets:
+        if not _sheet_has_content(g):
+            continue
+        if _fj_find(g, _FJ_H_B2)[0] or _fj_find(g, _FJ_H_B1)[0]:
+            grid, sheet_name = g, name
+            break
+    if grid is None:
+        frappe.throw(_("Không tìm thấy bảng hóa đơn trong file Fuji (thiếu nhãn '{0}')")
+                     .format(_FJ_H_B2))
+    for name, g in sheets:
+        if name != sheet_name and _sheet_has_content(g):
+            warnings.append("Sheet '%s' còn dữ liệu nhưng tầng đọc Fuji chưa hiểu — "
+                            "KIỂM TAY trước khi nạp, có thể đang bỏ sót tiền." % name)
+
+    # ── Khối 1: hóa đơn <-> phiếu nhập kho (KHÔNG sinh tiền) ───────────────
+    b1 = {}
+    b1_total, n_b1 = None, 0
+    r1, c1cols = _fj_find(grid, _FJ_H_B1)
+    if not r1:
+        warnings.append("Không thấy khối '%s' — mất đối chiếu chéo hóa đơn/phiếu nhập "
+                        "kho và mọi dòng sẽ thiếu số PNK." % _FJ_H_B1)
+    else:
+        g_hdtc = _ae_col(c1cols, _FJ_H_B1)
+        g_pnk = _ae_col(c1cols, "THEO PHIẾU NK/XK")
+        c_amt1 = _ae_col(c1cols, "GIÁ TRỊ TIỀN THEO PNK")
+        c_stt1 = _ae_col(c1cols, "STT")
+        c_inv1 = _fj_sub(grid, r1, g_hdtc or 1, g_pnk, "SỐ HĐTC")
+        c_idate = _fj_sub(grid, r1, g_hdtc or 1, g_pnk, "NGÀY/THÁNG")
+        c_pnk = _fj_sub(grid, r1, g_pnk or 1, c_amt1, "SỐ PNK")
+        c_kho = _fj_sub(grid, r1, g_pnk or 1, c_amt1, "MÃ KHO NHẬP")
+        if not (c_inv1 and c_amt1 and c_stt1):
+            warnings.append("Khối '%s' thiếu cột STT / SỐ HĐTC / GIÁ TRỊ TIỀN — bỏ qua "
+                            "đối chiếu chéo." % _FJ_H_B1)
+        else:
+            tot = 0.0
+            for r in range(r1 + 2, len(grid) + 1):     # +2: tầng 2 của header
+                if to_number(_gv(grid, r, c_stt1)) is None:
+                    break                               # hết khối (dòng trắng / header sau)
+                inv = norm_inv_no(_txt(_gv(grid, r, c_inv1)))
+                amt = to_number(_gv(grid, r, c_amt1))
+                if not inv or amt is None:
+                    continue
+                n_b1 += 1
+                tot += amt
+                b1[inv] = {
+                    "amount": amt,
+                    "pnk": _txt(_gv(grid, r, c_pnk)) if c_pnk else "",
+                    "kho": _txt(_gv(grid, r, c_kho)) if c_kho else "",
+                    "inv_date": to_date(_gv(grid, r, c_idate)) if c_idate else None,
+                    "row": r,
+                }
+            b1_total = tot
+
+    # ── Khối 2: tổng theo hóa đơn (SINH TIỀN) ──────────────────────────────
+    r2, c2cols = _fj_find(grid, _FJ_H_B2)
+    if not r2:
+        frappe.throw(_("File Fuji không có khối '{0}' — không đọc được hóa đơn nào")
+                     .format(_FJ_H_B2))
+    c_stt2 = _ae_col(c2cols, "STT")
+    c_inv2 = _ae_col(c2cols, _FJ_H_B2)
+    c_date2 = _ae_col(c2cols, "NGÀY HÓA ĐƠN")
+    c_amt2 = _ae_col(c2cols, "SỐ TIỀN")
+    if not (c_stt2 and c_inv2 and c_amt2):
+        frappe.throw(_("Khối hóa đơn của Fuji thiếu cột STT / SỐ HÓA ĐƠN / SỐ TIỀN"))
+
+    n_matched = 0
+    for r in range(r2 + 1, len(grid) + 1):
+        if to_number(_gv(grid, r, c_stt2)) is None:
+            break
+        raw_no = _txt(_gv(grid, r, c_inv2))     # có khoảng trắng thừa, _txt đã trim
+        amt = to_number(_gv(grid, r, c_amt2))
+        if not raw_no or amt is None:
+            warnings.append("Khối hóa đơn dòng %d: thiếu số hóa đơn hoặc số tiền — bỏ qua." % r)
+            continue
+        key = norm_inv_no(raw_no)
+        ref = b1.get(key) or {}
+        if ref and abs(ref["amount"] - amt) <= MONEY_EPS:
+            n_matched += 1
+        rows.append(_line(
+            row_kind="thanh_toan", row_subtype="HĐTC",
+            # Fuji KHÔNG in ký hiệu -> để rỗng. Bịa 'C26THG' ở đây là ghi tiền vào
+            # hóa đơn của chuỗi khác cùng dải số.
+            inv_series="", inv_no=raw_no,
+            inv_date=to_date(_gv(grid, r, c_date2)) if c_date2 else None,
+            store_code=ref.get("kho") or "",
+            doc_no=ref.get("pnk") or "",
+            description="Hóa đơn %s%s" % (
+                raw_no, (" · PNK %s" % ref["pnk"]) if ref.get("pnk") else ""),
+            signed_amount=amt, payment_date=None,
+            source_sheet=sheet_name, source_row=r))
+
+    # ── Khối 3: hàng trả (SINH TIỀN, số đã ÂM sẵn trong file) ──────────────
+    #
+    # `n_b3_seen` được đếm ĐỘC LẬP với cột tiền, chỉ dựa vào cột STT, để làm số
+    # kiểm tra cho chính việc đọc khối này. Xem chốt "Số dòng hàng trả" ở phần
+    # đối chiếu — không có nó thì bỏ sót cả khối vẫn báo khớp.
+    n_b3_seen = 0
+    r3, c3cols = _fj_find(grid, _FJ_H_B3)
+    if not r3:
+        warnings.append("Không thấy khối '%s' (hàng trả). Nếu kỳ này thật sự không có "
+                        "hàng trả thì bỏ qua; nếu có thì đang BỎ SÓT tiền ghi giảm."
+                        % _FJ_H_B3)
+    else:
+        c_amt3 = _ae_col(c3cols, _FJ_H_B3)
+        c_stt3 = _ae_col(c3cols, "STT")
+        g_pnk3 = _ae_col(c3cols, "THEO PHIẾU NK/XK")
+        c_pnk3 = _fj_sub(grid, r3, g_pnk3 or 1, c_amt3, "SỐ PNK/XK")
+        c_date3 = _fj_sub(grid, r3, g_pnk3 or 1, c_amt3, "NGÀY/THÁNG")
+        # Đếm dòng của khối TRƯỚC khi bàn tới cột tiền — đếm phải sống sót cả khi
+        # cột tiền không dò ra, nếu không thì "hỏng cột tiền" = "khối không tồn
+        # tại" và chốt bên dưới mất tác dụng.
+        if c_stt3:
+            for r in range(r3 + 2, len(grid) + 1):
+                if to_number(_gv(grid, r, c_stt3)) is None:
+                    break
+                n_b3_seen += 1
+        if not (c_amt3 and c_stt3):
+            warnings.append("Khối hàng trả thiếu cột STT / GIÁ TRỊ — bỏ qua toàn khối.")
+        else:
+            for r in range(r3 + 2, len(grid) + 1):
+                if to_number(_gv(grid, r, c_stt3)) is None:
+                    break
+                amt = to_number(_gv(grid, r, c_amt3))
+                if amt is None:
+                    continue
+                pnk = _txt(_gv(grid, r, c_pnk3)) if c_pnk3 else ""
+                # GIỮ NGUYÊN DẤU của file: khối này in sẵn số âm. `-abs()` ở đây thì
+                # đúng trên file mẫu nhưng sẽ nuốt mất một dòng điều chỉnh dương nếu
+                # kỳ sau có. Chiều tiền do file quyết, loại dòng do KHỐI quyết.
+                rows.append(_line(
+                    row_kind="ghi_giam", row_subtype="PNK/XK",
+                    inv_series="", inv_no="",
+                    inv_date=to_date(_gv(grid, r, c_date3)) if c_date3 else None,
+                    doc_no=pnk,
+                    description="Hàng trả theo phiếu %s" % (pnk or "(không số)"),
+                    signed_amount=amt, payment_date=None,
+                    # Không có số hóa đơn -> không tự nối được về hóa đơn nào.
+                    needs_review=True,
+                    source_sheet=sheet_name, source_row=r))
+
+    # ── Khối 4: chiết khấu / hỗ trợ (SINH TIỀN, cặp 2 dòng mỗi mục) ─────────
+    #
+    # Cấu trúc thật: dòng TÊN mang nhãn + số tiền; dòng CHI TIẾT ngay dưới mang
+    # STT + doanh số căn cứ + tỷ lệ + số tiền (LẶP LẠI). Đọc gộp cả hai dòng là
+    # cộng đôi toàn bộ chiết khấu.
+    items = []
+    r4, c4cols = _fj_find(grid, _FJ_H_B4)
+    if not r4:
+        warnings.append("Không thấy khối '%s' — nếu kỳ này có chiết khấu/hỗ trợ thì "
+                        "đang BỎ SÓT." % _FJ_H_B4)
+    else:
+        c_name = _ae_col(c4cols, _FJ_H_B4)
+        c_stt4 = _ae_col(c4cols, "STT")
+        c_base = _ae_col(c4cols, "DOANH SỐ BAS")
+        c_rate = _ae_col(c4cols, "TỶ LỆ")
+        c_amt4 = _ae_col(c4cols, "TIỀN CHIẾT KHẤU")
+        if not (c_name and c_amt4):
+            warnings.append("Khối chiết khấu thiếu cột TÊN / TIỀN — bỏ qua toàn khối.")
+        else:
+            cur = None
+            for r in range(r4 + 1, len(grid) + 1):
+                name = _txt(_gv(grid, r, c_name))
+                stt = to_number(_gv(grid, r, c_stt4)) if c_stt4 else None
+                amt = to_number(_gv(grid, r, c_amt4))
+                if name:
+                    if cur:
+                        items.append(cur)   # mục trước thiếu dòng chi tiết
+                    cur = {"name": name, "label_amount": amt, "row": r,
+                           "base": None, "rate": None, "amount": None, "detail_row": None}
+                elif stt is not None and cur is not None:
+                    cur["base"] = to_number(_gv(grid, r, c_base)) if c_base else None
+                    cur["rate"] = to_number(_gv(grid, r, c_rate)) if c_rate else None
+                    cur["amount"] = amt
+                    cur["detail_row"] = r
+                    # Số thứ tự do FILE in ra -> số kiểm tra cho chính số MỤC đọc
+                    # được. Xem chốt "Số mục chiết khấu/hỗ trợ" ở phần đối chiếu.
+                    cur["stt"] = stt
+                    items.append(cur)
+                    cur = None
+            if cur:
+                items.append(cur)
+
+    gross = _sum(rows, "signed_amount", {"thanh_toan"})
+    returns = _sum(rows, "signed_amount", {"ghi_giam"})
+    net_base = gross + returns
+    bases = [it["base"] for it in items if it["base"] is not None]
+
+    for it in items:
+        amt = it["amount"] if it["amount"] is not None else it["label_amount"]
+        if amt is None:
+            warnings.append("Khoản '%s' (dòng %d): KHÔNG đọc được số tiền — bỏ qua, "
+                            "số kiểm tra sẽ báo lệch." % (it["name"], it["row"]))
+            continue
+        kind, unknown = _fj_deduct_kind(it["name"])
+        if unknown:
+            warnings.append("Khoản '%s' không bắt đầu bằng 'Chiết khấu' hay 'Hỗ trợ' — "
+                            "xếp tạm vào 'Khác', kế toán phải phân loại tay." % it["name"])
+        base, rate = it["base"], it["rate"]
+        # Căn cứ tính phải là MỘT trong hai đại lượng đọc được từ chính file:
+        # tổng hóa đơn, hoặc tổng hóa đơn trừ hàng trả. Khác hai cái đó nghĩa là
+        # Fuji dùng một doanh số mình không kiểm được -> bắt người xem.
+        base_ok = base is not None and (abs(base - gross) <= MONEY_EPS
+                                        or abs(base - net_base) <= MONEY_EPS)
+        rate_ok = True
+        if base is not None and rate is not None:
+            rate_ok = abs(base * rate - amt) <= _FJ_RATE_EPS
+            if not rate_ok:
+                warnings.append("Khoản '%s': căn cứ %s × %s = %s nhưng file in %s — "
+                                "nghi đọc nhầm cột." % (
+                                    it["name"], f"{base:,.0f}", rate,
+                                    f"{base * rate:,.0f}", f"{amt:,.0f}"))
+        if base is not None and not base_ok:
+            warnings.append("Khoản '%s': căn cứ %s không bằng tổng hóa đơn (%s) cũng "
+                            "không bằng tổng sau trả hàng (%s) — không kiểm được, "
+                            "kế toán xác nhận tay." % (
+                                it["name"], f"{base:,.0f}", f"{gross:,.0f}",
+                                f"{net_base:,.0f}"))
+        desc = it["name"]
+        if base is not None and rate is not None:
+            desc += " · căn cứ %s × %s" % (f"{base:,.0f}", rate)
+        rows.append(_line(
+            row_kind=kind, row_subtype=it["name"][:60],
+            inv_series="", inv_no="",
+            description=desc,
+            # Khoản trừ làm GIẢM tiền về -> âm. Loại dòng do NHÃN quyết, không do dấu.
+            signed_amount=-abs(amt), payment_date=None,
+            # Chỉ gắn cờ khi CHÍNH tầng đọc không chắc (nhãn lạ / căn cứ không kiểm
+            # được / tỷ lệ không ra). Khoản kỳ nào cũng có và kiểm được thì không
+            # gắn — gắn tất là làm cờ mất nghĩa.
+            needs_review=bool(unknown or not base_ok or not rate_ok),
+            source_sheet=sheet_name,
+            source_row=it.get("detail_row") or it["row"]))
+
+    # ── Đối chiếu ──────────────────────────────────────────────────────────
+    #
+    # File Fuji KHÔNG in tổng thanh toán ròng, nên số kiểm tra ở đây đều là
+    # ĐẲNG THỨC GIỮA HAI SỐ CÙNG DO FILE IN RA — vẫn đủ mạnh: chúng bắt được đọc
+    # nhầm cột, sót dòng và lệch khối.
+    n_b2 = sum(1 for r in rows if r["row_kind"] == "thanh_toan")
+    # Xem `_assert_rows_frozen`: dưới mốc này chỉ được dựng check/warning.
+    n_frozen = len(rows)
+    checks.append(_check("Tổng theo PNK (khối 1) = Tổng theo hóa đơn (khối 2)",
+                         b1_total, gross))
+    checks.append(_check("Số dòng khối 1 = số dòng khối 2", float(n_b1), float(n_b2)))
+    checks.append(_check("Khớp từng hóa đơn giữa khối 1 và khối 2",
+                         float(n_b2), float(n_matched)))
+
+    # Đẳng thức chiết khấu: dòng TÊN và dòng CHI TIẾT in cùng một số tiền. Chỉ
+    # thêm khi kỳ này CÓ khoản trừ — kỳ không có khoản nào mà vẫn dựng một mục
+    # `declared=None` là tự làm `reconciled=False` cho một file hoàn toàn sạch.
+    if items:
+        # `_declared_sum` trả None nếu bất kỳ vế nào đọc không ra — đúng ý: thiếu
+        # một số thì KHÔNG được coi là 0 rồi báo khớp.
+        checks.append(_check(
+            "Tiền chiết khấu/hỗ trợ: dòng tên = dòng chi tiết",
+            _declared_sum([it["label_amount"] for it in items]),
+            _declared_sum([it["amount"] for it in items]) or 0.0))
+
+    # File không in tổng hàng trả, nhưng có in doanh số căn cứ tính chiết khấu,
+    # và căn cứ đó chính bằng "tổng hóa đơn − hàng trả" -> đối chiếu chéo được.
+    dg = next((b for b in bases if abs(b - gross) <= MONEY_EPS), None)
+    dn = next((b for b in bases if abs(b - net_base) <= MONEY_EPS), None)
+    checks.append(_check("Tổng hóa đơn = doanh số căn cứ in trong file", dg, gross))
+    checks.append(_check("Tổng hóa đơn − hàng trả = doanh số căn cứ in trong file",
+                         dn, net_base))
+
+    # CHỐT CHỐNG CỘNG TRÙNG / BỎ SÓT MỤC CHIẾT KHẤU.
+    #
+    # VÌ SAO đẳng thức "dòng tên = dòng chi tiết" KHÔNG đủ: mỗi mục góp một số
+    # vào CẢ HAI vế, nên nhân đôi (hay bỏ sót) cả mục thì hai vế vẫn bằng nhau.
+    # Đã đo bằng đột biến: `items.append` hai lần làm chiết khấu tăng đúng gấp
+    # đôi mà cả 7 số kiểm tra vẫn báo khớp. File KHÔNG in tổng khoản trừ, nhưng
+    # CÓ in số thứ tự — và số thứ tự cuối cùng chính là số mục.
+    stts = [it["stt"] for it in items if it.get("stt") is not None]
+    if items:
+        checks.append(_check("Số mục chiết khấu/hỗ trợ (theo cột STT)",
+                             float(max(stts)) if stts else None, float(len(items))))
+
+    # CHỐT CHỐNG BỎ SÓT CẢ KHỐI HÀNG TRẢ.
+    #
+    # VÌ SAO hai đẳng thức trên KHÔNG đủ: nếu khối 3 không được đọc thì `net_base`
+    # tụt về đúng `gross`, mà `gross` LẠI LÀ một trong các doanh số căn cứ in
+    # trong file — nên `dn` vẫn tìm thấy và phép kiểm khớp một cách GIẢ. Đã đo
+    # bằng đột biến: ép `c_amt3 = None` làm mất sạch 8.191.071 tiền hàng trả mà
+    # cả 6 số kiểm tra đều báo khớp.
+    #
+    # Chốt này đếm số dòng của khối bằng cột STT — độc lập hoàn toàn với cột
+    # tiền, nên "hỏng cột tiền" không còn giả trang được thành "khối không có".
+    n_b3_rows = sum(1 for r in rows if r["row_kind"] == "ghi_giam")
+    checks.append(_check("Số dòng hàng trả đọc được", float(n_b3_seen), float(n_b3_rows)))
+
+    warnings.append("File Fuji không in NGÀY THANH TOÁN và SỐ BẢNG KÊ — kế toán "
+                    "phải điền ngày thanh toán tay sau khi nạp, nếu không bảng kê "
+                    "sẽ không lên đúng kỳ trên màn hình Công nợ MT.")
+
+    _assert_rows_frozen(rows, n_frozen, "parse_fuji")
+
+    groups = [{
+        "key": "fuji",
+        "advice_no": None, "payment_date": None, "n_rows": len(rows),
+        "declared_gross": b1_total,
+        "declared_payment": b1_total,
+        "computed_payment": gross,
+        "computed_net": _sum(rows, "signed_amount"),
+        "declared_net": None,
+    }]
+
+    return {
+        "advice_no": None,
+        "payment_dates": [],
+        "declared_totals": {
+            "total_payment": b1_total,
+            "total_discount": None,
+            "net_payment": None,
+        },
+        "rows": rows, "checks": checks, "groups": groups, "warnings": warnings,
+    }
+
+
 PARSERS = {
     "wincommerce": parse_wincommerce,
     "central_retail": parse_central_retail,
     "lotte": parse_lotte,
     "emart": parse_emart,
     "coop": parse_coop,
+    "aeon": parse_aeon,
+    "fuji": parse_fuji,
+    # 'Mega Market' CỐ Ý không có ở đây: chưa có file bảng kê mẫu thật nên chưa
+    # viết được parser. Có option để gán khách, nhưng nạp file thì phải báo lỗi
+    # rõ ràng — đọc bừa bằng parser chuỗi khác là đọc SAI CỘT TIỀN mà vẫn ra một
+    # con số trông hợp lý.
 }
 
 
 def parse_sheets(sheets, chain_key):
     """Chạy parser của một chuỗi trên các sheet đã đọc và bổ sung phần tổng chung."""
     if chain_key not in PARSERS:
+        # Phân biệt hai ca khác hẳn nhau: chuỗi lạ hoàn toàn, và chuỗi CÓ trong
+        # danh sách nhưng CHƯA có tầng đọc (Mega Market — chưa có file mẫu thật).
+        if chain_key in CHAIN_LABEL:
+            frappe.throw(_(
+                "Chưa có tầng đọc bảng kê cho chuỗi {0}. Gán khách vào chuỗi này thì "
+                "được, nhưng nạp file thì chưa — cần một file bảng kê mẫu thật để "
+                "viết parser. KHÔNG chọn tạm chuỗi khác: parser sai chuỗi đọc SAI "
+                "CỘT TIỀN mà vẫn ra một con số trông hợp lý."
+            ).format(CHAIN_LABEL[chain_key]))
         frappe.throw(_("Chuỗi không hợp lệ: {0}").format(chain_key))
     res = PARSERS[chain_key](sheets)
     rows = res["rows"]
@@ -1800,7 +2668,7 @@ def parse_sheets(sheets, chain_key):
     # nó nguy hiểm gấp đôi vì `_paid_subquery` lấy SUM(ABS(...)) — một khoản trả
     # hàng bị lật thành TIỀN ĐÃ THU trên đúng hóa đơn đó.
     # Đây CHỈ là cờ 'cần người xem lại', KHÔNG tự đổi loại dòng — phân loại bằng
-    # dấu là điều cấm của hợp đồng (§B). Trên cả 5 file thật, số dòng bị gắn cờ = 0.
+    # dấu là điều cấm của hợp đồng (§B). Trên cả 7 file thật, số dòng bị gắn cờ = 0.
     pay_rows = [r for r in rows if r["row_kind"] == "thanh_toan" and r.get("signed_amount")]
     n_pos = sum(1 for r in pay_rows if r["signed_amount"] > 0)
     n_neg = len(pay_rows) - n_pos
@@ -1844,9 +2712,17 @@ def read_payment_advice(content, chain=None):
     chuỗi vẫn ra một con số trông hợp lý nhưng đọc sai cột tiền.
     """
     sheets = read_sheets(content)
-    key = _resolve_chain_key(chain) if chain else detect_chain(sheets)
-    if not key:
-        frappe.throw(_("Không nhận ra chuỗi siêu thị từ file. Hãy chọn chuỗi bằng tay."))
+    if chain:
+        key = _resolve_chain_key(chain)
+        # Người đã CHỌN chuỗi mà báo "không nhận ra chuỗi từ file" là thông báo
+        # sai địa chỉ — họ sẽ đi soi file trong khi lỗi nằm ở tên chuỗi gửi lên.
+        if not key:
+            frappe.throw(_("Không có chuỗi siêu thị tên '{0}'. Chọn lại trong danh sách.")
+                         .format(chain))
+    else:
+        key = detect_chain(sheets)
+        if not key:
+            frappe.throw(_("Không nhận ra chuỗi siêu thị từ file. Hãy chọn chuỗi bằng tay."))
     out = parse_sheets(sheets, key)
     out["sheets"] = [{"name": n, "rows": len(g)} for n, g in sheets]
     if chain is None:
@@ -1855,8 +2731,14 @@ def read_payment_advice(content, chain=None):
 
 
 def _resolve_chain_key(chain):
+    """Nhãn ('AEON') hoặc khóa ASCII ('aeon') -> khóa ASCII. Không nhận ra -> None.
+
+    Nhận diện theo `CHAIN_LABEL` chứ KHÔNG theo `PARSERS`: chuỗi đã có trong danh
+    sách nhưng chưa có tầng đọc (Mega Market) vẫn phải phân giải được, để
+    `parse_sheets` báo đúng lý do "chưa có parser" thay vì "không nhận ra chuỗi".
+    """
     c = _txt(chain)
-    if c in PARSERS:
+    if c in CHAIN_LABEL:
         return c
     for k, label in CHAIN_LABEL.items():
         if strip_tones(label) == strip_tones(c):

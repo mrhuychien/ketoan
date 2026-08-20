@@ -108,9 +108,23 @@ PAGE_SIZE = 20
 MAX_PAGE_SIZE = 200
 
 # Nhãn row_kind trong DocType (tiếng Việt có dấu). Fieldname vẫn ASCII.
-# Đúng options của field `chain` trên MT Payment Advice. Khai ở một chỗ để màn
-# hình, API gán chuỗi và DocType không bao giờ lệch nhau.
-CHAIN_OPTIONS = ("WinCommerce", "Central Retail", "LOTTE", "Emart", "Saigon Co.op")
+#
+# Danh sách chuỗi siêu thị có ĐÚNG MỘT nguồn: `ketoan.install.MT_CHAINS`. Trước
+# đây khai lại ở đây và ở DocType JSON — ba bản sao, và thêm một chuỗi mới thì
+# chắc chắn quên một chỗ. `install.check_chain_options()` đối chiếu cả ba nơi,
+# bộ hồi quy docs/mt/verified/regression_check.py chạy phép kiểm đó.
+from ketoan.install import MT_CHAINS as CHAIN_OPTIONS  # noqa: E402
+
+# Chuỗi không có ký hiệu hóa đơn trong bảng kê -> tầng khớp phải đi nhánh
+# 'số + ngày + tiền' và LUÔN để 'Cần review'. Xem `_match_row`.
+#
+# Emart: chuỗi không cấp ký hiệu (§A hợp đồng).
+# Fuji:  cột 'SỐ HĐTC'/'SỐ HÓA ĐƠN' chỉ in số trần ('4409'), đã soi hết 65 dòng
+#        x 14 cột của file mẫu — không có ký hiệu ở bất kỳ đâu trong file.
+#
+# Chuỗi NGOÀI danh sách này mà bóc ký hiệu ra rỗng nghĩa là ĐỌC HỎNG, và khi đó
+# khớp bằng số trần trên chỉ mục gộp mọi chuỗi là vơ nhầm hóa đơn của chuỗi khác.
+SERIESLESS_CHAINS = ("emart", "fuji")
 
 KIND_PAYMENT = "Thanh toán"
 KIND_DISCOUNT = "Chiết khấu"
@@ -508,7 +522,28 @@ def get_overview(company=None, from_date=None, to_date=None):
         },
         "recent_advices": advices,
         "can_import": is_chief(),
+        # Danh sách chuỗi cho mọi ô chọn trên màn hình. Gửi từ backend thay vì
+        # khai lại trong mt.js: bản sao thứ tư của danh sách này chắc chắn sẽ
+        # lệch — thêm AEON ở Python mà quên ở JS thì kế toán không chọn được
+        # chuỗi để nạp lại khi tự nhận diện trượt.
+        "chain_options": list(CHAIN_OPTIONS),
+        # Chuỗi ĐÃ có tầng đọc file. Chuỗi có trong `chain_options` mà không có
+        # ở đây thì gán khách được nhưng nạp bảng kê chưa được (Mega Market).
+        "chain_parsers": _parser_chains(),
     }
+
+
+def _parser_chains():
+    """Nhãn của các chuỗi ĐÃ có parser bảng kê. Lỗi import -> danh sách rỗng.
+
+    Không để lỗi ở tầng đọc file làm sập cả màn hình tổng quan: màn hình còn
+    nhiều thứ khác không liên quan tới việc nạp file.
+    """
+    try:
+        from ketoan.api.mt_advice import CHAIN_LABEL, PARSERS
+    except Exception:                                        # noqa: BLE001
+        return []
+    return [CHAIN_LABEL[k] for k in PARSERS if k in CHAIN_LABEL]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1010,6 +1045,8 @@ def _read_file(content, chain):
 #   · Central Retail-> doc_no       (2 Clearing Doc. trong 1 file)
 #   · LOTTE         -> payment_date (2 Payment Date trong 1 file)
 #   · WinCommerce, Emart -> chỉ 1 nhóm, không phải chia
+#   · AEON          -> 1 nhóm (mẫu chỉ có PAYMENT NO 265294)
+#   · Fuji          -> 1 nhóm, và KHÔNG có ngày thanh toán trong file
 _GROUP_FIELDS = ("source_sheet", "doc_no", "payment_date")
 
 
@@ -1069,7 +1106,7 @@ def _si_index(company, dates):
     19/02/2025), nên không được lọc theo tháng thanh toán.
 
     CHỈ nạp hóa đơn của KHÁCH KÊNH MT và CHỈ hóa đơn bán ra (is_return = 0):
-      · Kênh: cả 5 chuỗi dùng chung dải ký hiệu (C26THG), và hóa đơn kênh NPP
+      · Kênh: MỌI chuỗi dùng chung dải ký hiệu (C26THG), và hóa đơn kênh NPP
         cũng nằm trong dải đó. Không lọc kênh là để một dòng bảng kê siêu thị
         đánh dấu "đã thu" cho hóa đơn của nhà phân phối.
       · Trả hàng: ERPNext 'Create Return' COPY nguyên custom field sang credit
@@ -1164,7 +1201,7 @@ def _si_index(company, dates):
 def _invoice_objection(si, chain, cus_chain):
     """Lý do KHÔNG được để một liên kết ở mức 'Chắc chắn'. Trả method ASCII hoặc None.
 
-    · Khác chuỗi: cả 5 chuỗi dùng chung dải ký hiệu C26THG, nên chỉ cần đọc lệch
+    · Khác chuỗi: MỌI chuỗi dùng chung dải ký hiệu C26THG, nên chỉ cần đọc lệch
       một chữ số là tiền của chuỗi này được ghi vào hóa đơn của chuỗi khác — hai
       chuỗi lệch công nợ ngược chiều nhau mà không có cảnh báo nào. Ánh xạ khách
       hàng -> chuỗi lấy từ chính các bảng kê kế toán đã chốt (không đoán theo tên).
@@ -1192,7 +1229,8 @@ def _match_row(row, idx, chain_key=None, chain=None, cus_chain=None):
         (§E — đã gặp lẫn lộn ngay trong một file ở Central Retail, LOTTE, Co.op).
       · Nhiều ứng viên thì KHÔNG nối. Nối bừa là đánh dấu đã trả cho hóa đơn của
         khách khác.
-      · Emart không cấp ký hiệu -> khớp bằng SỐ + NGÀY + TIỀN và LUÔN 'Cần review'.
+      · Emart và Fuji không in ký hiệu -> khớp bằng SỐ + NGÀY + TIỀN và LUÔN
+        'Cần review' (danh sách ở `SERIESLESS_CHAINS`).
 
     Cờ `needs_review` của tầng đọc file luôn HẠ độ tin cậy xuống 'Cần review',
     kể cả khi ký hiệu + số khớp đúng một hóa đơn: tầng đọc bật cờ đó khi CHÍNH
@@ -1239,12 +1277,12 @@ def _match_row(row, idx, chain_key=None, chain=None, cus_chain=None):
             return None, f"trung_{len(cands)}_hoa_don", "Cần review", None
         return None, "khong_tim_thay_ky_hieu_so", "Không khớp", None
 
-    # Không có ký hiệu. Nhánh này CHỈ dành cho Emart — chuỗi duy nhất không in ký
-    # hiệu (§A). Chuỗi khác mà bóc ký hiệu ra rỗng nghĩa là ĐỌC HỎNG (WinCommerce
-    # đổi dấu '#', Central Retail thiếu '|' trong Reference): khớp bằng số trần
-    # trên chỉ mục gộp cả 5 chuỗi là vơ nhầm hóa đơn của chuỗi khác. Thà không
-    # khớp và để người nối tay.
-    if cstr(chain_key) != "emart":
+    # Không có ký hiệu. Nhánh này CHỈ dành cho các chuỗi thật sự không in ký hiệu
+    # trong bảng kê (Emart §A, Fuji — xem `SERIESLESS_CHAINS`). Chuỗi khác mà bóc
+    # ký hiệu ra rỗng nghĩa là ĐỌC HỎNG (WinCommerce đổi dấu '#', Central Retail
+    # thiếu '|' trong Reference): khớp bằng số trần trên chỉ mục gộp mọi chuỗi là
+    # vơ nhầm hóa đơn của chuỗi khác. Thà không khớp và để người nối tay.
+    if cstr(chain_key) not in SERIESLESS_CHAINS:
         return None, "thieu_ky_hieu", "Không khớp", None
 
     # Thu hẹp bằng ngày hóa đơn VÀ số tiền, và chỉ nhận khi còn ĐÚNG MỘT ứng viên.
@@ -1551,7 +1589,7 @@ def _plan(content, filename, chain, company):
 
     # Ánh xạ khách hàng -> chuỗi, lấy từ các bảng kê kế toán đã chốt (§I: KHÔNG
     # đoán chuỗi theo tên khách). Dùng để chặn tiền chuỗi này chạy sang hóa đơn
-    # của chuỗi khác — cả 5 chuỗi dùng chung dải ký hiệu.
+    # của chuỗi khác — mọi chuỗi dùng chung dải ký hiệu.
     cus_chain, _amb = _customer_chain_map()
     chain_key = cstr(parsed.get("chain_key") or "")
 
@@ -1722,6 +1760,20 @@ def _summarize(a):
     }
 
 
+def _norm_filename(name):
+    """Tên file gửi lên -> dạng lưu. Đổi \xa0 (non-breaking space) thành dấu cách.
+
+    VÌ SAO: tên file AEON thật là 'chi tiet thanh to\xa0n AEON.xls' — có một ký
+    tự khoảng-trắng-không-ngắt lẫn giữa 'to' và 'n'. `norm_text` (NFC + strip)
+    KHÔNG đổi ký tự đó, nên tên lưu trong DocType nhìn giống 'to n' mà tìm kiếm
+    theo 'toán' lại không ra, và hai lần nạp cùng một file có thể cho hai chuỗi
+    tên khác nhau tùy trình duyệt. Tên file chỉ để người đọc và để tra lại, nên
+    chuẩn hóa ở đây là an toàn — nó KHÔNG tham gia nhận diện chuỗi (chuỗi được
+    nhận từ NỘI DUNG file, xem mt_advice.detect_chain).
+    """
+    return norm_text(cstr(name).replace("\xa0", " "))
+
+
 @frappe.whitelist()
 def preview_advice(content, filename=None, chain=None, company=None):
     """XEM TRƯỚC bảng kê: đọc file, khớp hóa đơn, KHÔNG ghi bất cứ thứ gì.
@@ -1732,7 +1784,7 @@ def preview_advice(content, filename=None, chain=None, company=None):
     _require_tables()
     company = _company(company)
     _check_size(content)
-    filename = norm_text(filename)
+    filename = _norm_filename(filename)
     chain, plan, parsed = _plan(content, filename, chain, company)
 
     advices = []
@@ -1881,7 +1933,7 @@ def commit_advice(content, filename=None, chain=None, expected_hash=None,
     _require_tables()
     company = _company(company)
     _check_size(content)
-    filename = norm_text(filename)
+    filename = _norm_filename(filename)
     if customer and not frappe.db.exists("Customer", customer):
         frappe.throw(_("Không tìm thấy khách hàng {0}").format(customer))
     # Từ đây tới frappe.db.commit() nằm TRONG khóa: dựng lại kế hoạch, kiểm trùng
