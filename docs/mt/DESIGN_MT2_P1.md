@@ -5,7 +5,7 @@
 > Giai đoạn 1 (khai thác nghiệp vụ) bỏ qua — đã có `SOP_ke_toan_MT_RVHG.md` và
 > `docs/blueprint/00_blueprint_p0.md`.
 >
-> Trạng thái: **GIAI ĐOẠN 2 — CHỜ DUYỆT**. Chưa viết code app.
+> Trạng thái: GĐ2 ✅ duyệt · **GĐ3–4 CHỜ DUYỆT** · GĐ5–6 chưa làm. Chưa viết code app.
 
 ---
 
@@ -187,65 +187,155 @@ erDiagram
 
 ---
 
-### 2.6 🚩 BA ĐIỂM PHẢI CHỐT TRƯỚC KHI SANG GIAI ĐOẠN 3
+### 2.6 ✅ BA ĐIỂM ĐÃ CHỐT (20/08/2026)
 
-#### Q1 — Dòng phí có reference được Sales Invoice không?
+#### Q1 — JE phí: **một bút toán cả cục, ghi tham chiếu đầy đủ**
 
-Ràng buộc anh đặt: *"Dòng chạm 131 BẮT BUỘC set reference_type/reference_name =
-Sales Invoice"*. Nhưng dữ liệu thật **không phải lúc nào cũng cho phép**:
+Ràng buộc "dòng 131 bắt buộc reference Sales Invoice" **chỉ áp cho JE thanh
+toán**. Lý do dữ liệu: phí của Central Retail (`D1`), LOTTE (khoản `L`), Emart
+(`I1`), AEON (`Costdet`) đều tính theo **kỳ** hoặc **phiếu giao**, không thuộc
+hóa đơn bán nào — ép cứng thì 4/5 chuỗi không sinh được JE phí.
 
-| Chuỗi | Khoản phí/CK | Gắn được SI? |
+Chốt:
+
+| Loại JE | Dòng 131 | Tham chiếu |
 |---|---|---|
-| Saigon Co.op | 17,75% trừ **trên từng hóa đơn** | ✅ được — file cho theo từng dòng HĐ |
-| Central Retail | `D1` phí theo **kỳ**, ký hiệu `K26TEB` của EB | ❌ không — không thuộc hóa đơn nào |
-| LOTTE | `PHI BAN HANG` / `PHI DICH VU KHAC` theo **store × kỳ** | ❌ không |
-| Emart | `I1` phí hỗ trợ theo **kỳ** | ❌ không |
-| AEON | `Costdet` theo **phiếu giao**, có số HĐ AEON | ❌ không (theo phiếu, không theo HĐ bán của mình) |
+| **Thanh toán** | 1 dòng / Sales Invoice | `reference_type=Sales Invoice` + `reference_name` — **bắt buộc, không ngoại lệ** |
+| **Phí chuỗi xuất** | **1 dòng gộp cả cục** | Không reference SI. Ghi ĐẦY ĐỦ vào `user_remark`: chuỗi · kỳ · số hóa đơn của chuỗi · danh sách khoản trừ · tên bảng kê nguồn |
+| **Chiết khấu mình xuất** (MT2-B) | 1 dòng gộp | `user_remark` ghi số BKCK + số hóa đơn CK |
 
-Hệ quả nếu ép cứng: 4/5 chuỗi **không sinh được JE phí**, phải làm tay — mất
-gần hết giá trị của MT2-D.
+Hệ quả kế toán **phải biết**: JE phí gộp làm **giảm số dư 131 của khách** nhưng
+**không giảm outstanding của từng hóa đơn**. Đúng bản chất — chuỗi trừ phí vào
+tổng thanh toán của kỳ, không trừ vào một hóa đơn cụ thể. Câu này sẽ hiện ngay
+trên màn duyệt JE, không giấu trong tooltip.
 
-**Đề xuất**: giữ ràng buộc cho **JE thanh toán** (bắt buộc, không ngoại lệ vì
-đó là thứ trừ outstanding). Với **JE phí**, dòng Có 131 để **không reference**
-khi file không cho biết hóa đơn nào, và ghi số hóa đơn của chuỗi vào
-`user_remark` + `custom_mt_source_name`. Riêng **Co.op thì reference được** vì
-file cho theo từng hóa đơn → làm đúng.
+Riêng Co.op có 17,75% theo **từng hóa đơn**: vẫn gộp một dòng 131 theo quyết
+định trên, nhưng `user_remark` liệt kê chi tiết từng hóa đơn + số tiền trừ, vì
+dữ liệu có sẵn — "ghi tham chiếu đầy đủ" đúng nghĩa.
 
-Hệ quả kế toán cần biết: JE phí không reference sẽ **giảm số dư 131 của khách**
-nhưng **không giảm outstanding của từng hóa đơn**. Với 4 chuỗi trên, phần phí
-được chuỗi trừ vào tổng thanh toán chứ không vào một hóa đơn cụ thể, nên đây là
-phản ánh đúng bản chất — không phải chỗ chấp nhận cho qua.
+#### Q2 — 1 JE thanh toán / advice ✅
 
-#### Q2 — JE thanh toán: một JE cho cả đợt, hay một JE cho mỗi ngày?
+`MT Payment Advice` đã tách theo `payment_date` từ MT-1, nên `advice ×
+payment_date` luôn là 1. Advice có nhiều `payment_date` ở dòng con → **throw**,
+không tự tách: dữ liệu đã sai từ tầng đọc, sinh JE lên trên là chôn lỗi.
 
-Brief nói *"1 JE / (advice × payment_date)"*. Nhưng `MT Payment Advice` **đã
-tách theo `payment_date`** từ MT-1 (LOTTE 2 kỳ = 2 advice, Co.op 8 kỳ = 8
-advice). Vậy `advice × payment_date` **luôn là 1**.
+#### Q3 — Central Retail: tên store nằm trong **ngoặc** ở `shipping_address_name` ✅
 
-**Đề xuất**: 1 JE thanh toán / advice. Nếu gặp advice có nhiều `payment_date` ở
-dòng con (không nên xảy ra) thì **throw**, không tự tách — dữ liệu đã sai từ
-tầng đọc, sinh JE lên trên là chôn lỗi.
+Đây là nguồn TỐT HƠN file chuỗi: lấy từ **chính ERPNext**, có sẵn link Address,
+và là dữ liệu mình kiểm soát.
 
-#### Q3 — `MT Store` seed từ đâu?
+Quy tắc seed CR:
+- Quét `shipping_address_name` của Sales Invoice kênh MT thuộc Customer Central
+  Retail (và/hoặc quét thẳng `tabAddress`).
+- `store_name` = phần trong **cặp ngoặc cuối cùng** của tên address.
+  Lấy ngoặc CUỐI vì tên address có thể chứa ngoặc khác ở giữa.
+- `store_code` = tên đã chuẩn hóa (bỏ dấu, upper, khoảng trắng → `_`).
+- `address` = chính Address đó → BKCK lấy được buyer info ngay.
+- Không tìm thấy ngoặc → **bỏ qua và ghi log**, không lấy cả tên address làm
+  store (sẽ đẻ ra store rác trùng nhau).
 
-File mẫu cho: LOTTE 19 `Store CD` + tên · CR 59 tên store **không có mã** ·
-Co.op ~120 mã tiền tố + tên · AEON 6 `STORE CODE` · Mega 1 · Win **không có
-store** · Emart **không có store** · Fuji **không có store**.
-
-Central Retail **chỉ có tên, không có mã** → không seed được `store_code`.
-
-**Đề xuất**: seed những chuỗi có mã (LOTTE, AEON, Co.op, Mega). Central Retail
-seed với `store_code` = tên đã chuẩn hóa (bỏ dấu, upper, gạch dưới) và đánh dấu
-`note = "mã suy từ tên, cần chuẩn lại khi có mã thật"`. Không bịa mã số.
+Với 4 chuỗi có mã thật (LOTTE, AEON, Co.op, Mega) vẫn seed từ file mẫu như cũ.
 
 ---
 
-## ✅ CỔNG DUYỆT — GIAI ĐOẠN 2
+## GIAI ĐOẠN 3 — PERMISSION MATRIX
 
-Anh duyệt phần trên (đặc biệt **Q1 · Q2 · Q3**) rồi em sang:
+### 3.0 Nguyên tắc áp dụng cho MT-2
 
-- **Giai đoạn 3** — Permission matrix (Role × DocType mới)
-- **Giai đoạn 4** — Workflow (dự kiến **không cần**: JE đã có docstatus, advice
-  chỉ cần status field; sẽ nêu lý do rồi bỏ qua)
+1. **DocType của app** (`MT Store`, `MT Account Map`) → DocPerm ghi thẳng trong
+   DocType JSON. Convention "KHÔNG ship DocPerm qua fixtures" của repo nhắm vào
+   DocType **core**; DocType do app sở hữu thì JSON chính là nguồn.
+2. **DocType core** (`Journal Entry`) → cấp bằng `add_permission` trong
+   `install.py`, đúng lối đã dùng cho Sales Invoice/Customer.
+3. **Quyền GHI của nghiệp vụ tiền nằm ở kế toán trưởng.** Kế toán MT làm việc
+   hằng ngày qua **portal** — nơi mọi thao tác ghi đều đi qua whitelisted method
+   có `guard_manager()`. Cấp `write` trên Desk cho `Ke Toan MT` là **vô hiệu hóa
+   guard** (đúng lỗi đã mắc và đã sửa ở MT-1 với `MT Payment Advice`).
+4. **Không dùng permlevel** ở P1: không có nhóm field nhạy cảm nào cần che riêng
+   trong 2 DocType mới. Thêm permlevel khi chưa cần là đẻ ra lỗi khó truy.
+
+### 3.1 `MT Store`
+
+| Role | Lvl | R | W | C | D | Report | Print | Export | If Owner |
+|---|---|---|---|---|---|---|---|---|---|
+| System Manager | 0 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| Ke Toan Truong | 0 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | |
+| Accounts Manager | 0 | ✓ | ✓ | ✓ | | ✓ | ✓ | ✓ | |
+| Ke Toan MT | 0 | ✓ | | | | ✓ | ✓ | | |
+| Accounts User | 0 | ✓ | | | | ✓ | | | |
+
+*Vì sao `Ke Toan MT` không có `write`*: mở/đóng điểm siêu thị là việc **thưa**
+(vài lần/năm) nhưng sai thì **định tuyến tiền sai** — store gắn nhầm pháp nhân
+là cả kỳ công nợ chạy sang khách khác. Để trưởng chốt.
+
+### 3.2 `MT Account Map`
+
+| Role | Lvl | R | W | C | D | Report | Print |
+|---|---|---|---|---|---|---|---|
+| System Manager | 0 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Ke Toan Truong | 0 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Accounts Manager | 0 | ✓ | ✓ | ✓ | | ✓ | ✓ |
+| Ke Toan MT | 0 | ✓ | | | | ✓ | |
+| Accounts User | 0 | ✓ | | | | ✓ | |
+
+`Ke Toan MT` **có `read`** — cần thấy TK nào sẽ được dùng ngay trên màn xem
+trước JE. Giấu đi thì họ duyệt một bút toán mà không biết nó vào tài khoản nào.
+
+### 3.3 `Journal Entry` (core — cấp qua `install.py`)
+
+Ma trận hiện hành (`_SALES_CHANNEL_PERMS`) đã cho `Ke Toan MT` quyền
+`DRAFT_DOC` = read/write/create/print/report trên Journal Entry — **không có
+`submit`**. Đúng ý đồ: kế toán kênh lập nháp, không tự ghi sổ.
+
+**MT-2 KHÔNG nới quyền này.** Việc duyệt JE trên portal (MT2-E) đi qua
+whitelisted method có `guard_manager()`, và bản thân `doc.submit()` chạy dưới
+quyền của user — nên **chỉ kế toán trưởng duyệt được**, đúng như hiện trạng
+(`Ke Toan Truong` thừa hưởng `FULL_DOC` cho Journal Entry).
+
+| Role | submit JE | Ghi chú |
+|---|---|---|
+| Ke Toan MT | ❌ | Lập nháp + xem; bấm duyệt sẽ bị guard chặn |
+| Ke Toan Hach Toan | ✓ | `FULL_DOC` sẵn có |
+| Ke Toan Truong | ✓ | |
+
+⚠ **Điểm cần anh xác nhận (Q4)**: hiện `Ke Toan MT` **không duyệt được JE**.
+Nếu thực tế 1 kế toán làm toàn bộ kênh MT và người đó *chính là* người duyệt,
+thì hoặc (a) người đó mang thêm role `Ke Toan Truong`, hoặc (b) nới `submit`
+cho `Ke Toan MT`. Em **không tự quyết** vì đây là nới quyền ghi sổ.
+
+### 3.4 User Permission
+
+Không đặt User Permission mới ở P1. Lọc theo công ty đã do `mt._company()` lo ở
+tầng API (kiểm bằng User Permission trên `Company` nếu có khai).
+
+---
+
+## GIAI ĐOẠN 4 — WORKFLOW BLUEPRINT
+
+### ❌ KHÔNG dùng Workflow doctype — có lý do
+
+Tiêu chí của skill: chỉ dựng Workflow khi DocType có **>3 trạng thái + chuyển
+trạng thái theo role**. Đối chiếu:
+
+| Đối tượng | Trạng thái | Kết luận |
+|---|---|---|
+| `Journal Entry` | Draft → Submitted → Cancelled | **Đã có `docstatus` của core.** Chồng Workflow lên JE là đè lên cơ chế ghi sổ của ERPNext — rủi ro rất cao, lợi ích bằng 0 |
+| `MT Payment Advice` | Nháp / Đã đối chiếu / Đã ghi nhận | Là **thuộc tính** phản ánh tiến độ, không có chuyển trạng thái theo role. Đúng định nghĩa "status field", không phải workflow |
+| `MT Store`, `MT Account Map` | master data | Không có vòng đời |
+
+⇒ **Bỏ qua giai đoạn 4.** Thay bằng ràng buộc trong controller:
+
+- `MT Payment Advice.status = 'Đã ghi nhận'` **chỉ** khi mọi JE mang
+  `custom_mt_source_name = advice.name` đều `docstatus = 1`. Đặt tay trên Desk
+  mà chưa đủ điều kiện → `validate()` throw.
+- `je_state` (read_only) tính lại từ chính các JE đó, không cho sửa tay.
+
+---
+
+## ✅ CỔNG DUYỆT — GIAI ĐOẠN 3 & 4
+
+GĐ2 đã duyệt (Q1·Q2·Q3 chốt ở mục 2.6). Cần anh duyệt GĐ3–4, và trả lời **Q4**
+(ai được duyệt JE — xem 3.3). Sau đó em sang:
+
 - **Giai đoạn 5** — Integration & hooks plan
 - **Giai đoạn 6** — Patch plan (thay cho fixtures — đã chốt ở BƯỚC 0)
