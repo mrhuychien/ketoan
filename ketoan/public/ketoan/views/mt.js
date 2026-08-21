@@ -296,7 +296,8 @@ function boardShell(state, board) {
     <div class="kt-card kt-mb"><div class="kt-card-body">
       <div style="font-weight:600;margin-bottom:4px"><i class="fas fa-layer-group"></i> Việc trên toàn kênh</div>
       <div class="kt-sub" style="margin-bottom:10px">
-        Hai việc dưới đây làm một lượt cho mọi chuỗi, không tách theo chuỗi.
+        Các việc dưới đây làm một lượt cho mọi chuỗi, không tách theo chuỗi.
+        <b>Số dư đầu kỳ</b> làm MỘT LẦN lúc chuyển từ Excel sang phần mềm.
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         ${GLOBAL_VIEWS.map((g) => html`
