@@ -564,7 +564,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-J** bộ lọc chuỗi thật sự lọc — gom về MỘT quy tắc | `7b1aa83` | `chain_filter_check` |
 | **MT2-K1/K2/K3** đọc 7 file công nợ Excel để nhập số dư đầu kỳ | `30e5d0b` `c77ba12` `07c5c73` | `opening_check` |
 | **MT2-L1** danh sách đợt giao Winmart chưa xuất hóa đơn | `8dee7d8` | — |
-| **MT2-L2** đọc phiếu nhập kho Winmart (PDF) + đối soát PO/mã hàng | *(commit này)* | `win_grn_check` |
+| **MT2-L2** đọc phiếu nhập kho Winmart (PDF) + đối soát PO/mã hàng | `8db013e` | `win_grn_check` |
+| **MT2-K4** cất số dư đầu kỳ + luật tất toán trước ngày chuyển giao | *(commit này)* | `opening_store_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -573,10 +574,96 @@ for t in regression_check crosscheck_mt2 mutation_check \
          store_seed_check je_plan_check je_submit_check \
          discount_basis_check discount_sheet_check win_dossier_check \
          debt_due_check rebate_pdf_check clawback_check ui_board_check \
-         chain_filter_check opening_check win_grn_check; do
+         chain_filter_check opening_check win_grn_check opening_store_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
+
+### Số dư đầu kỳ — một luật ĐỌC, không phải bút toán
+
+Kế toán chốt cách nghĩ ngược: **ghi vào phần mềm những hóa đơn CHƯA được thanh
+toán tại ngày chuyển giao, mặc định mọi thứ trước đó đã trả.** Cách đó thu việc
+nhập từ 9.497 dòng xuống 1.167 và chỉ phải tin MỘT cột thay vì hai.
+
+Diễn đạt trong code đúng một câu, ở đúng một chỗ (`mt.opening_settled_expr`):
+
+    hóa đơn của chuỗi X · ngày <= ngày chốt của X · KHÔNG có tên trong danh
+    sách còn nợ của X   ->   coi như ĐÃ THANH TOÁN.
+
+**Đây là luật ĐỌC, không sinh chứng từ nào.** Không bút toán, không đụng sổ,
+không `db_set` lên hóa đơn. Chốt sai thì mở lại là xong — đó là lý do chọn cách
+này thay vì đánh dấu lên từng Sales Invoice.
+
+#### Ba bước, cố ý tách rời
+
+| | Làm gì | Ảnh hưởng công nợ |
+|---|---|---|
+| **Nháp** | đọc file, nối từng dòng sang Sales Invoice, cất lại | **không** |
+| **Nối tay** | dòng máy không nối được thì người nối, hoặc đánh dấu `Bỏ qua` | **không** |
+| **Đã chốt** | bật luật | **có** |
+
+Gộp bước 3 vào lúc tải file lên là để một lần bấm nhầm cuốn trôi vài tỷ mà không
+ai kịp nhìn. Màn hình chốt bày ra **đúng danh sách hóa đơn sắp biến mất** trước
+khi hỏi.
+
+#### Vì sao phải nối được hóa đơn thì mới cho chốt
+
+Luật chạy theo **hóa đơn ERPNext**, không theo số hóa đơn trong file. Một dòng
+còn nợ không nối được Sales Invoice nào thì nó không GIỮ được hóa đơn nào lại —
+và đúng hóa đơn đang còn nợ đó rơi vào vế "không có trong danh sách", tức là bị
+coi là đã trả. **Nợ thật biến mất, im lặng.** Nên `validate` chặn chốt khi còn
+dòng nhóm `co_hoa_don` chưa nối và chưa ai bảo bỏ qua.
+
+#### Nối dòng sang hóa đơn — đo trước rồi mới viết
+
+Đã kiểm cả 7 file: **không file nào in ký hiệu hóa đơn**, chỉ in SỐ, đệm 0
+(`00003333`). Nên không có nhánh "ký hiệu + số" ở đây — dựng ra là code chết mà
+đọc vào lại tưởng đang có phép khớp mạnh.
+
+Bù lại, số dư đầu kỳ biết ba thứ mà bảng kê thanh toán không có cùng lúc: chuỗi
+của cả file, ngày hóa đơn, tổng tiền. Thu hẹp bằng cả ba, **chỉ nhận khi còn
+đúng một ứng viên**, và mọi liên kết máy đề xuất đều để `Cần review`.
+
+Số hóa đơn đánh lại từ 1 theo từng mẫu số — file Co.op có cả `00007709` lẫn
+`00000001` — nên "trùng số" là chuyện bình thường, nhận bừa là giữ nhầm hóa đơn
+này và tất toán oan hóa đơn kia.
+
+#### Chặn
+
+- **Một chuỗi chốt MỘT LẦN** (chặn ở `validate`, không chỉ ở giao diện). Nhập
+  lần hai là cộng đôi — riêng bộ file mẫu là ~5 tỷ.
+- Hai dòng nối cùng một hóa đơn -> chặn chốt.
+- Ngày chốt sớm hơn ngày ERPNext có dữ liệu -> chặn.
+- Xóa bản **đã chốt** -> chặn (mọi hóa đơn quay lại rổ nợ cùng lúc).
+- Chuỗi đã chốt mà **chưa gán khách nào** -> `1 = 0`: bản chốt đó không che hóa
+  đơn nào. Rỗng là rỗng.
+- Chưa có bản chốt nào -> luật trả `0`. Mặc định là **không giấu gì**.
+
+#### Con số mang sang
+
+```
+Nợ gộp (7 sheet chính)                      5.059.095.894đ
+− ghi giảm chưa cấn trừ (3 sheet phụ)         183.968.726đ
+= Nợ ròng                                   4.875.127.168đ
+− đơn đã giao CHƯA xuất hóa đơn                46.665.180đ   <- không phải phải thu
+= CÔNG NỢ MANG SANG                         4.828.461.988đ
+```
+
+Dòng thứ tư là quyết định: 9 dòng WinCommerce không có số hóa đơn, file Excel vẫn
+cộng vào `Số còn nợ`. Chưa xuất hóa đơn thì chưa phải khoản phải thu — chúng được
+theo dõi riêng ở `MT Win Pending`. `opening_debt` **giữ nguyên** con số đã đối
+chiếu với dòng TỔNG CỘNG in trong file; phần tách ra nằm ở `debt_carried`, để cả
+hai đều tra ngược lại được.
+
+#### Luật đi vào đâu
+
+| Màn hình | Áp luật? | Vì sao |
+|---|---|---|
+| Rổ "chưa thanh toán" | **có** | rổ nói về NỢ |
+| Công nợ đến hạn (`mt_debt`) | **có** | cùng hàm, để hai màn hình không ra hai số |
+| Công nợ theo khách (`outstanding`, `unpaid_count`) | **có** | bọc hai cột nợ, không bọc `invoiced` |
+| Rổ "tất cả" · "đã thanh toán" | **không** | vẫn phải tra lại được hóa đơn cũ |
+| Khớp bảng kê thanh toán | **không** | bảng kê đến sau vẫn phải nối được hóa đơn cũ |
 
 ### Phiếu nhập kho Winmart — chốt bằng hai file PDF thật
 

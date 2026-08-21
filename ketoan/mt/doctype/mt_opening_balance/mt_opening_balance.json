@@ -1,0 +1,319 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-08-21 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "chain",
+  "status",
+  "cutover_date",
+  "golive_date",
+  "col_head",
+  "file_name",
+  "file_hash",
+  "sheet_name",
+  "imported_by",
+  "sec_money",
+  "opening_debt_gross",
+  "deduction_open",
+  "col_money",
+  "opening_debt",
+  "no_invoice_amount",
+  "debt_carried",
+  "sec_count",
+  "n_rows",
+  "n_in_erp",
+  "n_pre_golive",
+  "n_no_invoice",
+  "col_count",
+  "n_matched",
+  "n_unmatched",
+  "n_settled",
+  "sec_lines",
+  "lines",
+  "sec_ded",
+  "deductions",
+  "sec_note",
+  "note"
+ ],
+ "fields": [
+  {
+   "default": "MT-OPEN-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Dãy số",
+   "options": "MT-OPEN-.#####",
+   "reqd": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Công ty",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "description": "MỘT chuỗi chốt số dư MỘT LẦN. Nhập lại lần hai là cộng đôi công nợ.",
+   "fieldname": "chain",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Chuỗi",
+   "options": "\nWinCommerce\nCentral Retail\nLOTTE\nEmart\nSaigon Co.op\nAEON\nFuji\nMega Market",
+   "reqd": 1
+  },
+  {
+   "default": "Nháp",
+   "description": "'Đã chốt' MỚI bật luật tất toán: hóa đơn trước ngày chốt mà không có trong danh sách này coi như đã thanh toán.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trạng thái",
+   "options": "\nNháp\nĐã chốt",
+   "reqd": 1
+  },
+  {
+   "description": "Mốc chuyển giao từ Excel sang phần mềm. Hóa đơn của chuỗi này có ngày <= mốc mà KHÔNG nằm trong danh sách -> đã tất toán.",
+   "fieldname": "cutover_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày chốt số dư",
+   "reqd": 1
+  },
+  {
+   "description": "Trước mốc này ERPNext không có hóa đơn nào, nên dòng nợ trước đó là nợ đầu kỳ độc lập.",
+   "fieldname": "golive_date",
+   "fieldtype": "Date",
+   "label": "ERPNext có dữ liệu từ",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "file_name",
+   "fieldtype": "Data",
+   "label": "Tên file nguồn",
+   "read_only": 1
+  },
+  {
+   "description": "sha1 của chính file Excel đã nhập — để biết lần sau có phải cùng một file không.",
+   "fieldname": "file_hash",
+   "fieldtype": "Data",
+   "label": "Vân tay file",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sheet_name",
+   "fieldtype": "Data",
+   "label": "Sheet đã đọc",
+   "read_only": 1
+  },
+  {
+   "fieldname": "imported_by",
+   "fieldtype": "Link",
+   "label": "Người nhập",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_money",
+   "fieldtype": "Section Break",
+   "label": "Số dư mang sang"
+  },
+  {
+   "fieldname": "opening_debt_gross",
+   "fieldtype": "Currency",
+   "label": "Nợ gộp (sheet chính)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "deduction_open",
+   "fieldtype": "Currency",
+   "label": "Ghi giảm chưa cấn trừ",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_money",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "= nợ gộp − ghi giảm chưa cấn trừ. Đây là con số thật sự mang sang.",
+   "fieldname": "opening_debt",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "NỢ RÒNG ĐẦU KỲ",
+   "read_only": 1
+  },
+  {
+   "description": "Dòng còn nợ KHÔNG có số hóa đơn — hàng đã giao, chưa xuất hóa đơn. File Excel cộng nó vào `Số còn nợ`; nó KHÔNG phải khoản phải thu và được theo dõi riêng ở danh sách đợt giao.",
+   "fieldname": "no_invoice_amount",
+   "fieldtype": "Currency",
+   "label": "Trong đó: đơn chưa xuất hóa đơn",
+   "read_only": 1
+  },
+  {
+   "description": "= nợ ròng − đơn chưa xuất hóa đơn. Đây là con số vào công nợ.",
+   "fieldname": "debt_carried",
+   "fieldtype": "Currency",
+   "label": "CÔNG NỢ MANG SANG",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_count",
+   "fieldtype": "Section Break",
+   "label": "Đối chiếu dòng"
+  },
+  {
+   "fieldname": "n_rows",
+   "fieldtype": "Int",
+   "label": "Dòng còn nợ",
+   "read_only": 1
+  },
+  {
+   "fieldname": "n_in_erp",
+   "fieldtype": "Int",
+   "label": "Nhóm 'phải khớp ERPNext'",
+   "read_only": 1
+  },
+  {
+   "fieldname": "n_pre_golive",
+   "fieldtype": "Int",
+   "label": "Nhóm 'trước go-live'",
+   "read_only": 1
+  },
+  {
+   "fieldname": "n_no_invoice",
+   "fieldtype": "Int",
+   "label": "Nhóm 'chưa có số hóa đơn'",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_count",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "n_matched",
+   "fieldtype": "Int",
+   "label": "Đã nối được hóa đơn",
+   "read_only": 1
+  },
+  {
+   "description": "Dòng nhóm 'phải khớp ERPNext' mà không nối được hóa đơn nào. Chốt khi còn dòng ở đây là để hóa đơn thật bị tất toán oan.",
+   "fieldname": "n_unmatched",
+   "fieldtype": "Int",
+   "label": "CHƯA nối được",
+   "read_only": 1
+  },
+  {
+   "fieldname": "n_settled",
+   "fieldtype": "Int",
+   "label": "Hóa đơn được tất toán khi chốt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_lines",
+   "fieldtype": "Section Break",
+   "label": "Danh sách hóa đơn CÒN NỢ"
+  },
+  {
+   "fieldname": "lines",
+   "fieldtype": "Table",
+   "label": "Dòng còn nợ",
+   "options": "MT Opening Invoice"
+  },
+  {
+   "fieldname": "sec_ded",
+   "fieldtype": "Section Break",
+   "label": "Sheet ghi giảm"
+  },
+  {
+   "fieldname": "deductions",
+   "fieldtype": "Table",
+   "label": "Ghi giảm",
+   "options": "MT Opening Deduction"
+  },
+  {
+   "fieldname": "sec_note",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-21 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Opening Balance",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan Truong",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan MT",
+   "share": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1
+  }
+ ],
+ "search_fields": "chain,status,cutover_date",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "title_field": "chain",
+ "track_changes": 1
+}

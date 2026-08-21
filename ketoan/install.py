@@ -227,8 +227,16 @@ MT_CHAINS = (
 # Option của Select bắt đầu bằng dòng RỖNG: khách ngoài kênh MT phải để trống được.
 MT_CHAIN_OPTIONS = "\n".join(("",) + MT_CHAINS)
 
-# Đường dẫn tương đối tới DocType JSON có field `chain` — dùng cho phép kiểm ba nơi.
-MT_ADVICE_DOCTYPE_JSON = "mt/doctype/mt_payment_advice/mt_payment_advice.json"
+# Đường dẫn tương đối tới MỌI DocType JSON có field Select `chain` — phép kiểm
+# đối chiếu tất cả với `MT_CHAIN_OPTIONS`. Thêm DocType mới có field `chain` thì
+# THÊM VÀO ĐÂY, nếu không nó thành nơi thứ tư âm thầm lệch.
+MT_CHAIN_DOCTYPE_JSON = (
+    "mt/doctype/mt_payment_advice/mt_payment_advice.json",
+    "mt/doctype/mt_opening_balance/mt_opening_balance.json",
+)
+
+# Giữ tên cũ cho code/kiểm đã trỏ vào đây.
+MT_ADVICE_DOCTYPE_JSON = MT_CHAIN_DOCTYPE_JSON[0]
 
 
 def check_chain_options():
@@ -251,19 +259,21 @@ def check_chain_options():
             problems.append("ketoan/api/mt.py CHAIN_OPTIONS lệch: %s != %s"
                             % (list(api_chains), list(MT_CHAINS)))
 
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), MT_ADVICE_DOCTYPE_JSON)
-    try:
-        with open(path, encoding="utf-8") as fh:
-            meta = json.load(fh)
-    except Exception as e:                                   # noqa: BLE001
-        problems.append("Không đọc được %s: %s" % (MT_ADVICE_DOCTYPE_JSON, e))
-    else:
+    here = os.path.dirname(os.path.abspath(__file__))
+    for rel in MT_CHAIN_DOCTYPE_JSON:
+        path = os.path.join(here, rel)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                meta = json.load(fh)
+        except Exception as e:                               # noqa: BLE001
+            problems.append("Không đọc được %s: %s" % (rel, e))
+            continue
         field = next((f for f in meta.get("fields") or [] if f.get("fieldname") == "chain"), None)
         if not field:
-            problems.append("%s không có field `chain`" % MT_ADVICE_DOCTYPE_JSON)
+            problems.append("%s không có field `chain`" % rel)
         elif field.get("options") != MT_CHAIN_OPTIONS:
-            problems.append("mt_payment_advice.json chain.options lệch: %r != %r"
-                            % (field.get("options"), MT_CHAIN_OPTIONS))
+            problems.append("%s chain.options lệch: %r != %r"
+                            % (os.path.basename(rel), field.get("options"), MT_CHAIN_OPTIONS))
 
     return problems
 

@@ -59,6 +59,7 @@ from ketoan.api.mt import (
     KIND_PAYMENT,
     _company,
     _mt_clause,
+    opening_open_clause,
     _paid_subquery,
     _require_tables,
 )
@@ -165,6 +166,12 @@ def _fetch(company, as_of, chain=None, customer=None, search=None):
 
     credit = "c.custom_mt_credit_days" if _has_credit_days() else "NULL"
 
+    # Hóa đơn đã tất toán TRƯỚC ngày chuyển giao không còn là nợ. Gọi đúng cái
+    # hàm mà `mt.get_overview` gọi — màn hình công nợ và rổ 'chưa thanh toán'
+    # phải nói về CÙNG một tập hóa đơn, nếu không kế toán đối chiếu hai màn hình
+    # ra hai số khác nhau mà không biết tin cái nào.
+    opening = opening_open_clause(p, p["company"])
+
     return frappe.db.sql(f"""
         SELECT si.name, si.customer, si.customer_name, si.posting_date, si.due_date,
                ABS(si.grand_total) AS grand_total,
@@ -183,6 +190,7 @@ def _fetch(company, as_of, chain=None, customer=None, search=None):
           AND si.is_return = 0
           AND si.posting_date <= %(as_of)s
           AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < ABS(si.grand_total) - %(tol)s
+          AND {opening}
           AND {mt} {extra}
         ORDER BY si.posting_date ASC, si.name ASC
     """, p, as_dict=True)

@@ -226,6 +226,17 @@ export const api = {
   mtWinCustomers: () => callMethod(NS + "mt_win_pending.search_win_customers", withCompany({})),
   mtWinGrnPreview: (content) => callMethod(NS + "mt_win_grn.preview", withCompany({ content })),
   mtWinGrnAttach: (a) => callMethod(NS + "mt_win_grn.attach_grn", withCompany(a)),
+  mtOpenings: () => callMethod(NS + "mt_opening_store.list_openings", withCompany({})),
+  mtOpeningPreview: (a) => callMethod(NS + "mt_opening_store.preview_import", withCompany(a)),
+  mtOpeningCommit: (a) => callMethod(NS + "mt_opening_store.commit_import", withCompany(a)),
+  mtOpeningGet: (a) => callMethod(NS + "mt_opening_store.get_opening", withCompany(a)),
+  mtOpeningSetLine: (a) => callMethod(NS + "mt_opening_store.set_line", withCompany(a)),
+  mtOpeningSearchInvoices: (a) => callMethod(NS + "mt_opening_store.search_invoices", withCompany(a)),
+  mtOpeningFinalizePreview: (name) => callMethod(NS + "mt_opening_store.finalize_preview", withCompany({ name })),
+  mtOpeningFinalize: (a) => callMethod(NS + "mt_opening_store.finalize", withCompany(a)),
+  mtOpeningReopen: (name) => callMethod(NS + "mt_opening_store.reopen", withCompany({ name })),
+  mtOpeningDelete: (name) => callMethod(NS + "mt_opening_store.delete_opening", withCompany({ name })),
+  mtOpeningSettled: (a) => callMethod(NS + "mt_opening_store.settled_invoices", withCompany(a)),
 
   // Bảng điều khiển theo CHUỖI — màn hình đầu tiên của kênh MT. Một lời gọi
   // trả về tiến độ cả năm bước cho mọi chuỗi.

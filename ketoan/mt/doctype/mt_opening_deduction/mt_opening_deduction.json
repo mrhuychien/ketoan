@@ -1,0 +1,68 @@
+{
+ "actions": [],
+ "creation": "2026-08-21 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "sheet",
+  "n_rows",
+  "gross",
+  "offset_amount",
+  "remaining",
+  "unreadable"
+ ],
+ "fields": [
+  {
+   "fieldname": "sheet",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Sheet ghi giảm",
+   "read_only": 1
+  },
+  {
+   "fieldname": "n_rows",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Số dòng",
+   "read_only": 1
+  },
+  {
+   "fieldname": "gross",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "TỔNG",
+   "read_only": 1
+  },
+  {
+   "fieldname": "offset_amount",
+   "fieldtype": "Currency",
+   "label": "Đã cấn trừ",
+   "read_only": 1
+  },
+  {
+   "description": "Đây mới là phần TRỪ vào nợ đầu kỳ. Phần đã cấn trừ thì bảng chính đã trừ rồi.",
+   "fieldname": "remaining",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Còn lại (chưa cấn trừ)",
+   "read_only": 1
+  },
+  {
+   "description": "Không cặp cột nào thỏa `TỔNG − đã cấn trừ = còn lại`. Phần ghi giảm của sheet này CHƯA được trừ.",
+   "fieldname": "unreadable",
+   "fieldtype": "Check",
+   "label": "KHÔNG dò được cột",
+   "read_only": 1
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-21 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Opening Deduction",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

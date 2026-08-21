@@ -368,6 +368,72 @@ _BUCKET_WHERE = {
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Luật tất toán theo SỐ DƯ ĐẦU KỲ — MỘT nơi duy nhất
+# ═══════════════════════════════════════════════════════════════════════════
+
+def opening_settled_expr(params, company, alias="si"):
+    """Biểu thức SQL đúng khi hóa đơn ĐÃ TẤT TOÁN trước ngày chuyển giao.
+
+    Kế toán đã chốt cách nghĩ ngược: nhập vào phần mềm những hóa đơn **CHƯA**
+    được thanh toán tại ngày chốt, mặc định mọi thứ trước đó đã trả. Nên:
+
+        hóa đơn của chuỗi X, ngày <= ngày chốt của X, mà KHÔNG có tên trong
+        danh sách còn nợ của X   ->   đã thanh toán.
+
+    Chỉ tính bản số dư đã ở trạng thái **Đã chốt**. Bản Nháp không bật luật gì —
+    nhập vào, soi, nối tay xong mới chốt.
+
+    BA ĐIỂM CỐ Ý:
+
+    · Khách của chuỗi lấy từ `chain_customers()` — ĐÚNG một quy tắc khách->chuỗi
+      của cả app (xem MT2-J). Không viết lại phép so chuỗi bằng SQL ở đây, vì
+      thành quy tắc thứ hai là lại lệch.
+    · Chuỗi đã chốt mà CHƯA gán khách nào -> `chain_customers` rỗng ->
+      `_customer_in_clause` trả `1 = 0` -> bản chốt đó không che hóa đơn nào.
+      Rỗng là rỗng, không bao giờ là tất cả.
+    · Trả `0` (không hóa đơn nào tất toán) khi chưa có bản chốt nào. Mặc định
+      phải là "không giấu gì cả".
+
+    Hàm này là NƠI DUY NHẤT diễn đạt luật. Mọi màn hình nói về công nợ đều gọi
+    nó; không màn hình nào được tự dựng lại điều kiện tương đương.
+    """
+    from ketoan.mt.doctype.mt_opening_balance.mt_opening_balance import finalized_for
+
+    parts = []
+    for i, ob in enumerate(finalized_for(company)):
+        cus = chain_customers(ob.chain)
+        in_cus = _customer_in_clause(cus, params, prefix="ob%dc" % i, alias=alias)
+        params["obd%d" % i] = cstr(ob.cutover_date)
+        params["obp%d" % i] = ob.name
+        parts.append(
+            "({alias}.posting_date <= %(obd{i})s AND {in_cus}"
+            " AND NOT EXISTS (SELECT 1 FROM `tabMT Opening Invoice` oi"
+            "                 WHERE oi.parent = %(obp{i})s"
+            "                   AND oi.parenttype = 'MT Opening Balance'"
+            "                   AND oi.sales_invoice = {alias}.name))"
+            .format(alias=alias, i=i, in_cus=in_cus))
+    return "(%s)" % " OR ".join(parts) if parts else "0"
+
+
+def opening_open_clause(params, company, alias="si"):
+    """Mệnh đề giữ lại hóa đơn CHƯA tất toán theo số dư đầu kỳ."""
+    return "NOT %s" % opening_settled_expr(params, company, alias=alias)
+
+
+def _bucket_where(bucket, params, company):
+    """Điều kiện của một rổ hóa đơn, đã áp luật số dư đầu kỳ khi cần.
+
+    CHỈ rổ 'chưa thanh toán' bị áp: đó là rổ nói về NỢ. Rổ 'tất cả' vẫn phải
+    thấy hóa đơn cũ — giấu nó khỏi mọi màn hình là kế toán không còn chỗ nào tra
+    lại xem vì sao nó biến mất.
+    """
+    where = _BUCKET_WHERE[bucket]
+    if bucket == "chua_thanh_toan":
+        where += " AND " + opening_open_clause(params, company)
+    return where
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Màn hình 1 — Tổng quan
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -403,8 +469,8 @@ def get_overview(company=None, from_date=None, to_date=None):
               AND {mt} AND {where}
         """, p, as_dict=True)[0]
 
-    chua = bucket(_BUCKET_WHERE["chua_thanh_toan"])
-    da = bucket(_BUCKET_WHERE["da_thanh_toan"])
+    chua = bucket(_bucket_where("chua_thanh_toan", p, company))
+    da = bucket(_bucket_where("da_thanh_toan", p, company))
 
     # Rổ 3 đếm DÒNG BẢNG KÊ, không đếm hóa đơn: khoản chuỗi trừ lại thường không
     # gắn với hóa đơn nào (phí hỗ trợ, chiết khấu tháng, NET OFF).
@@ -566,10 +632,13 @@ def _parser_chains():
 # Màn hình 2 — Danh sách hóa đơn (chia trang 20/trang)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _invoice_page(company, from_date, to_date, where, search, page_size, offset, sort=None,
+def _invoice_page(company, from_date, to_date, bucket, search, page_size, offset, sort=None,
                   customer=None, chain=None):
     p = {"company": company, "fd": from_date, "td": to_date, "tol": PAID_TOLERANCE,
          "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT, "limit": page_size, "offset": offset}
+    # Điều kiện rổ dựng Ở ĐÂY chứ không nhận sẵn từ ngoài: rổ 'chưa thanh toán'
+    # phải kèm luật số dư đầu kỳ, và luật đó cần chính `p` để nhét tham số vào.
+    where = _bucket_where(bucket, p, company)
     mt = _mt_clause(p)
     # Lọc theo CHUỖI. Hóa đơn không mang trường chuỗi — nó thuộc chuỗi nào là do
     # KHÁCH HÀNG của nó thuộc chuỗi nào (SOP §0.2: Customer = chuỗi).
@@ -736,7 +805,7 @@ def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None
                                       chain, customer)
     else:
         source = "erp"
-        rows, total = _invoice_page(company, from_date, to_date, _BUCKET_WHERE[bucket],
+        rows, total = _invoice_page(company, from_date, to_date, bucket,
                                     search, page_size, offset, customer=customer,
                                     chain=chain)
 
@@ -2286,6 +2355,10 @@ def get_customer_summary(company=None, from_date=None, to_date=None, chain=None,
          "tol": PAID_TOLERANCE, "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}
     mt = _mt_clause(p)
     join = _paid_subquery()
+    # Hóa đơn đã tất toán trước ngày chuyển giao KHÔNG còn nợ — nhưng vẫn phải
+    # nằm trong `invoiced` của kỳ đó, vì nó có xuất thật. Nên luật chỉ bọc hai
+    # cột NỢ, không bọc cả câu WHERE.
+    settled = opening_settled_expr(p, company)
 
     # ── Vế CÔNG NỢ: theo hóa đơn ghi sổ trong kỳ ────────────────────────────
     inv_where = ""
@@ -2298,9 +2371,9 @@ def get_customer_summary(company=None, from_date=None, to_date=None, chain=None,
                IFNULL(SUM(CASE WHEN si.is_return = 0 THEN ABS(si.grand_total) ELSE 0 END), 0) AS invoiced,
                IFNULL(SUM(CASE WHEN si.is_return = 1 THEN ABS(si.grand_total) ELSE 0 END), 0) AS returns_amt,
                IFNULL(SUM(LEAST({_NET_PAID}, ABS(si.grand_total))), 0) AS collected,
-               IFNULL(SUM(CASE WHEN si.is_return = 0
+               IFNULL(SUM(CASE WHEN si.is_return = 0 AND NOT {settled}
                           THEN GREATEST(ABS(si.grand_total) - {_NET_PAID}, 0) ELSE 0 END), 0) AS outstanding,
-               SUM(CASE WHEN si.is_return = 0
+               SUM(CASE WHEN si.is_return = 0 AND NOT {settled}
                         AND {_NET_PAID} < ABS(si.grand_total) - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer

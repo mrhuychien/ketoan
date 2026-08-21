@@ -72,6 +72,9 @@ const GLOBAL_VIEWS = [
   // xuống tới từng pháp nhân mới biết gọi cho ai.
   { key: "g-khach", label: "Công nợ theo khách hàng", icon: "fa-building",
     hint: "Xuống từng pháp nhân của mỗi chuỗi. Một chuỗi thường có nhiều pháp nhân xuất hóa đơn riêng." },
+  // Việc MỘT LẦN, làm trước tất cả: chuyển sổ theo dõi Excel sang phần mềm.
+  { key: "g-so-du", label: "Số dư đầu kỳ", icon: "fa-file-import",
+    hint: "Nhập danh sách hóa đơn CÒN NỢ tại ngày chuyển giao. Mỗi chuỗi làm MỘT LẦN. Chốt xong, hóa đơn trước ngày đó mà không có trong danh sách coi như đã thanh toán." },
 ];
 
 // Rổ tuổi nợ — khóa phải trùng `mt_debt.BUCKETS`. Nhãn hiển thị lấy từ backend.
@@ -156,6 +159,8 @@ export async function render({ container, query }) {
     bkckStatus: query?.bkck_status || "",
     winStatus: query?.win_status || "",
     jeDocstatus: query?.je_docstatus === "1" ? "1" : "0",
+    openName: query?.open || "",
+    openOnly: "",
     dueBucket: "tat_ca",
     dueAsOf: "",
     board: null,
@@ -203,7 +208,10 @@ async function paint(container, state) {
 function syncHash(state) {
   const p = [`from=${state.from}`, `to=${state.to}`];
   if (state.view === "chuoi") { p.push(`chain=${q(state.chain)}`, `step=${state.step}`); }
-  else if (state.view === "toan-kenh") { p.push(`g=${state.global}`); }
+  else if (state.view === "toan-kenh") {
+    p.push(`g=${state.global}`);
+    if (state.global === "g-so-du" && state.openName) p.push(`open=${q(state.openName)}`);
+  }
   history.replaceState(null, "", `#/cong-no-mt?${p.join("&")}`);
 }
 
@@ -604,6 +612,11 @@ async function loadTab(container, state) {
   if (state.view === "toan-kenh") {
     if (state.global === "g-cong-no") return loadDueDebt(container, state);
     if (state.global === "g-khach") return loadChains(container, state);
+    if (state.global === "g-so-du") {
+      return state.openName
+        ? loadOpeningDoc(container, state)
+        : loadOpeningBoard(container, state);
+    }
     return loadJeApproval(container, state);
   }
 
@@ -4353,6 +4366,541 @@ async function openWinGrn(container, state, content) {
     } catch (e) {
       toast(e.message, "error");
       at.disabled = false;
+    }
+  });
+}
+
+// ── Số dư đầu kỳ: bảng chuỗi ──────────────────────────────────────────────
+// Việc MỘT LẦN cho mỗi chuỗi. Ba trạng thái, và chỉ trạng thái cuối mới đụng
+// tới công nợ:
+//   chưa nhập  ->  Nháp (đã nhập, chưa bật luật)  ->  Đã chốt (bật luật).
+const OB_TONE = { "": "gray", "Nháp": "yellow", "Đã chốt": "green" };
+
+async function loadOpeningBoard(container, state) {
+  const body = container.querySelector("#mt-body");
+  let res;
+  try {
+    res = await api.mtOpenings();
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = res.rows || [];
+
+  setHTML(body, html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-primary)">
+      <div class="kt-card-body kt-sub">${res.note}</div>
+    </div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+      <span class="kt-sub">Đã chốt <b>${res.n_done}/${rows.length}</b> chuỗi</span>
+      <span class="kt-sub">Công nợ mang sang: <b>${formatVND(res.total_carried)}</b></span>
+      ${!res.can_manage ? html`<span class="kt-sub">Chỉ kế toán trưởng mới nhập/chốt được.</span>` : ""}
+    </div></div>
+
+    <div class="kt-card"><div class="kt-card-body">
+      <div class="kt-table-wrap"><table class="kt-table">
+        <thead><tr>
+          <th>Chuỗi</th><th>Trạng thái</th><th>Ngày chốt</th>
+          <th class="num">Nợ ròng</th><th class="num">Đơn chưa xuất HĐ</th>
+          <th class="num">Mang sang</th><th class="num">Dòng treo</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${rows.map((r) => html`<tr>
+            <td><b>${r.chain}</b>
+              ${!r.n_customers ? html`<div class="kt-sub" style="color:var(--kt-warning)">chưa gán khách hàng nào</div>` : ""}</td>
+            <td><span class="kt-badge kt-badge--${OB_TONE[r.status] || "gray"}">${r.status || "chưa nhập"}</span></td>
+            <td>${r.doc ? formatDate(r.doc.cutover_date) : html`<span class="kt-sub">—</span>`}</td>
+            <td class="num">${r.doc ? formatVND(r.doc.opening_debt) : html`<span class="kt-sub">—</span>`}</td>
+            <td class="num">${r.doc && r.doc.no_invoice_amount
+              ? html`<span class="kt-sub">${formatVND(r.doc.no_invoice_amount)}</span>` : html`<span class="kt-sub">—</span>`}</td>
+            <td class="num">${r.doc ? html`<b>${formatVND(r.doc.debt_carried)}</b>` : html`<span class="kt-sub">—</span>`}</td>
+            <td class="num">${r.doc && r.doc.n_unmatched
+              ? html`<span class="kt-badge kt-badge--red">${r.doc.n_unmatched}</span>`
+              : html`<span class="kt-sub">${r.doc ? "0" : "—"}</span>`}</td>
+            <td>${r.doc
+              ? html`<button class="kt-btn kt-btn--outline kt-btn--sm ob-open" data-name="${r.doc.name}">
+                  <i class="fas fa-folder-open"></i> Mở</button>`
+              : (res.can_manage
+                ? html`<button class="kt-btn kt-btn--primary kt-btn--sm ob-import" data-chain="${r.chain}">
+                    <i class="fas fa-file-import"></i> Nhập file</button>`
+                : html`<span class="kt-sub">chưa nhập</span>`)}</td>
+          </tr>`)}
+        </tbody>
+      </table></div>
+    </div></div>
+  `);
+
+  container.querySelectorAll(".ob-open").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.openName = b.dataset.name; state.openOnly = ""; state.page = 1;
+      loadTab(container, state);
+    });
+  });
+  container.querySelectorAll(".ob-import").forEach((b) => {
+    b.addEventListener("click", () => pickOpeningFile(container, state, b.dataset.chain));
+  });
+}
+
+function pickOpeningFile(container, state, chain) {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".xlsx,.xls,.xlsm";
+  inp.addEventListener("change", () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    const fr = new FileReader();
+    fr.onload = () => openOpeningImport(container, state, chain, String(fr.result).split(",").pop());
+    fr.readAsDataURL(f);
+  });
+  inp.click();
+}
+
+// ── Nhập file: hỏi hai mốc ngày TRƯỚC, rồi mới đọc ────────────────────────
+// Hai mốc này quyết định toàn bộ cách phân nhóm, nên không đoán hộ: `golive`
+// chia "hóa đơn ERPNext có" với "nợ độc lập", `cutover` là mốc bật luật.
+async function openOpeningImport(container, state, chain, content) {
+  const modal = openModal({
+    title: `Nhập số dư đầu kỳ — ${chain}`,
+    icon: "fa-file-import",
+    maxWidth: 960,
+    body: html`
+      <div class="kt-sub" style="margin-bottom:12px">
+        Hai mốc ngày quyết định cách chia nhóm. Khai xong mới đọc file.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <label>Ngày chốt số dư
+          <input type="date" class="kt-input" id="ob-cut" value="${todayISO()}">
+          <div class="kt-sub">Mốc chuyển giao. Hóa đơn của chuỗi trước mốc này mà không có trong danh sách -> coi như đã trả.</div>
+        </label>
+        <label>ERPNext có dữ liệu từ
+          <input type="date" class="kt-input" id="ob-golive" value="2026-05-01">
+          <div class="kt-sub">Trước mốc này ERPNext không có hóa đơn nào, nên dòng nợ trước đó là nợ đầu kỳ độc lập.</div>
+        </label>
+      </div>
+      <div style="display:flex;margin-top:14px">
+        <button class="kt-btn kt-btn--primary" id="ob-read" style="margin-left:auto">
+          <i class="fas fa-magnifying-glass"></i> Đọc file
+        </button>
+      </div>`,
+  });
+
+  modal.body.querySelector("#ob-read").addEventListener("click", async () => {
+    const cutover = modal.body.querySelector("#ob-cut").value;
+    const golive = modal.body.querySelector("#ob-golive").value;
+    setHTML(modal.body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+    let res;
+    try {
+      res = await api.mtOpeningPreview({ content, chain, golive, cutover });
+    } catch (e) {
+      setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+      return;
+    }
+    renderOpeningPreview(container, state, modal, { content, chain, golive, cutover }, res);
+  });
+}
+
+function renderOpeningPreview(container, state, modal, args, res) {
+  const t = res.totals || {};
+  const kinds = t.by_kind || [];
+
+  setHTML(modal.body, html`
+    ${res.blocked
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)">
+          <div class="kt-card-body kt-sub">Chuỗi ${res.chain} đã có bản số dư
+            (<b>${res.existing.name}</b>, ${res.existing.status}). Số dư đầu kỳ chỉ nhập
+            MỘT LẦN — nhập lần hai là cộng đôi công nợ.</div></div>`
+      : ""}
+    ${res.chain_detected && res.chain_detected !== res.chain
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+          <div class="kt-card-body kt-sub">Bố cục file trông giống chuỗi
+            <b>${res.chain_detected}</b> chứ không phải ${res.chain}. Kiểm lại trước khi ghi.</div></div>`
+      : ""}
+
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+      <div><div class="kt-sub">Nợ gộp (sheet chính)</div><b>${formatVND(t.opening_debt_gross)}</b></div>
+      <div><div class="kt-sub">− Ghi giảm chưa cấn trừ</div><b>${formatVND(t.deduction_open)}</b></div>
+      <div><div class="kt-sub">= Nợ ròng</div><b>${formatVND(t.opening_debt)}</b></div>
+      <div><div class="kt-sub">Dòng còn nợ</div><b>${res.n}</b></div>
+      <div><div class="kt-sub">Nối được hóa đơn</div><b>${res.n_matched}</b>
+        ${res.n_unmatched ? html`<div class="kt-sub" style="color:var(--kt-warning)">${res.n_unmatched} dòng chưa nối</div>` : ""}</div>
+    </div></div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div class="kt-table-wrap"><table class="kt-table">
+        <thead><tr><th>Nhóm</th><th class="num">Số dòng</th><th class="num">Tiền</th></tr></thead>
+        <tbody>${kinds.map((k) => html`<tr>
+          <td>${k.label}</td><td class="num">${k.n}</td><td class="num">${formatVND(k.amount)}</td>
+        </tr>`)}</tbody>
+      </table></div>
+    </div></div>
+
+    ${(res.warnings || []).map((w) => html`<div class="kt-card kt-mb"
+        style="border-left:4px solid var(--kt-warning)">
+        <div class="kt-card-body kt-sub">${w}</div></div>`)}
+
+    ${res.unmatched_sample && res.unmatched_sample.length
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <div class="kt-sub" style="margin-bottom:8px">
+            <b>${res.n_unmatched} dòng chưa nối được hóa đơn</b> — nhập vào vẫn được, nhưng
+            phải xử lý hết thì mới CHỐT được.</div>
+          <div class="kt-table-wrap" style="max-height:28vh;overflow:auto">
+            <table class="kt-table">
+              <thead><tr><th>Dòng</th><th>Số HĐ</th><th>Ngày</th><th class="num">Còn nợ</th><th>Vì sao</th></tr></thead>
+              <tbody>${res.unmatched_sample.map((r) => html`<tr>
+                <td>${r.source_row}</td><td><code>${r.inv_no || "—"}</code></td>
+                <td>${r.inv_date ? formatDate(r.inv_date) : "—"}</td>
+                <td class="num">${formatVND(r.remaining)}</td>
+                <td><code class="kt-sub">${r.match_method}</code></td>
+              </tr>`)}</tbody>
+            </table></div>
+        </div></div>`
+      : ""}
+
+    <div class="kt-sub">${res.note}</div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+      <span class="kt-sub">Ngày chốt <b>${formatDate(args.cutover)}</b> · ERPNext từ <b>${formatDate(args.golive)}</b></span>
+      ${!res.blocked
+        ? html`<button class="kt-btn kt-btn--success" id="ob-go" style="margin-left:auto">
+            <i class="fas fa-check"></i> Nhập ${res.n} dòng (trạng thái Nháp)
+          </button>`
+        : ""}
+    </div>
+  `);
+
+  const go = modal.body.querySelector("#ob-go");
+  if (go) go.addEventListener("click", async () => {
+    go.disabled = true;
+    try {
+      const out = await api.mtOpeningCommit({ ...args, expected_hash: res.plan_hash });
+      toast(out.message, "success");
+      modal.close();
+      state.openName = out.name; state.openOnly = ""; state.page = 1;
+      loadTab(container, state);
+    } catch (e) {
+      toast(e.message, "error");
+      go.disabled = false;
+    }
+  });
+}
+
+// ── Một bản số dư: xử lý dòng treo rồi chốt ───────────────────────────────
+const OB_FILTERS = [
+  { key: "", label: "Tất cả dòng" },
+  { key: "treo", label: "Còn treo" },
+  { key: "review", label: "Máy đoán — cần review" },
+  { key: "co_hoa_don", label: "Phải khớp ERPNext" },
+  { key: "truoc_golive", label: "Trước go-live" },
+  { key: "chua_co_hoa_don", label: "Chưa có số hóa đơn" },
+];
+
+const OB_CONF_TONE = { "Chắc chắn": "green", "Cần review": "yellow", "Không khớp": "red" };
+
+async function loadOpeningDoc(container, state) {
+  const body = container.querySelector("#mt-body");
+  let res;
+  try {
+    res = await api.mtOpeningGet({
+      name: state.openName, only: state.openOnly || undefined,
+      page: state.page, page_size: 50,
+    });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p>
+      <button class="kt-btn kt-btn--outline kt-btn--sm" id="ob-back">Quay lại</button></div>`);
+    const b = container.querySelector("#ob-back");
+    if (b) b.addEventListener("click", () => { state.openName = ""; loadTab(container, state); });
+    return;
+  }
+  const d = res.doc;
+  const rows = res.rows || [];
+  const final = d.status === "Đã chốt";
+
+  setHTML(body, html`
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <button class="kt-btn kt-btn--outline kt-btn--sm" id="ob-back">
+        <i class="fas fa-arrow-left"></i> Mọi chuỗi</button>
+      <b>${d.chain}</b>
+      <span class="kt-badge kt-badge--${OB_TONE[d.status] || "gray"}">${d.status}</span>
+      <span class="kt-sub">chốt ngày ${formatDate(d.cutover_date)} · ERPNext từ ${formatDate(d.golive_date)}</span>
+    </div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px">
+      <div><div class="kt-sub">Nợ gộp</div><b>${formatVND(d.opening_debt_gross)}</b></div>
+      <div><div class="kt-sub">− Ghi giảm chưa cấn trừ</div><b>${formatVND(d.deduction_open)}</b></div>
+      <div><div class="kt-sub">− Đơn chưa xuất hóa đơn</div><b>${formatVND(d.no_invoice_amount)}</b>
+        <div class="kt-sub">theo dõi ở danh sách đợt giao, không phải phải thu</div></div>
+      <div><div class="kt-sub">= CÔNG NỢ MANG SANG</div><b>${formatVND(d.debt_carried)}</b></div>
+      <div><div class="kt-sub">Dòng còn nợ</div><b>${d.n_rows}</b>
+        <div class="kt-sub">${d.n_matched} nối được · ${d.n_unmatched} treo</div></div>
+      ${final ? html`<div><div class="kt-sub">Hóa đơn đã tất toán</div><b>${d.n_settled}</b></div>` : ""}
+    </div></div>
+
+    ${d.n_unmatched
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)">
+          <div class="kt-card-body kt-sub">
+            <b>${d.n_unmatched} dòng chưa nối được hóa đơn ERPNext.</b> Chốt khi còn dòng ở đây
+            là để đúng những hóa đơn đó rơi vào vế "không có trong danh sách" và bị coi là
+            đã thanh toán — nợ thật biến mất. Nối hóa đơn cho từng dòng, hoặc đánh dấu
+            "Bỏ qua" nếu đã xem và xác nhận không có hóa đơn tương ứng.
+          </div></div>`
+      : ""}
+
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <select class="kt-input kt-input--sm" id="ob-only">
+        ${OB_FILTERS.map((f) => html`<option value="${f.key}" ${state.openOnly === f.key ? "selected" : ""}>${f.label}</option>`)}
+      </select>
+      <span class="kt-sub">${res.total} dòng</span>
+      ${res.can_manage
+        ? html`<span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+            ${final
+              ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="ob-reopen">
+                  <i class="fas fa-lock-open"></i> Mở lại về Nháp</button>`
+              : html`
+                  <button class="kt-btn kt-btn--danger kt-btn--sm" id="ob-del">
+                    <i class="fas fa-trash"></i> Xóa bản này</button>
+                  <button class="kt-btn kt-btn--success kt-btn--sm" id="ob-final">
+                    <i class="fas fa-stamp"></i> Xem tác động &amp; chốt</button>`}
+          </span>`
+        : ""}
+    </div></div>
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có dòng nào trong bộ lọc này.</p></div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr>
+              <th>Dòng</th><th>Số HĐ</th><th>Ngày</th><th>Bên mua trong file</th>
+              <th class="num">Còn nợ</th><th>Nhóm</th><th>Hóa đơn ERPNext</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((r) => html`<tr>
+                <td>${r.source_row}</td>
+                <td><code>${r.inv_no || "—"}</code></td>
+                <td>${r.inv_date ? formatDate(r.inv_date) : html`<span class="kt-sub">—</span>`}</td>
+                <td class="kt-sub">${r.party || "—"}</td>
+                <td class="num">${formatVND(r.remaining)}</td>
+                <td><span class="kt-sub">${res.kind_label[r.kind] || r.kind}</span></td>
+                <td>${r.sales_invoice
+                  ? html`<a href="/app/sales-invoice/${r.sales_invoice}" target="_blank">${r.sales_invoice}</a>
+                      <div><span class="kt-badge kt-badge--${OB_CONF_TONE[r.match_confidence] || "gray"}">${r.match_confidence}</span></div>`
+                  : (r.resolution
+                    ? html`<span class="kt-badge kt-badge--gray">${r.resolution}</span>`
+                    : html`<code class="kt-sub">${r.match_method}</code>`)}</td>
+                <td>${res.can_manage && !final && r.kind === "co_hoa_don"
+                  ? html`<button class="kt-btn kt-btn--outline kt-btn--sm ob-pick" data-row="${r.row}">
+                      <i class="fas fa-link"></i></button>`
+                  : ""}</td>
+              </tr>`)}
+            </tbody>
+          </table></div>
+          ${pager(res, "dòng")}
+        </div></div>`}
+  `);
+
+  bindPager(container, state);
+  const back = container.querySelector("#ob-back");
+  if (back) back.addEventListener("click", () => {
+    state.openName = ""; state.page = 1; loadTab(container, state);
+  });
+  const only = container.querySelector("#ob-only");
+  if (only) only.addEventListener("change", (e) => {
+    state.openOnly = e.target.value; state.page = 1; loadTab(container, state);
+  });
+  container.querySelectorAll(".ob-pick").forEach((b) => {
+    const row = rows.find((r) => String(r.row) === b.dataset.row);
+    b.addEventListener("click", () => openOpeningPick(container, state, d, row));
+  });
+
+  const fin = container.querySelector("#ob-final");
+  if (fin) fin.addEventListener("click", () => openOpeningFinalize(container, state, d));
+  const reo = container.querySelector("#ob-reopen");
+  if (reo) reo.addEventListener("click", async () => {
+    try {
+      const out = await api.mtOpeningReopen(d.name);
+      toast(out.message, "success");
+      loadTab(container, state);
+    } catch (e) { toast(e.message, "error"); }
+  });
+  const del = container.querySelector("#ob-del");
+  if (del) del.addEventListener("click", async () => {
+    if (!confirm(`Xóa bản số dư đầu kỳ của ${d.chain}? Toàn bộ ${d.n_rows} dòng sẽ mất.`)) return;
+    try {
+      const out = await api.mtOpeningDelete(d.name);
+      toast(out.message, "success");
+      state.openName = ""; loadTab(container, state);
+    } catch (e) { toast(e.message, "error"); }
+  });
+}
+
+// ── Chọn hóa đơn cho một dòng treo ────────────────────────────────────────
+async function openOpeningPick(container, state, doc, row) {
+  const modal = openModal({
+    title: `Dòng ${row.source_row} — hóa đơn ${row.inv_no || "(không số)"}`,
+    icon: "fa-link",
+    maxWidth: 820,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+
+  async function draw(q) {
+    let res;
+    try {
+      res = await api.mtOpeningSearchInvoices({ name: doc.name, row: row.row, q });
+    } catch (e) {
+      setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+      return;
+    }
+    setHTML(modal.body, html`
+      <div class="kt-sub" style="margin-bottom:10px">
+        File ghi: số <b>${row.inv_no || "—"}</b>${row.inv_date ? html` · ngày <b>${formatDate(row.inv_date)}</b>` : ""}
+        · tổng <b>${formatVND(row.gross)}</b> · còn nợ <b>${formatVND(row.remaining)}</b>.
+        Máy dừng ở <code>${row.match_method}</code>.
+      </div>
+      ${res.message ? html`<div class="kt-sub" style="color:var(--kt-warning);margin-bottom:10px">${res.message}</div>` : ""}
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input class="kt-input kt-input--sm" id="ob-q" placeholder="Tìm theo mã hóa đơn hoặc tên khách" value="${q || ""}">
+        <button class="kt-btn kt-btn--outline kt-btn--sm" id="ob-find"><i class="fas fa-magnifying-glass"></i></button>
+      </div>
+      <div class="kt-sub" style="margin-bottom:8px">Chỉ hiện hóa đơn của chuỗi ${res.chain}.</div>
+      ${!(res.rows || []).length
+        ? html`<div class="kt-empty"><p>Không có hóa đơn nào khớp.</p></div>`
+        : html`<div class="kt-table-wrap" style="max-height:40vh;overflow:auto">
+            <table class="kt-table">
+              <thead><tr><th>Hóa đơn</th><th>Ngày</th><th>Khách</th><th class="num">Tổng</th><th></th></tr></thead>
+              <tbody>${res.rows.map((r) => html`<tr>
+                <td><code>${r.name}</code></td>
+                <td>${formatDate(r.posting_date)}</td>
+                <td>${r.customer_name || r.customer}</td>
+                <td class="num">${formatVND(r.grand_total)}</td>
+                <td>${r.taken
+                  ? html`<span class="kt-sub">đã nối dòng khác</span>`
+                  : html`<button class="kt-btn kt-btn--success kt-btn--sm ob-take" data-si="${r.name}">Chọn</button>`}</td>
+              </tr>`)}</tbody>
+            </table></div>`}
+      <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+        ${row.sales_invoice
+          ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="ob-clear">Gỡ liên kết</button>`
+          : ""}
+        <button class="kt-btn kt-btn--outline kt-btn--sm" id="ob-skip" style="margin-left:auto">
+          <i class="fas fa-forward"></i> Bỏ qua dòng này
+        </button>
+      </div>
+      <div class="kt-sub" style="margin-top:8px">
+        "Bỏ qua" = đã xem và xác nhận dòng này không có hóa đơn ERPNext tương ứng. Nó cho
+        phép chốt, và KHÔNG giữ hóa đơn nào lại.
+      </div>
+    `);
+
+    const find = modal.body.querySelector("#ob-find");
+    const box = modal.body.querySelector("#ob-q");
+    if (find) find.addEventListener("click", () => draw(box.value));
+    if (box) box.addEventListener("keydown", (e) => { if (e.key === "Enter") draw(box.value); });
+
+    async function save(payload) {
+      try {
+        const out = await api.mtOpeningSetLine({ name: doc.name, row: row.row, ...payload });
+        toast(out.message, "success");
+        modal.close();
+        loadTab(container, state);
+      } catch (e) { toast(e.message, "error"); }
+    }
+    modal.body.querySelectorAll(".ob-take").forEach((b) => {
+      b.addEventListener("click", () => save({ sales_invoice: b.dataset.si, resolution: "" }));
+    });
+    const clr = modal.body.querySelector("#ob-clear");
+    if (clr) clr.addEventListener("click", () => save({ sales_invoice: "" }));
+    const skip = modal.body.querySelector("#ob-skip");
+    if (skip) skip.addEventListener("click", () => save({ resolution: "Bỏ qua" }));
+  }
+
+  draw("");
+}
+
+// ── Chốt: cho xem đúng cái sắp biến mất ───────────────────────────────────
+async function openOpeningFinalize(container, state, doc) {
+  const modal = openModal({
+    title: `Chốt số dư đầu kỳ — ${doc.chain}`,
+    icon: "fa-stamp",
+    maxWidth: 900,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  let res;
+  try {
+    res = await api.mtOpeningFinalizePreview(doc.name);
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+
+  setHTML(modal.body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px">
+      <div><div class="kt-sub">Hóa đơn RỜI khỏi công nợ</div>
+        <b style="font-size:1.2em">${res.n_settled}</b>
+        <div class="kt-sub">${formatVND(res.amount_settled)}</div></div>
+      <div><div class="kt-sub">Hóa đơn Ở LẠI (có trong danh sách)</div>
+        <b style="font-size:1.2em">${res.n_kept}</b>
+        <div class="kt-sub">${formatVND(res.amount_kept)}</div></div>
+      <div><div class="kt-sub">Dòng còn treo</div>
+        <b style="font-size:1.2em;color:${res.n_unresolved ? "var(--kt-danger)" : "inherit"}">${res.n_unresolved}</b></div>
+    </div></div>
+
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-primary)">
+      <div class="kt-card-body kt-sub">${res.note}</div></div>
+
+    ${res.n_unresolved
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)">
+          <div class="kt-card-body kt-sub">
+            Còn <b>${res.n_unresolved} dòng</b> chưa nối được hóa đơn — chưa chốt được.
+            Xử lý hết ở bộ lọc "Còn treo" rồi quay lại.
+          </div></div>`
+      : ""}
+
+    ${(res.sample || []).length
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <div class="kt-sub" style="margin-bottom:8px">
+            ${res.n_settled} hóa đơn sẽ được coi là đã thanh toán (hiện ${Math.min(res.sample.length, res.n_settled)} cái gần nhất):
+          </div>
+          <div class="kt-table-wrap" style="max-height:34vh;overflow:auto">
+            <table class="kt-table">
+              <thead><tr><th>Hóa đơn</th><th>Ngày</th><th>Khách</th><th class="num">Tổng</th></tr></thead>
+              <tbody>${res.sample.map((r) => html`<tr>
+                <td><code>${r.name}</code></td>
+                <td>${formatDate(r.posting_date)}</td>
+                <td>${r.customer_name}</td>
+                <td class="num">${formatVND(r.grand_total)}</td>
+              </tr>`)}</tbody>
+            </table></div>
+        </div></div>`
+      : html`<div class="kt-card kt-mb"><div class="kt-card-body kt-sub">
+          Không có hóa đơn ERPNext nào rơi vào diện tất toán — hoặc chuỗi chưa gán khách
+          hàng, hoặc mọi hóa đơn trước ngày chốt đều đã có tên trong danh sách còn nợ.
+        </div></div>`}
+
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+      <span class="kt-sub">Chốt xong vẫn mở lại được — luật này là cách ĐỌC, không phải bút toán.</span>
+      ${res.ready && res.can_manage
+        ? html`<button class="kt-btn kt-btn--success" id="ob-final-go" style="margin-left:auto">
+            <i class="fas fa-stamp"></i> Chốt số dư đầu kỳ ${doc.chain}
+          </button>`
+        : ""}
+    </div>
+  `);
+
+  const go = modal.body.querySelector("#ob-final-go");
+  if (go) go.addEventListener("click", async () => {
+    go.disabled = true;
+    try {
+      const out = await api.mtOpeningFinalize({ name: doc.name, expected_hash: res.plan_hash });
+      toast(out.message, "success");
+      modal.close();
+      loadTab(container, state);
+    } catch (e) {
+      toast(e.message, "error");
+      go.disabled = false;
     }
   });
 }

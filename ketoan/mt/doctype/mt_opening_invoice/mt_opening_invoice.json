@@ -1,0 +1,157 @@
+{
+ "actions": [],
+ "creation": "2026-08-21 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "source_row",
+  "kind",
+  "party",
+  "inv_no",
+  "inv_date",
+  "col_a",
+  "net",
+  "vat",
+  "gross",
+  "paid",
+  "returns",
+  "remaining",
+  "sec_match",
+  "sales_invoice",
+  "match_method",
+  "match_confidence",
+  "col_b",
+  "resolution",
+  "note"
+ ],
+ "fields": [
+  {
+   "description": "Số dòng trên sheet gốc — để đối chiếu ngược lại file Excel.",
+   "fieldname": "source_row",
+   "fieldtype": "Int",
+   "label": "Dòng trong file",
+   "read_only": 1
+  },
+  {
+   "description": "co_hoa_don = phải khớp được hóa đơn ERPNext · truoc_golive = có hóa đơn nhưng ERPNext chưa có dữ liệu · chua_co_hoa_don = đơn chưa giao",
+   "fieldname": "kind",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Nhóm",
+   "options": "\nco_hoa_don\ntruoc_golive\nchua_co_hoa_don",
+   "read_only": 1
+  },
+  {
+   "fieldname": "party",
+   "fieldtype": "Data",
+   "label": "Bên mua ghi trong file",
+   "read_only": 1
+  },
+  {
+   "fieldname": "inv_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Số hóa đơn",
+   "read_only": 1
+  },
+  {
+   "fieldname": "inv_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày hóa đơn",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_a",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "net",
+   "fieldtype": "Currency",
+   "label": "Chưa VAT",
+   "read_only": 1
+  },
+  {
+   "fieldname": "vat",
+   "fieldtype": "Currency",
+   "label": "VAT",
+   "read_only": 1
+  },
+  {
+   "fieldname": "gross",
+   "fieldtype": "Currency",
+   "label": "Tổng hóa đơn",
+   "read_only": 1
+  },
+  {
+   "fieldname": "paid",
+   "fieldtype": "Currency",
+   "label": "Đã trả",
+   "read_only": 1
+  },
+  {
+   "fieldname": "returns",
+   "fieldtype": "Currency",
+   "label": "Hàng trả lại",
+   "read_only": 1
+  },
+  {
+   "description": "Số mang sang. Cộng THEO DẤU — dòng âm là trả thừa/trả hàng, không lọc bỏ.",
+   "fieldname": "remaining",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "CÒN NỢ",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_match",
+   "fieldtype": "Section Break",
+   "label": "Nối sang ERPNext"
+  },
+  {
+   "description": "Dòng CÓ nối hóa đơn = hóa đơn đó vẫn còn nợ sau ngày chốt. Dòng không nối được thì không giữ được hóa đơn nào lại.",
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Hóa đơn ERPNext",
+   "options": "Sales Invoice"
+  },
+  {
+   "fieldname": "match_method",
+   "fieldtype": "Data",
+   "label": "Cách khớp",
+   "read_only": 1
+  },
+  {
+   "fieldname": "match_confidence",
+   "fieldtype": "Select",
+   "label": "Độ tin cậy",
+   "options": "\nChắc chắn\nCần review\nKhông khớp"
+  },
+  {
+   "fieldname": "col_b",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "'Bỏ qua' = người đã xem và xác nhận dòng này không cần nối hóa đơn ERPNext nào.",
+   "fieldname": "resolution",
+   "fieldtype": "Select",
+   "label": "Người chốt",
+   "options": "\nBỏ qua"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  }
+ ],
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-21 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Opening Invoice",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}
