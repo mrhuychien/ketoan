@@ -459,7 +459,7 @@ def decode_upload(content) -> bytes:
     return raw
 
 
-def _sheets_xlsx(raw):
+def _sheets_xlsx(raw, allow_wide=False):
     """.xlsx -> [(tên sheet, lưới giá trị)].
 
     KHÔNG dùng read_only: Co.op cần đọc theo tọa độ tuyệt đối (I5/I6/I7, M13-M15)
@@ -492,7 +492,8 @@ def _sheets_xlsx(raw):
         # `ws.max_row` = 1.048.576; `[list(r) for r in ws.iter_rows()][:50000]` sẽ
         # SINH ĐỦ hơn một triệu tuple (~26GB) rồi mới cắt còn 50.000 -> worker bị
         # OOM-kill. Trần dung lượng 12MB không đỡ được vì file chỉ 1,4KB.
-        if (ws.max_row or 0) > MAX_ROWS_PER_SHEET or (ws.max_column or 0) > MAX_COLS_PER_SHEET:
+        wide = (ws.max_column or 0) > MAX_COLS_PER_SHEET
+        if (ws.max_row or 0) > MAX_ROWS_PER_SHEET or (wide and not allow_wide):
             frappe.throw(_("Sheet {0} quá lớn ({1} dòng x {2} cột) — không phải bảng kê thật.")
                          .format(ws.title, ws.max_row, ws.max_column))
         ncols = min(ws.max_column or 0, MAX_COLS_PER_SHEET)
@@ -554,16 +555,27 @@ def _sheets_xls(raw):
     return out
 
 
-def read_sheets(content):
+def read_sheets(content, allow_wide=False):
     """base64 -> [(tên sheet, lưới)]. Tự nhận .xlsx / .xls theo chữ ký file.
 
     Nhận diện theo BYTE ĐẦU chứ không theo đuôi tên file: kế toán hay đổi tên file
     hoặc "Save As" nhầm định dạng, và đọc .xls bằng openpyxl thì lỗi khó hiểu.
+
+    `allow_wide=True`: sheet KHAI nhiều hơn `MAX_COLS_PER_SHEET` cột thì CẮT còn
+    đúng trần đó thay vì từ chối cả file.
+
+    VÌ SAO cần và vì sao vẫn an toàn: file theo dõi công nợ Emart khai 16.375 cột
+    trong khi cột có dữ liệu xa nhất là 17 — bề rộng đó là rác định dạng, và file
+    chỉ 187KB. Chốt chặn ban đầu sinh ra để chống OOM, mà OOM đến từ việc VẬT CHẤT
+    HÓA ô: đọc với `max_col` đã cắt thì bộ nhớ bị chặn bởi (số dòng × trần cột) bất
+    kể sheet khai bao nhiêu. Trần DÒNG vẫn giữ nguyên, không nới.
+
+    Mặc định là `False` để đường nạp bảng kê thanh toán KHÔNG đổi hành vi.
     """
     raw = decode_upload(content)
     if raw[:2] == b"PK":
         try:
-            return _sheets_xlsx(raw)
+            return _sheets_xlsx(raw, allow_wide=allow_wide)
         except frappe.ValidationError:
             # Đây là frappe.throw của chính tầng đọc (vd 'Sheet X quá lớn') — thông
             # báo đã nói rõ hỏng ở đâu, nuốt nó thành câu chung là bịt mắt kế toán.
