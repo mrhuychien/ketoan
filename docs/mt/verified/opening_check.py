@@ -286,6 +286,60 @@ def main():
           f"(chọn {r['chain']}, máy đoán {r['chain_detected']}) — và vẫn báo máy đoán gì")
     bad += not ok
 
+    # ── 8. Ba nhóm dòng còn nợ — ba đường xử khác hẳn nhau ──────────────
+    #
+    # ERPNext site này chỉ có dữ liệu TỪ 01/05/2026. Nên "còn nợ" không phải một
+    # cục: hóa đơn trước mốc đó KHÔNG có trong ERPNext để mà nối.
+    print("-" * 84)
+    GOLIVE = "2026-05-01"
+    agg = {}
+    for fname, chain, *_ in CASES:
+        r = read(fname, golive=GOLIVE)
+        for e in r["totals"]["by_kind"]:
+            a = agg.setdefault(e["kind"], {"label": e["label"], "n": 0, "amount": 0.0})
+            a["n"] += e["n"]
+            a["amount"] += e["amount"]
+
+    WANT = [
+        (mo.KIND_IN_ERP,      1101, 4_434_428_970),
+        (mo.KIND_PRE_GOLIVE,    57,   578_001_744),
+        (mo.KIND_NO_INVOICE,     9,    46_665_180),
+    ]
+    for kind, n, amount in WANT:
+        a = agg.get(kind) or {"label": kind, "n": 0, "amount": 0.0}
+        ok = a["n"] == n and round(a["amount"]) == amount
+        print(f"  {'✅' if ok else '❌'} {a['label']:<46} {a['n']:>5} dòng "
+              f"{a['amount']:>17,.0f}đ")
+        if not ok:
+            print(f"       └─ mong {n} dòng / {amount:,}đ")
+        bad += not ok
+
+    ok = sum(a["n"] for a in agg.values()) == 1167
+    print(f"  {'✅' if ok else '❌'} ba nhóm cộng lại = 1.167 dòng còn nợ, không dòng nào "
+          f"rơi ra ngoài")
+    bad += not ok
+
+    # Không khai `golive` -> KHÔNG được tự đoán một mốc.
+    r = read("congno_saigon_coop.xlsx")
+    pre = next(e for e in r["totals"]["by_kind"] if e["kind"] == mo.KIND_PRE_GOLIVE)
+    ok = pre["n"] == 0 and any("CHƯA khai ngày" in w for w in r["warnings"])
+    print(f"  {'✅' if ok else '❌'} không khai ngày go-live -> KHÔNG tự đoán mốc, "
+          f"báo ra là chưa tách được")
+    bad += not ok
+
+    # Dòng KHÔNG có số hóa đơn phải tách kể cả khi chưa khai go-live: nó không
+    # phải công nợ hóa đơn, và điều đó không phụ thuộc mốc ngày nào.
+    r = read("congno_wincommerce.xlsx")
+    noinv = next(e for e in r["totals"]["by_kind"] if e["kind"] == mo.KIND_NO_INVOICE)
+    ok = noinv["n"] == 9 and round(noinv["amount"]) == 46_665_180
+    print(f"  {'✅' if ok else '❌'} 9 dòng `chưa giao hàng` của Win tách được KHÔNG cần "
+          f"biết ngày go-live ({noinv['amount']:,.0f}đ)")
+    bad += not ok
+
+    ok = any("chưa giao" in w for w in r["warnings"])
+    print(f"  {'✅' if ok else '❌'} và được NÊU RA — file vẫn cộng chúng vào `Số còn nợ`")
+    bad += not ok
+
     print("=" * 84)
     if bad:
         print(f"KẾT QUẢ: HỎNG {bad} phép")

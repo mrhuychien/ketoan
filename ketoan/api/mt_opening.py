@@ -375,8 +375,51 @@ def _pick_sheet(sheets):
     return live[0], skipped
 
 
-def read_opening(content, chain=None):
-    """base64 -> số dư đầu kỳ đọc từ file Excel theo dõi công nợ. THUẦN ĐỌC."""
+# Ba nhóm của một dòng CÒN NỢ. Ba nhóm này đi ba đường khác hẳn nhau khi ghi,
+# nên phải chia ngay ở tầng đọc chứ không dồn thành một cục "nợ đầu kỳ".
+KIND_NO_INVOICE = "chua_co_hoa_don"    # chưa xuất hóa đơn -> KHÔNG phải công nợ hóa đơn
+KIND_PRE_GOLIVE = "truoc_golive"       # có hóa đơn nhưng ERPNext không có -> nợ độc lập
+KIND_IN_ERP = "co_hoa_don"             # phải khớp được một Sales Invoice trong ERPNext
+
+KIND_LABEL = {
+    KIND_NO_INVOICE: "Chưa có số hóa đơn (đơn chưa giao)",
+    KIND_PRE_GOLIVE: "Có hóa đơn nhưng trước khi ERPNext có dữ liệu",
+    KIND_IN_ERP: "Phải khớp được hóa đơn trong ERPNext",
+}
+
+
+def classify(row, golive):
+    """Một dòng còn nợ thuộc nhóm nào.
+
+    `golive` = ngày ERPNext BẮT ĐẦU có dữ liệu (site này: 2026-05-01). Là THAM SỐ
+    chứ không phải hằng số: mỗi lần triển khai một mốc khác nhau, và chôn cứng
+    một ngày vào code là để lần sau sai mà không ai nhớ vì sao.
+
+    Không có `golive` -> KHÔNG phân nhóm theo ngày, chỉ tách được nhóm chưa có
+    hóa đơn. Đoán một mốc là quyết định hộ kế toán về gần 600 triệu.
+
+    · KHÔNG có số hóa đơn -> chưa xuất hóa đơn. Đo trên file thật: 9 dòng của
+      WinCommerce, cột 'Ngày gửi chứng từ' ghi `chưa giao hàng`, chỉ có số PO,
+      tổng 46.665.180đ. Đây là ĐƠN CHƯA GIAO, không phải công nợ hóa đơn — nhưng
+      file lại cộng nó vào `Số còn nợ`, nên phải tách ra cho người quyết.
+    · Có hóa đơn, ngày < golive -> ERPNext không có hóa đơn này. Nợ đầu kỳ độc
+      lập, không nối được Sales Invoice nào.
+    · Có hóa đơn, ngày >= golive -> PHẢI khớp được một Sales Invoice. Không khớp
+      được là dấu hiệu hóa đơn thiếu trên ERPNext, phải báo chứ không nuốt.
+    """
+    if not row.get("inv_no"):
+        return KIND_NO_INVOICE
+    d = row.get("inv_date")
+    if not golive or not d:
+        return KIND_IN_ERP
+    return KIND_PRE_GOLIVE if cstr(d) < cstr(golive) else KIND_IN_ERP
+
+
+def read_opening(content, chain=None, golive=None):
+    """base64 -> số dư đầu kỳ đọc từ file Excel theo dõi công nợ. THUẦN ĐỌC.
+
+    `golive`: ngày ERPNext bắt đầu có dữ liệu. Xem `classify`.
+    """
     # `allow_wide`: file Emart khai 16.375 cột trong khi cột có dữ liệu xa nhất
     # là 17 — bề rộng đó là rác định dạng. Đã đo: 0 ô có dữ liệu ngoài cột 200.
     sheets = read_sheets(content, allow_wide=True)
@@ -482,9 +525,40 @@ def read_opening(content, chain=None):
     open_rows = [x for x in rows if abs(flt(x["remaining"])) > MONEY_EPS]
     gross_debt = round(sum(flt(x["remaining"]) for x in rows), 2)
 
+    golive = cstr(golive) or None
+    by_kind = {k: {"kind": k, "label": KIND_LABEL[k], "n": 0, "amount": 0.0}
+               for k in (KIND_NO_INVOICE, KIND_PRE_GOLIVE, KIND_IN_ERP)}
+    for x in open_rows:
+        x["kind"] = classify(x, golive)
+        e = by_kind[x["kind"]]
+        e["n"] += 1
+        e["amount"] += flt(x["remaining"])
+    for e in by_kind.values():
+        e["amount"] = round(e["amount"], 2)
+
+    if by_kind[KIND_NO_INVOICE]["n"]:
+        warnings.append(
+            "%d dòng còn nợ KHÔNG có số hóa đơn (%s đ) — đơn chưa giao, chưa xuất hóa "
+            "đơn. File vẫn cộng chúng vào `Số còn nợ`. Đây không phải công nợ hóa đơn; "
+            "kế toán quyết có mang sang hay không."
+            % (by_kind[KIND_NO_INVOICE]["n"],
+               "{:,.0f}".format(by_kind[KIND_NO_INVOICE]["amount"])))
+    if golive and by_kind[KIND_PRE_GOLIVE]["n"]:
+        warnings.append(
+            "%d dòng còn nợ có hóa đơn ghi ngày TRƯỚC %s (%s đ) — ERPNext chưa có dữ "
+            "liệu từ trước mốc đó, nên các dòng này không nối được Sales Invoice nào và "
+            "phải mang sang thành nợ đầu kỳ độc lập."
+            % (by_kind[KIND_PRE_GOLIVE]["n"], golive,
+               "{:,.0f}".format(by_kind[KIND_PRE_GOLIVE]["amount"])))
+    if not golive:
+        warnings.append(
+            "CHƯA khai ngày ERPNext bắt đầu có dữ liệu — không tách được dòng nào nối "
+            "được hóa đơn, dòng nào phải mang sang thành nợ độc lập.")
+
     return {
         "chain": chain,
         "chain_detected": detected,
+        "golive": golive,
         "sheet": sheet_name,
         "skipped_sheets": skipped,
         "header_row": money_row,
@@ -512,6 +586,8 @@ def read_opening(content, chain=None):
             # TỰ IN RA số này và cả ba đều khớp với phép trừ dưới đây.
             "opening_debt": round(gross_debt - ded_open, 2),
             "n_deduction_rows": sum(d["n_rows"] for d in deductions),
+            "by_kind": [by_kind[k] for k in
+                        (KIND_IN_ERP, KIND_PRE_GOLIVE, KIND_NO_INVOICE)],
             "paid_history": round(sum(flt(x["paid"]) for x in rows), 2),
             "gross": computed["gross"],
         },
@@ -527,14 +603,14 @@ MAX_UPLOAD_MB = 20
 
 
 @frappe.whitelist()
-def preview(content, chain=None):
+def preview(content, chain=None, golive=None):
     """Xem trước số dư đầu kỳ đọc từ file Excel theo dõi công nợ. KHÔNG ghi gì."""
     guard_mt()
     raw = decode_upload(content)
     if len(raw) > MAX_UPLOAD_MB * 1024 * 1024:
         frappe.throw(_("File quá {0} MB").format(MAX_UPLOAD_MB))
 
-    res = read_opening(content, chain=chain)
+    res = read_opening(content, chain=chain, golive=golive)
     out = dict(res)
     # Xem trước ưu tiên dòng CÒN NỢ — đó là thứ mang sang; dòng đã tất toán chỉ
     # cần con số tổng.

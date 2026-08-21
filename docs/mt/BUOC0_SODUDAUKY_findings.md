@@ -175,7 +175,37 @@ bất thường thì nhìn là biết.
 
 ---
 
-## 8. Còn phải chốt
+## 8. ERPNext chỉ có dữ liệu từ 01/05/2026 — chia 1.167 dòng thành BA nhóm
+
+Mốc này quyết định cách xử từng dòng, vì hóa đơn trước đó **không có trong
+ERPNext để mà nối**.
+
+| Nhóm | Dòng | Tiền | Xử thế nào |
+|---|---:|---:|---|
+| **Phải khớp hóa đơn ERPNext** (HĐ ≥ 01/05) | 1.101 | 4.434.428.970 | nối vào Sales Invoice; không khớp được = hóa đơn thiếu trên ERPNext, phải báo |
+| **Có hóa đơn nhưng trước go-live** | 57 | 578.001.744 | nợ đầu kỳ **độc lập**, không Sales Invoice nào |
+| **Chưa có số hóa đơn** | 9 | 46.665.180 | **đơn chưa giao** — xem dưới |
+| **Cộng** | **1.167** | **5.059.095.894** | (nợ gộp, chưa trừ ghi giảm) |
+
+**54/57 dòng trước go-live là Saigon Co.op** (516.162.024đ), toàn bộ từ tháng
+1/2026 — không phải nợ từ 2018 như bố cục file gợi ý.
+
+### 9 dòng "chưa có số hóa đơn" — không phải công nợ
+
+Đo trên WinCommerce r2190–r2202: **không** số hóa đơn, **không** ngày, cột
+`Ngày gửi chứng từ` ghi **`chưa giao hàng`**, chỉ có số PO. Đây là **đơn chưa
+giao, chưa xuất hóa đơn** — 46.665.180đ.
+
+Nhưng file **vẫn cộng** chúng vào `Số còn nợ`. ⇒ Tách ra thành nhóm riêng và
+**để kế toán quyết**, không tự cộng cũng không tự bỏ.
+
+⚠ Ngày go-live là **tham số**, không phải hằng số trong code. Không khai thì
+**không đoán** — chỉ tách được nhóm "chưa có số hóa đơn" (nhóm đó không phụ
+thuộc mốc ngày nào).
+
+---
+
+## 9. Còn phải chốt
 
 1. **Ngày chuyển giao.** Kế toán nhập tay, không đọc từ file — các mốc ghi trong
    file rời rạc và mâu thuẫn (`CÔNG NỢ KHỚP 30/06/2026` ở Emart nhưng cột tổng ra
