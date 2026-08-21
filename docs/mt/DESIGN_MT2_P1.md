@@ -565,7 +565,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-K1/K2/K3** đọc 7 file công nợ Excel để nhập số dư đầu kỳ | `30e5d0b` `c77ba12` `07c5c73` | `opening_check` |
 | **MT2-L1** danh sách đợt giao Winmart chưa xuất hóa đơn | `8dee7d8` | — |
 | **MT2-L2** đọc phiếu nhập kho Winmart (PDF) + đối soát PO/mã hàng | `8db013e` | `win_grn_check` |
-| **MT2-K4** cất số dư đầu kỳ + luật tất toán trước ngày chuyển giao | *(commit này)* | `opening_store_check` |
+| **MT2-K4** cất số dư đầu kỳ + luật tất toán trước ngày chuyển giao | `fbb77d5` | `opening_store_check` |
+| **MT2-M** parser thanh toán Mega Market — chuỗi cuối cùng | *(commit này)* | `mega_check` · `regression_check` · `crosscheck_mt2` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -574,7 +575,8 @@ for t in regression_check crosscheck_mt2 mutation_check \
          store_seed_check je_plan_check je_submit_check \
          discount_basis_check discount_sheet_check win_dossier_check \
          debt_due_check rebate_pdf_check clawback_check ui_board_check \
-         chain_filter_check opening_check win_grn_check opening_store_check; do
+         chain_filter_check opening_check win_grn_check opening_store_check \
+         mega_check; do
   python3 docs/mt/verified/$t.py
 done
 ```

@@ -66,6 +66,17 @@ EXPECTED = {
         "chiet_khau": -2618419, "phi": -7507717, "net": 71693773,
         "pay_lines": 10, "periods": 0, "rows": 23, "reconciled": True,
         "needs_review": 7},
+
+    # Mega Market: bảng kê CẤN TRỪ HẾT — 313.983.000 hóa đơn bán ra trừ đúng
+    # bằng 313.983.000 chứng từ ghi giảm, tiền thực nhận BẰNG 0.
+    # `thanh_toan` KHÔNG được là 0: bằng 0 nghĩa là 8 dòng ký hiệu THG đã bị xếp
+    # nhầm sang ghi giảm — tổng NET vẫn ra 0 nên KHÔNG số kiểm tra nào bắt được.
+    # `reconciled` = False là ĐÚNG và sẽ mãi như vậy: file không in dòng tổng,
+    # số bảng kê hay số tiền thanh toán nào để đối chiếu.
+    "cttt_mega.xls": {
+        "chain": "mega_market", "thanh_toan": 313983000, "ghi_giam": -313983000,
+        "net": 0, "pay_lines": 8, "periods": 1, "rows": 18, "reconciled": False,
+        "needs_review": 0},
 }
 
 

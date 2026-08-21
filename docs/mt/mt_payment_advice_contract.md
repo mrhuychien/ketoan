@@ -293,13 +293,73 @@ Chuỗi **ngoài** danh sách này mà bóc ký hiệu ra rỗng nghĩa là **đ
 khớp bằng số trần trên chỉ mục gộp mọi chuỗi là **vơ nhầm hóa đơn của chuỗi
 khác** — cả 7 chuỗi dùng chung dải ký hiệu `C26THG`.
 
-## K.5 Mega Market — có option, chưa có parser
+## K.5 Mega Market — bảng phẳng tiếng Anh, KHÔNG có số kiểm tra
 
-`Mega Market` nằm trong `MT_CHAINS` để **gán khách được ngay**, nhưng chưa có
-tầng đọc (chưa có file bảng kê mẫu thật — file `Chi tiết doanh số Mega Market.xlsx`
-là bảng **doanh số**, không phải bảng kê thanh toán). Nạp file cho chuỗi này báo
-lỗi rõ ràng chứ **không** đọc bừa bằng parser chuỗi khác: parser sai chuỗi không
-"đọc thiếu", nó **đọc sai cột tiền** và vẫn ra một con số trông hợp lý.
+File mẫu thật: `docs/mt/samples/cttt_mega.xls` (`.xls` BIFF, 1 sheet `Sheet1`,
+header dòng 1, **18 dòng dữ liệu**, 10 cột).
+
+| c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 |
+|---|---|---|---|---|---|---|---|---|---|
+| Store no | Supplier code | Supplier name | Description | Invoice no | Amount | Invoice Date | GL date | Due date | Payment date |
+
+`GL date` và `Due date` **rỗng toàn bộ**. `Payment date` giống nhau ở mọi dòng
+(2026-07-10) — đó là ngày thanh toán. `Store no` ra từ ô số nên mang đuôi `.0`
+(`590072.0`), phải cắt.
+
+### K.5.1 Hai loại chứng từ — phân biệt bằng KÝ HIỆU, không bằng dấu tiền
+
+```
+1C26THG_00004450   <- hóa đơn BÁN RA của mình   (8 dòng, tất cả DƯƠNG)
+C26TAP 3269        <- chứng từ ký hiệu khác      (10 dòng, tất cả ÂM)
+```
+
+Ký hiệu và số cách nhau bằng `_` (hóa đơn của mình, số đệm 0 tám chữ) hoặc bằng
+**dấu cách** (chứng từ kia, số trần) — **cùng một file dùng cả hai**.
+
+Dấu và loại trùng khớp **18/18 dòng**. Đó chính là cái bẫy: phân loại theo dấu
+chạy đúng hôm nay và sai câm vào ngày Mega đổi quy ước, vì tổng NET không đổi
+nên **không phép kiểm SUM nào bắt được**. Đúng điều cấm ở §B.
+
+Quy tắc thật: ba ký tự cuối của ký hiệu là **mã người bán** (TT78:
+`<mẫu số><C|K><2 số năm><3 ký tự>`). Của mình là `THG` — hằng số
+`mt_advice.OUR_ISSUER_CODE`, đổi pháp nhân thì đổi ở đó, không rải `'THG'` vào
+từng parser. Dấu chỉ dùng để **gắn cờ** `needs_review`, không bao giờ để đổi loại.
+
+**Bằng chứng cho cách phân loại** — đối chiếu với `congno_mega_market.xlsx`:
+cả **8/8** dòng ký hiệu THG khớp **đúng từng đồng** với cột TỔNG của hóa đơn
+tương ứng, và cả 8 đều đã về `Số còn nợ = 0`. Không dòng `C26TAP` nào khớp được.
+
+⚠ Số của `C26TAP` **đụng** số hóa đơn của mình: `C26TAP 3264` và hóa đơn
+`00003264` (29/08/2024) cùng tồn tại. Đúng ca §MT2-G — dòng ghi giảm vẫn giữ số
+để kế toán đối chiếu, nhưng không đường nào cho nó nối Sales Invoice.
+
+### K.5.2 File này KHÔNG có số kiểm tra nào
+
+Không dòng TỔNG CỘNG, không ô net payment, không số bảng kê. Nên `checks` để
+**rỗng** và `reconciled` = **False**, và sẽ mãi như vậy. Nhét một phép kiểm cấu
+trúc vào `checks` để màn hình sáng xanh là **nói dối** về thứ chưa từng được đối
+chiếu — "không kiểm được" không phải là "đã kiểm và đúng".
+
+Thứ duy nhất kiểm được là **cột**, bằng chính sự thừa của file:
+`Description == "<Invoice no>,<Store no>"` đúng **18/18** dòng. Đọc lệch cột thì
+đẳng thức đó vỡ, và parser cảnh báo.
+
+### K.5.3 Bảng kê mẫu CẤN TRỪ HẾT
+
+313.983.000đ hóa đơn bán ra trừ **đúng bằng** 313.983.000đ chứng từ ghi giảm →
+**tiền thực nhận bằng 0**. Không phải lỗi đọc file, và parser nói thẳng ra —
+kế toán chờ tiền vào tài khoản mà không thấy sẽ đi tìm nhầm chỗ.
+
+### K.5.4 Hạn chế còn lại
+
+File **không có cột phân loại** khoản trừ, nên 10 dòng ghi giảm không tách được
+đâu là chiết khấu, đâu là phí, đâu là hàng trả lại. Tất cả vào một nhóm
+`Ghi giảm` và hạch toán vào **một** tài khoản theo `MT Account Map`. Cần tách
+thì phải sửa loại dòng trên chứng từ trước khi sinh bút toán. Parser cảnh báo
+điều này ở mỗi lần nạp.
+
+`Chi tiết doanh số Mega Market.xlsx` là bảng **doanh số** (cơ sở tính chiết
+khấu), không phải bảng kê thanh toán — hai đường đọc khác nhau.
 
 ## K.6 Danh sách chuỗi có ĐÚNG MỘT nguồn
 

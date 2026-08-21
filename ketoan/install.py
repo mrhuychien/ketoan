@@ -210,9 +210,10 @@ MISA_RELATION_OPTIONS = "\n".join(
 # tiền có trong sổ mà không ai nhìn ra. `check_chain_options()` bên dưới đối
 # chiếu cả ba, và bộ hồi quy docs/mt/verified/regression_check.py chạy nó.
 #
-# `Mega Market` có trong danh sách để GÁN KHÁCH được ngay, nhưng CHƯA có parser
-# bảng kê (chưa có file mẫu thật). Nạp file Mega Market sẽ báo lỗi rõ ràng chứ
-# không đọc bừa bằng parser của chuỗi khác.
+# CẢ TÁM chuỗi đều đã có tầng đọc bảng kê thanh toán. Thêm chuỗi mới vào đây mà
+# chưa viết parser thì vẫn dùng được (gán khách, theo dõi công nợ); nạp file sẽ
+# báo lỗi rõ ràng chứ KHÔNG đọc bừa bằng parser của chuỗi khác — parser sai chuỗi
+# không "đọc thiếu", nó đọc SAI CỘT TIỀN và vẫn ra một con số trông hợp lý.
 MT_CHAINS = (
     "WinCommerce",
     "Central Retail",

@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """mt_advice — tầng ĐỌC bảng kê thanh toán của các chuỗi siêu thị (kênh MT).
 
-Bảy chuỗi đã có tầng đọc: WinCommerce · Central Retail · LOTTE · Emart ·
-Saigon Co.op · AEON · Fuji. Mega Market có trong danh sách chuỗi nhưng CHƯA có
-parser (chưa có file bảng kê mẫu thật) — xem `PARSERS` ở cuối module.
+CẢ TÁM chuỗi đã có tầng đọc: WinCommerce · Central Retail · LOTTE · Emart ·
+Saigon Co.op · AEON · Fuji · Mega Market — xem `PARSERS` ở cuối module.
 
 VÌ SAO có module riêng, không dùng lại `misa_import._rows()`:
 
@@ -78,6 +77,7 @@ from frappe import _
 from ketoan.api._guard import guard_mt
 from ketoan.misa_integration.doctype.misa_invoice_snapshot.misa_invoice_snapshot import (
     norm_inv_no,
+    norm_series,
 )
 from ketoan.mt.doctype.mt_payment_advice_line.mt_payment_advice_line import norm_series_mt
 
@@ -659,6 +659,9 @@ _CHAIN_SIGNS = {
     "aeon": [("payment statement to suppliers",)],
     # Fuji: nhãn hai tầng của khối 1. 'theo hdtc' là nhãn RIÊNG của Fuji.
     "fuji": [("theo hdtc",), ("gia tri tien theo pnk",)],
+    # Mega Market: header tiếng Anh ở dòng 1. Đã đối chiếu với CẢ 7 file bảng kê
+    # mẫu của các chuỗi khác — không file nào chứa bộ ba nhãn này.
+    "mega_market": [("store no", "supplier code", "invoice no")],
 }
 
 
@@ -2604,6 +2607,238 @@ def parse_fuji(sheets):
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# 4h. Mega Market  (.xls BIFF, 1 sheet, bảng PHẲNG nhãn tiếng Anh)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Đo trên file thật `docs/mt/samples/cttt_mega.xls`: 1 sheet 'Sheet1', header ở
+# dòng 1, 18 dòng dữ liệu, 10 cột:
+#
+#   Store no | Supplier code | Supplier name | Description | Invoice no |
+#   Amount | Invoice Date | GL date | Due date | Payment date
+#
+# `GL date` và `Due date` RỖNG toàn bộ. `Payment date` giống nhau ở mọi dòng
+# (2026-07-10) — đó là ngày thanh toán. `Description` = "<Invoice no>,<Store no>",
+# suy ra được từ hai cột kia nên không mang thêm thông tin, nhưng chính vì suy ra
+# được nên nó là phép KIỂM CỘT: đọc lệch cột thì đẳng thức đó vỡ.
+#
+# ── Hai loại chứng từ, phân biệt bằng KÝ HIỆU chứ không bằng dấu tiền ──────
+#
+#   1C26THG_00004450   <- hóa đơn BÁN RA của mình  (8 dòng, tất cả DƯƠNG)
+#   C26TAP 3269        <- chứng từ ký hiệu khác     (10 dòng, tất cả ÂM)
+#
+# Dấu và loại trùng khớp 18/18 dòng trên file mẫu, NHƯNG phân loại theo dấu là
+# điều cấm của hợp đồng (§B) và đã có tiền lệ hỏng: khi chuỗi đổi quy ước dấu,
+# một khoản ghi giảm lặng lẽ trôi thành TIỀN ĐÃ THU trên đúng hóa đơn đó, mà mọi
+# số kiểm tra SUM vẫn khớp vì tổng không đổi. Nên phân loại bằng ký hiệu, còn dấu
+# chỉ dùng để GẮN CỜ 'cần người xem lại'.
+#
+# ── Bằng chứng cho cách phân loại ──────────────────────────────────────────
+#
+# Đối chiếu với file công nợ Mega (`congno_mega_market.xlsx`): cả 8 dòng ký hiệu
+# THG khớp ĐÚNG TỪNG ĐỒNG với cột TỔNG của hóa đơn tương ứng, và cả 8 hóa đơn đó
+# đều đã về `Số còn nợ = 0`. Không dòng `C26TAP` nào khớp được như vậy.
+#
+# ⚠ Số của `C26TAP` ĐỤNG số hóa đơn của mình: `C26TAP 3264` và hóa đơn
+# `00003264` (29/08/2024) cùng tồn tại. Đây đúng là ca MT2-G đã đo trên 7 chuỗi —
+# khớp dòng ghi giảm sang Sales Invoice bằng số là vơ nhầm hóa đơn của mình.
+# Dòng ghi giảm vẫn GIỮ số để kế toán nhìn, nhưng không đường nào cho nó nối
+# Sales Invoice (chặn ở `_match_row`, ở `relink_line`, và ở `_paid_subquery`).
+#
+# ── KHÔNG CÓ SỐ KIỂM TRA TRONG FILE ───────────────────────────────────────
+#
+# Không dòng TỔNG CỘNG, không ô net payment, không số bảng kê. Nên `checks` để
+# RỖNG và `reconciled` = False. "Không kiểm được" KHÔNG phải là "đã kiểm và
+# đúng" — nhét phép kiểm cấu trúc vào `checks` để màn hình sáng xanh là nói dối
+# về thứ chưa từng được đối chiếu.
+
+# Ba ký tự cuối của ký hiệu hóa đơn là MÃ NGƯỜI BÁN (TT78: <mẫu số><C|K><năm>
+# <3 ký tự>). Của mình là THG — Thực phẩm Hoàng Giang. Đổi pháp nhân thì đổi ở
+# ĐÂY, không rải chuỗi 'THG' vào từng parser.
+OUR_ISSUER_CODE = "THG"
+
+_MG_H_INV = "Invoice no"
+_MG_H_AMT = "Amount"
+_MG_H_STORE = "Store no"
+_MG_H_DESC = "Description"
+_MG_H_IDATE = "Invoice Date"
+_MG_H_PDATE = "Payment date"
+_MG_H_SUPP = "Supplier code"
+
+# Ký hiệu và số cách nhau bằng '_' (hóa đơn của mình) hoặc dấu cách (chứng từ
+# ký hiệu khác) — CÙNG một file dùng cả hai.
+_MG_SEPS = " _"
+
+
+def is_our_series(series) -> bool:
+    """Ký hiệu này có phải hóa đơn BÁN RA của mình không.
+
+    Dùng mã người bán ở cuối ký hiệu, không dùng dấu tiền và không dùng độ dài.
+    Ký hiệu rỗng -> False: không biết thì KHÔNG kết luận là của mình.
+    """
+    s = norm_series(series)
+    return bool(s) and s.endswith(OUR_ISSUER_CODE)
+
+
+def parse_mega(sheets):
+    """Bảng kê thanh toán Mega Market.
+
+    Xem khối chú thích ngay trên hàm này để biết vì sao phân loại bằng ký hiệu
+    và vì sao file này không có số kiểm tra nào.
+    """
+    warnings = []
+    rows = []
+
+    hdr = None
+    for name, grid in sheets:
+        r, cols = _ae_find_header(grid, _MG_H_INV)
+        if r and _ae_col(cols, _MG_H_AMT):
+            hdr = (name, grid, r, cols)
+            break
+    if not hdr:
+        frappe.throw(_("File Mega Market không có dòng tiêu đề mang đủ '{0}' và '{1}' — "
+                       "không đọc được cột tiền nào.").format(_MG_H_INV, _MG_H_AMT))
+    sheet_name, grid, hrow, cols = hdr
+
+    c_inv = _ae_col(cols, _MG_H_INV)
+    c_amt = _ae_col(cols, _MG_H_AMT)
+    c_store = _ae_col(cols, _MG_H_STORE)
+    c_desc = _ae_col(cols, _MG_H_DESC)
+    c_idate = _ae_col(cols, _MG_H_IDATE)
+    c_pdate = _ae_col(cols, _MG_H_PDATE)
+    c_supp = _ae_col(cols, _MG_H_SUPP)
+
+    if not c_pdate:
+        warnings.append(
+            "File không có cột '%s' — mọi dòng sẽ thiếu ngày thanh toán, kế toán phải "
+            "điền tay trước khi sinh bút toán." % _MG_H_PDATE)
+
+    n_desc_ok = n_desc_seen = 0
+    pay_dates = set()
+    skipped = 0
+
+    for r in range(hrow + 1, len(grid) + 1):
+        raw_inv = _txt(_gv(grid, r, c_inv))
+        amt = to_number(_gv(grid, r, c_amt))
+        if not raw_inv and amt is None:
+            continue                       # dòng trắng giữa/cuối bảng
+        if amt is None:
+            warnings.append("Dòng %d: có tham chiếu '%s' nhưng KHÔNG đọc được số tiền — "
+                            "bỏ qua." % (r, raw_inv))
+            skipped += 1
+            continue
+
+        series, no = split_invoice_ref(raw_inv, _MG_SEPS)
+        ours = is_our_series(series)
+        store = _txt(_gv(grid, r, c_store)) if c_store else ""
+        # Store no ra từ ô số nên mang đuôi '.0' — cắt đi, nếu không mã cửa hàng
+        # '590072.0' không khớp mã nào trong master MT Store.
+        if store.endswith(".0"):
+            store = store[:-2]
+
+        # KIỂM CỘT bằng chính sự thừa của file: Description = "<số>,<mã cửa hàng>".
+        if c_desc:
+            want = "%s,%s" % (raw_inv, store)
+            got = _txt(_gv(grid, r, c_desc))
+            if got:
+                n_desc_seen += 1
+                if got == want:
+                    n_desc_ok += 1
+
+        # KHÔNG có dấu phân cách -> không bóc được ký hiệu. Thà để rỗng và gắn cờ
+        # còn hơn bịa ký hiệu rồi ghi tiền vào hóa đơn của người khác.
+        needs_review = not series
+        note = ""
+        if not series:
+            note = ("KHÔNG tách được ký hiệu khỏi '%s' (không có dấu '_' hay dấu cách)"
+                    % raw_inv)
+        # Dấu ngược với loại: KHÔNG đổi loại, chỉ bắt người nhìn.
+        elif (ours and amt < 0) or (not ours and amt > 0):
+            needs_review = True
+            note = ("DẤU TIỀN NGƯỢC với loại chứng từ (ký hiệu %s, %s đ) — phân loại vẫn "
+                    "theo KÝ HIỆU, xem tay trước khi khớp hóa đơn"
+                    % (series, "{:+,.0f}".format(amt)))
+
+        pdate = to_date(_gv(grid, r, c_pdate)) if c_pdate else None
+        if pdate:
+            pay_dates.add(pdate)
+
+        rows.append(_line(
+            row_kind="thanh_toan" if ours else "ghi_giam",
+            row_subtype="Hóa đơn bán ra" if ours else "Chứng từ ký hiệu %s" % (series or "?"),
+            # Dòng ghi giảm VẪN giữ ký hiệu/số để kế toán đối chiếu với chứng từ
+            # Mega gửi. An toàn vì mọi đường nối Sales Invoice đều chặn dòng không
+            # phải 'Thanh toán' (MT2-G).
+            inv_series=series, inv_no=no,
+            inv_date=to_date(_gv(grid, r, c_idate)) if c_idate else None,
+            store_code=store or None,
+            doc_no=_txt(_gv(grid, r, c_supp)) if c_supp else None,
+            # `_line` không có ô ghi chú riêng — cảnh báo của DÒNG phải đi cùng
+            # dòng, không thì nó chỉ còn ở `warnings` chung và mất dấu là dòng nào.
+            description=((_txt(_gv(grid, r, c_desc)) if c_desc else raw_inv)
+                         + (" · %s" % note if note else "")),
+            signed_amount=amt,
+            payment_date=pdate,
+            needs_review=needs_review,
+            source_sheet=sheet_name, source_row=r))
+
+    if not rows:
+        frappe.throw(_("Không đọc được dòng nào dưới tiêu đề của file Mega Market."))
+
+    if n_desc_seen and n_desc_ok != n_desc_seen:
+        warnings.append(
+            "%d/%d dòng có cột '%s' KHÔNG bằng '<%s>,<%s>' — rất có thể đã đọc lệch cột. "
+            "Đối chiếu lại bố cục file trước khi ghi nhận."
+            % (n_desc_seen - n_desc_ok, n_desc_seen, _MG_H_DESC, _MG_H_INV, _MG_H_STORE))
+
+    n_pay = sum(1 for r in rows if r["row_kind"] == "thanh_toan")
+    net = round(sum(float(r["signed_amount"] or 0) for r in rows), 2)
+
+    # File CẤN TRỪ HẾT: không có tiền mặt về. Nói thẳng ra — kế toán chờ tiền vào
+    # tài khoản mà không thấy sẽ đi tìm nhầm chỗ.
+    if abs(net) <= MONEY_EPS:
+        warnings.append(
+            "Bảng kê này CẤN TRỪ HẾT: %d hóa đơn bán ra (%s đ) trừ đúng bằng %d chứng "
+            "từ ghi giảm — tiền thực nhận bằng 0. Không phải lỗi đọc file."
+            % (n_pay,
+               "{:,.0f}".format(sum(float(r["signed_amount"] or 0) for r in rows
+                                    if r["row_kind"] == "thanh_toan")),
+               len(rows) - n_pay))
+
+    n_ded = len(rows) - n_pay
+    if n_ded:
+        warnings.append(
+            "%d dòng ghi giảm của Mega KHÔNG có cột phân loại nào trong file — không "
+            "tách được đâu là chiết khấu, đâu là phí, đâu là hàng trả lại. Tất cả vào "
+            "một nhóm 'Ghi giảm' và sẽ hạch toán vào MỘT tài khoản theo `MT Account "
+            "Map`. Cần tách thì sửa loại dòng trên chứng từ trước khi sinh bút toán."
+            % n_ded)
+
+    warnings.append(
+        "File Mega Market KHÔNG in dòng tổng cộng, số bảng kê hay số tiền thanh toán "
+        "nào — không có số kiểm tra để đối chiếu, nên bảng kê này luôn ở trạng thái "
+        "'chưa khớp số kiểm tra'. Đối chiếu tổng %s đ với thông báo thanh toán Mega gửi "
+        "rồi tự tick khi đã soi." % "{:,.0f}".format(net))
+    if skipped:
+        warnings.append("%d dòng bị bỏ qua vì không đọc được số tiền." % skipped)
+
+    return {
+        # Không có số bảng kê trong file — để None chứ không bịa từ tên file.
+        "advice_no": None,
+        "payment_dates": sorted(pay_dates),
+        "declared_totals": {
+            "total_payment": None,
+            "total_discount": None,
+            "net_payment": None,
+        },
+        # RỖNG có chủ đích — xem khối chú thích ở đầu mục 4h.
+        "checks": [],
+        "groups": [],
+        "rows": rows,
+        "warnings": warnings,
+    }
+
+
 PARSERS = {
     "wincommerce": parse_wincommerce,
     "central_retail": parse_central_retail,
@@ -2612,10 +2847,7 @@ PARSERS = {
     "coop": parse_coop,
     "aeon": parse_aeon,
     "fuji": parse_fuji,
-    # 'Mega Market' CỐ Ý không có ở đây: chưa có file bảng kê mẫu thật nên chưa
-    # viết được parser. Có option để gán khách, nhưng nạp file thì phải báo lỗi
-    # rõ ràng — đọc bừa bằng parser chuỗi khác là đọc SAI CỘT TIỀN mà vẫn ra một
-    # con số trông hợp lý.
+    "mega_market": parse_mega,
 }
 
 
@@ -2623,7 +2855,9 @@ def parse_sheets(sheets, chain_key):
     """Chạy parser của một chuỗi trên các sheet đã đọc và bổ sung phần tổng chung."""
     if chain_key not in PARSERS:
         # Phân biệt hai ca khác hẳn nhau: chuỗi lạ hoàn toàn, và chuỗi CÓ trong
-        # danh sách nhưng CHƯA có tầng đọc (Mega Market — chưa có file mẫu thật).
+        # danh sách nhưng CHƯA có tầng đọc. Hiện cả 8 chuỗi đều có parser, nhưng
+        # nhánh này phải ở lại: thêm chuỗi vào `MT_CHAINS` mà chưa viết parser là
+        # chuyện sẽ lặp lại, và khi đó báo sai lý do là bắt kế toán đi soi file.
         if chain_key in CHAIN_LABEL:
             frappe.throw(_(
                 "Chưa có tầng đọc bảng kê cho chuỗi {0}. Gán khách vào chuỗi này thì "
@@ -2746,8 +2980,8 @@ def _resolve_chain_key(chain):
     """Nhãn ('AEON') hoặc khóa ASCII ('aeon') -> khóa ASCII. Không nhận ra -> None.
 
     Nhận diện theo `CHAIN_LABEL` chứ KHÔNG theo `PARSERS`: chuỗi đã có trong danh
-    sách nhưng chưa có tầng đọc (Mega Market) vẫn phải phân giải được, để
-    `parse_sheets` báo đúng lý do "chưa có parser" thay vì "không nhận ra chuỗi".
+    sách nhưng chưa có tầng đọc vẫn phải phân giải được, để `parse_sheets` báo
+    đúng lý do "chưa có parser" thay vì "không nhận ra chuỗi".
     """
     c = _txt(chain)
     if c in CHAIN_LABEL:

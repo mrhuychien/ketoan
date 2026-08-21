@@ -1,4 +1,4 @@
-"""Đối chiếu CHÉO: bản đọc chạy thật vs bản tham chiếu độc lập (AEON, Fuji).
+"""Đối chiếu CHÉO: bản đọc chạy thật vs bản tham chiếu độc lập (AEON, Fuji, Mega).
 
     python3 docs/mt/verified/crosscheck_mt2.py
 
@@ -7,7 +7,7 @@
 
 Bộ này so hai bản đọc VIẾT KHÁC CÁCH trên cùng một file:
   · `ketoan/api/mt_advice.py`  — dò header theo NHÃN, quét mọi sheet, chạy thật
-  · `docs/mt/verified/{aeon,fuji}.py` — chỉ số dòng/cột CỨNG, đọc thẳng file mẫu
+  · `docs/mt/verified/{aeon,fuji,mega}.py` — chỉ số dòng/cột CỨNG, đọc thẳng file mẫu
 
 Hai cách đọc khác hẳn nhau mà ra cùng một số tới từng đồng VÀ từng dòng thì con
 số đó đáng tin. Giống nhau vì cùng một lỗi thì gần như không thể — muốn trùng
@@ -29,6 +29,7 @@ import regression_check as rc  # noqa: E402
 CASES = [
     ("aeon", "chi tiet thanh to\xa0n AEON.xls", "aeon"),
     ("fuji", "CHI TIẾT THANH TOÁN FUJI.Xls", "fuji"),
+    ("mega", "cttt_mega.xls", "mega_market"),
 ]
 
 

@@ -174,11 +174,21 @@ def main():
     print(f"  {'✅' if ok else '❌'} ĐÚNG MỘT chuỗi có bước 'Hồ sơ nộp' — WinCommerce")
     bad += not ok
 
-    ok = (by_chain["Mega Market"]["can_read_payment"] is False
-          and by_chain["LOTTE"]["can_read_payment"] is True)
-    print(f"  {'✅' if ok else '❌'} Mega Market báo CHƯA đọc được file thanh toán, "
-          f"LOTTE thì đọc được")
+    # `can_read_payment` phải bám ĐÚNG `mt_advice.PARSERS`, không chép cứng tên
+    # chuỗi: chép cứng thì ngày thêm parser mới, phép kiểm này báo hỏng vì lý do
+    # SAI (bảng vẫn đúng) và người sửa sẽ sửa bảng thay vì sửa phép kiểm.
+    from ketoan.api.mt_advice import CHAIN_LABEL, PARSERS
+    want_read = {CHAIN_LABEL[k] for k in PARSERS if k in CHAIN_LABEL}
+    got_read = {c["chain"] for c in chains if c["can_read_payment"]}
+    ok = got_read == want_read
+    print(f"  {'✅' if ok else '❌'} bảng báo đọc được file thanh toán cho đúng "
+          f"{len(want_read)}/{len(chains)} chuỗi CÓ parser"
+          + ("" if ok else f" — lệch: {sorted(got_read ^ want_read)}"))
     bad += not ok
+
+    no_parser = {c["chain"] for c in chains} - want_read
+    print(f"  ℹ chuỗi chưa có tầng đọc bảng kê: "
+          f"{', '.join(sorted(no_parser)) if no_parser else 'không còn chuỗi nào'}")
 
     # ── 6. Số việc = việc PHẢI LÀM, không phải hiện trạng ────────────────
     print("-" * 78)
