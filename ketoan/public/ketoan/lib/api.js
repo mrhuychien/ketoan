@@ -224,6 +224,8 @@ export const api = {
   mtWinPendingSeedPreview: (content) => callMethod(NS + "mt_win_pending.preview_seed", withCompany({ content })),
   mtWinPendingSeedCommit: (a) => callMethod(NS + "mt_win_pending.commit_seed", withCompany(a)),
   mtWinCustomers: () => callMethod(NS + "mt_win_pending.search_win_customers", withCompany({})),
+  mtWinGrnPreview: (content) => callMethod(NS + "mt_win_grn.preview", withCompany({ content })),
+  mtWinGrnAttach: (a) => callMethod(NS + "mt_win_grn.attach_grn", withCompany(a)),
 
   // Bảng điều khiển theo CHUỖI — màn hình đầu tiên của kênh MT. Một lời gọi
   // trả về tiến độ cả năm bước cho mọi chuỗi.

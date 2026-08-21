@@ -3968,8 +3968,13 @@ async function loadWinPending(container, state) {
       </select>
       <span class="kt-sub">${res.total} đợt giao · ${formatVND(res.amount)}
         ${res.n_received ? html` · <b>${res.n_received} đã có phiếu nhập kho, xuất hóa đơn được</b>` : ""}</span>
+      <span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="kt-btn kt-btn--outline kt-btn--sm" id="wp-grn">
+          <i class="fas fa-file-pdf"></i> Đối soát phiếu nhập kho
+        </button>
+      </span>
       ${res.can_manage
-        ? html`<span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+        ? html`<span style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="kt-btn kt-btn--outline kt-btn--sm" id="wp-seed">
               <i class="fas fa-file-import"></i> Khởi tạo từ file công nợ
             </button>
@@ -4028,6 +4033,8 @@ async function loadWinPending(container, state) {
   if (nw) nw.addEventListener("click", () => openWinPendingEdit(container, state, null));
   const sd = container.querySelector("#wp-seed");
   if (sd) sd.addEventListener("click", () => pickWinPendingSeed(container, state));
+  const gr = container.querySelector("#wp-grn");
+  if (gr) gr.addEventListener("click", () => pickWinGrn(container, state));
   container.querySelectorAll(".wp-edit").forEach((b) => {
     const row = rows.find((r) => r.name === b.dataset.name);
     b.addEventListener("click", () => openWinPendingEdit(container, state, row));
@@ -4206,6 +4213,146 @@ async function openWinPendingSeed(container, state, content) {
     } catch (e) {
       toast(e.message, "error");
       go.disabled = false;
+    }
+  });
+}
+
+// ── Đối soát phiếu nhập kho Winmart (PDF) ─────────────────────────────────
+// SOP §2.2: chỉ xuất hóa đơn sau khi có phiếu nhập kho trên hệ Win và khớp
+// PO + hàng hóa. Trước màn này kế toán mở PDF đọc bằng mắt rồi so tay.
+const GRN_TONE = {
+  khop: "green",
+  lech_sl: "yellow",
+  thieu_tren_hd: "red",
+  thua_tren_hd: "red",
+};
+
+function pickWinGrn(container, state) {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".pdf";
+  inp.addEventListener("change", () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    const fr = new FileReader();
+    fr.onload = () => openWinGrn(container, state, String(fr.result).split(",").pop());
+    fr.readAsDataURL(f);
+  });
+  inp.click();
+}
+
+async function openWinGrn(container, state, content) {
+  const modal = openModal({
+    title: "Đối soát phiếu nhập kho Winmart",
+    icon: "fa-file-pdf",
+    maxWidth: 940,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  let res;
+  try {
+    res = await api.mtWinGrnPreview(content);
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+
+  const g = res.grn || {};
+  const m = res.match || {};
+  const lines = m.lines || [];
+  const c = m.counts || {};
+  const pd = res.pending;
+  // "Chưa có hóa đơn mang PO này" KHÔNG phải lỗi — Win chỉ cho xuất hóa đơn sau
+  // khi có phiếu, nên đó thường là đúng quy trình.
+  const noInvoice = !m.blocked && !(m.invoices || []).length;
+
+  setHTML(modal.body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px">
+      <div><div class="kt-sub">Số phiếu</div><b><code>${g.grn_no || "—"}</code></b></div>
+      <div><div class="kt-sub">Số đơn hàng (PO)</div><b><code>${g.po_no || "—"}</code></b></div>
+      <div><div class="kt-sub">Ngày thực hiện</div><b>${g.grn_date ? formatDate(g.grn_date) : "—"}</b></div>
+      <div><div class="kt-sub">Cửa hàng / kho</div><b>${g.store || "—"}</b></div>
+      <div><div class="kt-sub">Dòng hàng</div><b>${g.n_lines} dòng · ${g.total_qty} đơn vị</b></div>
+    </div></div>
+
+    ${m.blocked
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)">
+          <div class="kt-card-body kt-sub">${m.reason}</div></div>`
+      : ""}
+    ${noInvoice
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-primary)">
+          <div class="kt-card-body kt-sub">${m.reason}</div></div>`
+      : ""}
+    ${(m.warnings || []).map((w) => html`<div class="kt-card kt-mb"
+        style="border-left:4px solid var(--kt-warning)">
+        <div class="kt-card-body kt-sub">${w}</div></div>`)}
+
+    ${(m.invoices || []).length
+      ? html`<div class="kt-sub" style="margin-bottom:8px">Hóa đơn mang PO
+          <code>${g.po_no}</code>:
+          ${m.invoices.map((i) => html`<a href="/app/sales-invoice/${i.name}" target="_blank">${i.name}</a>
+            <span class="kt-badge kt-badge--${i.docstatus === 1 ? "green" : "yellow"}">${i.docstatus === 1 ? "đã ghi sổ" : "nháp"}</span> `)}
+        </div>`
+      : ""}
+
+    ${!lines.length
+      ? html`<div class="kt-card"><div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>STT</th><th>Mã hàng Win</th><th>Tên hàng</th>
+              <th class="num">Số lượng</th><th>ĐVT</th></tr></thead>
+            <tbody>${(g.lines || []).map((l) => html`<tr>
+              <td>${l.stt}</td><td><code>${l.item_code}</code></td>
+              <td>${l.item_name}</td><td class="num">${l.qty}</td><td>${l.uom}</td>
+            </tr>`)}</tbody>
+          </table></div></div></div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <span class="kt-badge kt-badge--green">${c.khop || 0} khớp</span>
+            <span class="kt-badge kt-badge--yellow">${c.lech_sl || 0} lệch số lượng</span>
+            <span class="kt-badge kt-badge--red">${c.thieu_tren_hd || 0} phiếu có, hóa đơn không</span>
+            <span class="kt-badge kt-badge--red">${c.thua_tren_hd || 0} hóa đơn có, phiếu không</span>
+          </div>
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Mã hàng Win</th><th>Tên hàng</th>
+              <th class="num">SL phiếu</th><th class="num">SL hóa đơn</th>
+              <th class="num">Chênh</th><th>Kết luận</th></tr></thead>
+            <tbody>${lines.map((l) => html`<tr>
+              <td><code>${l.ma_win}</code>${l.item_code ? html`<div class="kt-sub">${l.item_code}</div>` : ""}</td>
+              <td>${l.name || html`<span class="kt-sub">—</span>`}</td>
+              <td class="num">${l.qty_grn === null ? html`<span class="kt-sub">—</span>` : l.qty_grn}</td>
+              <td class="num">${l.qty_si === null ? html`<span class="kt-sub">—</span>` : l.qty_si}</td>
+              <td class="num">${l.diff ? html`<b>${l.diff > 0 ? "+" : ""}${l.diff}</b>` : "0"}</td>
+              <td><span class="kt-badge kt-badge--${GRN_TONE[l.status] || "gray"}">${l.status_label}</span></td>
+            </tr>`)}</tbody>
+          </table></div>
+        </div></div>`}
+
+    <div class="kt-sub" style="margin-top:12px">${res.note}</div>
+
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+      ${pd
+        ? html`<span class="kt-sub">Đợt giao đang theo dõi: PO <code>${pd.po_no}</code> ·
+            ${pd.status}${pd.grn_no ? html` · đã gắn phiếu <code>${pd.grn_no}</code>` : ""}</span>`
+        : html`<span class="kt-sub">Chưa có đợt giao nào trong danh sách chờ mang PO này.</span>`}
+      ${pd && !pd.grn_no && res.can_attach
+        ? html`<button class="kt-btn kt-btn--success" id="grn-attach" style="margin-left:auto">
+            <i class="fas fa-link"></i> Ghi phiếu ${g.grn_no} vào đợt giao
+          </button>`
+        : ""}
+    </div>
+  `);
+
+  const at = modal.body.querySelector("#grn-attach");
+  if (at) at.addEventListener("click", async () => {
+    at.disabled = true;
+    try {
+      const out = await api.mtWinGrnAttach({ content, expected_hash: res.plan_hash });
+      toast(out.message, "success");
+      modal.close();
+      loadTab(container, state);
+    } catch (e) {
+      toast(e.message, "error");
+      at.disabled = false;
     }
   });
 }

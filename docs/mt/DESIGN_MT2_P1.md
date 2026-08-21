@@ -561,7 +561,10 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-G** đóng hạng mục "khớp tự động dòng Ghi giảm" bằng phép đo | `165cf30` | `clawback_check` |
 | **MT2-H** soát trước deploy: 3 lỗi thật, bịt vùng mù "kiểm không bao giờ GHI" | `04a72e2` | `discount_sheet_check` · `rebate_pdf_check` |
 | **MT2-I** giao diện xếp lại theo CHUỖI + vòng đời tháng | `26101e7` | `ui_board_check` |
-| **MT2-J** bộ lọc chuỗi thật sự lọc — gom về MỘT quy tắc | *(commit này)* | `chain_filter_check` |
+| **MT2-J** bộ lọc chuỗi thật sự lọc — gom về MỘT quy tắc | `7b1aa83` | `chain_filter_check` |
+| **MT2-K1/K2/K3** đọc 7 file công nợ Excel để nhập số dư đầu kỳ | `30e5d0b` `c77ba12` `07c5c73` | `opening_check` |
+| **MT2-L1** danh sách đợt giao Winmart chưa xuất hóa đơn | `8dee7d8` | — |
+| **MT2-L2** đọc phiếu nhập kho Winmart (PDF) + đối soát PO/mã hàng | *(commit này)* | `win_grn_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -570,10 +573,53 @@ for t in regression_check crosscheck_mt2 mutation_check \
          store_seed_check je_plan_check je_submit_check \
          discount_basis_check discount_sheet_check win_dossier_check \
          debt_due_check rebate_pdf_check clawback_check ui_board_check \
-         chain_filter_check; do
+         chain_filter_check opening_check win_grn_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
+
+### Phiếu nhập kho Winmart — chốt bằng hai file PDF thật
+
+SOP §2.2 đòi khớp **PO + hàng hóa** giữa phiếu nhập kho trên hệ Win và đơn trên
+ERPNext trước khi xuất hóa đơn. Trước MT2-L2 khâu đó **không tồn tại trong app** —
+kế toán mở PDF đọc bằng mắt rồi so tay.
+
+Đo trên `docs/mt/samples/pnk/`:
+
+| | `pnk_4193445648.pdf` | `pnk_4190754676.pdf` |
+|---|---|---|
+| Số Phiếu | 5195070958 | 5189984522 |
+| Số đơn hàng (PO) | 4193445648 | 4190754676 |
+| Ngày thực hiện | 30/07/2026 | 11/06/2026 |
+| Dòng hàng | 1 dòng · 40 HOP | 5 dòng · 184 HOP |
+| Nhà cung cấp | 0002007766 | 0002007766 |
+
+Chốt lại mấy điều dễ sai:
+
+- **Phiếu KHÔNG có tiền**, chỉ có số lượng. Đối soát được PO + mã hàng + số lượng;
+  thành tiền vẫn phải lấy theo đơn giá trên hóa đơn. Không dựng phép so tiền nào ở đây.
+- Nối sang hóa đơn bằng **hai field của SITE**: `Sales Invoice.custom_po_` và
+  `Sales Invoice Item.custom_ma_win`. App này không tạo chúng → phải dò
+  `has_column` trước, thiếu thì báo **đích danh field**, không ném lỗi SQL.
+- Tên hàng **chứa số** (`…300g`, `…RV 170g`) nên không tách số lượng bằng "lấy số
+  cuối"; neo vào **ĐVT** ở cuối dòng.
+- Số PO phải ra **chuỗi số nguyên**: `4193445648.0` không khớp `custom_po_` nào.
+- Tên kho **có dấu cách** (`1312 WMP_AMBIENT_BINH DUONG1_HANGTHUONG`) → đọc tới
+  nhãn kế tiếp, không lấy hai token.
+- Một mã có thể nằm **nhiều dòng** ở cả hai phía (Win tách lô, hóa đơn tách theo
+  đơn giá) → **cộng dồn theo mã** rồi mới so, nếu không là báo lệch giả.
+- Đối soát trả **bốn kết luận tách riêng**, không gộp thành "khớp / không khớp":
+  `khop` · `lech_sl` · `thieu_tren_hd` · `thua_tren_hd`. Gộp lại là bắt kế toán
+  mở lại PDF đọc tay — đúng việc module này sinh ra để bỏ.
+- **Chưa có hóa đơn mang PO đó KHÔNG phải lỗi** — Win chỉ cho xuất hóa đơn *sau*
+  khi có phiếu. Nói rõ điều đó thay vì báo đỏ.
+- Quét cả hóa đơn **NHÁP** (`docstatus < 2`): đối soát là việc *trước* khi ghi sổ.
+
+Chỗ **duy nhất** module này ghi là dòng `MT Win Pending` cùng PO: đánh dấu
+"đã nhận, chờ xuất HĐ" + số phiếu + ngày, có chốt **vân tay phiếu**. Không có đợt
+giao nào mang PO đó thì **dừng**, không tự tạo. Đã gắn một phiếu **khác** rồi thì
+**dừng hỏi người**, không ghi đè âm thầm. Lệch số lượng thì con người quyết —
+xuất hóa đơn theo **số thực nhận**, phần chênh làm xuất trả (SOP §2.2).
 
 ### Hồ sơ Winmart — chốt bằng file mẫu thật
 
