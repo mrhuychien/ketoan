@@ -215,6 +215,16 @@ export const api = {
   mtWinSubmitted: (name) => callMethod(NS + "mt_win.mark_submitted", withCompany({ name })),
   mtWinExport: (name) => downloadPost(NS + "mt_win.export_dossier", withCompany({ name })),
 
+  // Đợt giao Winmart ĐÃ GIAO nhưng CHƯA xuất hóa đơn. Win chỉ cho xuất hóa đơn
+  // sau khi có phiếu nhập kho của họ (SOP §2.2) — khoảng giữa đó trước nay
+  // không hệ nào theo dõi.
+  mtWinPending: (a) => callMethod(NS + "mt_win_pending.list_pending", withCompany(a)),
+  mtWinPendingSave: (a) => callMethod(NS + "mt_win_pending.save_pending", withCompany(a)),
+  mtWinPendingDelete: (name) => callMethod(NS + "mt_win_pending.delete_pending", withCompany({ name })),
+  mtWinPendingSeedPreview: (content) => callMethod(NS + "mt_win_pending.preview_seed", withCompany({ content })),
+  mtWinPendingSeedCommit: (a) => callMethod(NS + "mt_win_pending.commit_seed", withCompany(a)),
+  mtWinCustomers: () => callMethod(NS + "mt_win_pending.search_win_customers", withCompany({})),
+
   // Bảng điều khiển theo CHUỖI — màn hình đầu tiên của kênh MT. Một lời gọi
   // trả về tiến độ cả năm bước cho mọi chuỗi.
   mtBoard: (a) => callMethod(NS + "mt_hub.get_board", withCompany(a)),

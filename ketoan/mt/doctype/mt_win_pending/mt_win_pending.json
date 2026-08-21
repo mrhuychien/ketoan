@@ -1,0 +1,233 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-08-21 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "customer",
+  "customer_name",
+  "po_no",
+  "delivery_date",
+  "sec_money",
+  "amount_before_vat",
+  "vat_amount",
+  "col_money",
+  "total_amount",
+  "sec_status",
+  "status",
+  "grn_no",
+  "grn_date",
+  "grn_amount",
+  "col_status",
+  "sales_invoice",
+  "source",
+  "sec_note",
+  "note"
+ ],
+ "fields": [
+  {
+   "default": "MT-WPD-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Dãy số",
+   "options": "MT-WPD-.#####",
+   "reqd": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Công ty",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "description": "Pháp nhân sẽ đứng tên trên hóa đơn khi xuất.",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Chi nhánh Win (bên mua)",
+   "options": "Customer",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "customer.customer_name",
+   "fieldname": "customer_name",
+   "fieldtype": "Data",
+   "label": "Tên bên mua",
+   "read_only": 1
+  },
+  {
+   "description": "Khóa tự nhiên của một đợt giao. Trùng PO trong cùng công ty -> chặn.",
+   "fieldname": "po_no",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Số PO VCM",
+   "reqd": 1
+  },
+  {
+   "fieldname": "delivery_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Ngày giao hàng"
+  },
+  {
+   "fieldname": "sec_money",
+   "fieldtype": "Section Break",
+   "label": "Tiền dự kiến"
+  },
+  {
+   "fieldname": "amount_before_vat",
+   "fieldtype": "Currency",
+   "label": "Tiền trước VAT"
+  },
+  {
+   "fieldname": "vat_amount",
+   "fieldtype": "Currency",
+   "label": "Tiền VAT"
+  },
+  {
+   "fieldname": "col_money",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Tự cộng = trước VAT + VAT. Đây là tiền DỰ KIẾN theo đơn giao, chưa phải hóa đơn — số thật lấy theo phiếu nhập kho Win.",
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Tổng tiền",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_status",
+   "fieldtype": "Section Break",
+   "label": "Tiến độ"
+  },
+  {
+   "default": "Đang giao",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trạng thái",
+   "options": "\nĐang giao\nĐã nhận - chờ xuất HĐ\nĐã xuất hóa đơn\nHủy",
+   "reqd": 1
+  },
+  {
+   "description": "Win chỉ cho xuất hóa đơn sau khi có phiếu nhập kho (SOP §2.2).",
+   "fieldname": "grn_no",
+   "fieldtype": "Data",
+   "label": "Số phiếu nhập kho Win"
+  },
+  {
+   "fieldname": "grn_date",
+   "fieldtype": "Date",
+   "label": "Ngày nhập kho"
+  },
+  {
+   "description": "Lệch với tiền dự kiến -> xuất hóa đơn theo SỐ THỰC NHẬN, phần chênh làm xuất trả (SOP §2.2).",
+   "fieldname": "grn_amount",
+   "fieldtype": "Currency",
+   "label": "Tiền theo phiếu nhập kho"
+  },
+  {
+   "fieldname": "col_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Điền khi đã xuất hóa đơn — đợt giao rời khỏi danh sách chờ.",
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "label": "Hóa đơn đã xuất",
+   "options": "Sales Invoice"
+  },
+  {
+   "default": "Nhập tay",
+   "fieldname": "source",
+   "fieldtype": "Select",
+   "label": "Nguồn",
+   "options": "\nNhập tay\nSố dư đầu kỳ",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_note",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-21 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Win Pending",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan Truong",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan MT",
+   "share": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1
+  }
+ ],
+ "search_fields": "po_no,customer_name,grn_no",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "title_field": "po_no",
+ "track_changes": 1
+}

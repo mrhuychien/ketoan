@@ -42,6 +42,11 @@ const STEPS = [
   { key: "chiet-khau", no: "3", label: "Chiết khấu mình xuất", icon: "fa-file-signature",
     need: "we_issue_discount", count: ["sheets_draft", "sheets_await_invoice"],
     hint: "Nạp file doanh số/TBCK → lập bảng kê BKCK → chốt lấy số → xuất hóa đơn CK trên MISA → ghi số về → sinh bút toán." },
+  // Đứng TRƯỚC "Hồ sơ nộp" vì nó đứng trước trong thực tế: giao hàng → Win nhận
+  // → xuất hóa đơn → mới gom hồ sơ nộp.
+  { key: "cho-xuat-hd", no: "1", label: "Chờ xuất hóa đơn", icon: "fa-truck",
+    need: "has_dossier", count: [],
+    hint: "Hàng ĐÃ GIAO nhưng CHƯA xuất hóa đơn — Win chỉ cho xuất sau khi có phiếu nhập kho của họ. Đây CHƯA phải công nợ, nên không nằm trong số còn nợ." },
   { key: "ho-so", no: "", label: "Hồ sơ nộp", icon: "fa-folder-open",
     need: "has_dossier", count: ["dossiers_draft"],
     hint: "Bảng kê Excel + PDF hóa đơn đặt ĐÚNG TÊN. Win không xử lý thanh toán khi hồ sơ sai tên." },
@@ -603,6 +608,7 @@ async function loadTab(container, state) {
   }
 
   if (state.step === "chiet-khau") return loadBkck(container, state);
+  if (state.step === "cho-xuat-hd") return loadWinPending(container, state);
   if (state.step === "ho-so") return loadWinDossiers(container, state);
   if (state.step === "cong-no") return loadDueDebt(container, state);
   if (state.step === "but-toan") {
@@ -3913,5 +3919,293 @@ async function renderCreditTerms(container, state, modal) {
         b.disabled = false;
       }
     });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BƯỚC — CHỜ XUẤT HÓA ĐƠN (chỉ WinCommerce)
+//
+// Win chỉ cho xuất hóa đơn SAU KHI họ nhận hàng và có phiếu nhập kho (SOP §2.2).
+// Khoảng giữa "đã giao" và "đã xuất hóa đơn" trước nay không hệ nào theo dõi.
+//
+// PHẢI NÓI RÕ TRÊN MÀN HÌNH: đây CHƯA phải công nợ. File Excel cũ đang cộng
+// 46.665.180đ loại này vào cột `Số còn nợ` — chưa xuất hóa đơn thì chưa phải
+// khoản phải thu, cộng vào là thổi phồng công nợ.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const WP_TONE = {
+  "Đang giao": "yellow",
+  "Đã nhận - chờ xuất HĐ": "green",
+  "Đã xuất hóa đơn": "gray",
+  "Hủy": "gray",
+};
+
+async function loadWinPending(container, state) {
+  const body = container.querySelector("#mt-body");
+  let res;
+  try {
+    res = await api.mtWinPending({
+      status: state.wpStatus || undefined,
+      search: state.search || undefined,
+      page: state.page, page_size: 50,
+    });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = res.rows || [];
+
+  setHTML(body, html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-primary)">
+      <div class="kt-card-body kt-sub">${res.note}</div>
+    </div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <select class="kt-input kt-input--sm" id="wp-status">
+        <option value="">Đang chờ (mặc định)</option>
+        ${(res.statuses || []).map((x) => html`<option value="${x}" ${state.wpStatus === x ? "selected" : ""}>${x}</option>`)}
+      </select>
+      <span class="kt-sub">${res.total} đợt giao · ${formatVND(res.amount)}
+        ${res.n_received ? html` · <b>${res.n_received} đã có phiếu nhập kho, xuất hóa đơn được</b>` : ""}</span>
+      ${res.can_manage
+        ? html`<span style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="kt-btn kt-btn--outline kt-btn--sm" id="wp-seed">
+              <i class="fas fa-file-import"></i> Khởi tạo từ file công nợ
+            </button>
+            <button class="kt-btn kt-btn--primary kt-btn--sm" id="wp-new">
+              <i class="fas fa-plus"></i> Thêm đợt giao
+            </button>
+          </span>`
+        : ""}
+    </div></div>
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-truck"></i>
+          <p>Không có đợt giao nào đang chờ xuất hóa đơn.</p></div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr>
+              <th>PO VCM</th><th>Bên mua</th><th>Ngày giao</th>
+              <th class="num">Tiền dự kiến</th><th>Phiếu nhập kho Win</th>
+              <th class="num">Tiền theo phiếu</th><th>Trạng thái</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${rows.map((r) => html`<tr>
+                <td><code>${r.po_no}</code>
+                  ${r.source === "Số dư đầu kỳ" ? html`<div class="kt-sub">từ số dư đầu kỳ</div>` : ""}</td>
+                <td>${r.customer
+                  ? (r.customer_name || r.customer)
+                  : html`<span class="kt-badge kt-badge--red">chưa chọn bên mua</span>`}</td>
+                <td>${r.delivery_date ? formatDate(r.delivery_date) : html`<span class="kt-sub">—</span>`}</td>
+                <td class="num">${formatVND(r.total_amount)}</td>
+                <td>${r.grn_no
+                  ? html`<code>${r.grn_no}</code>${r.grn_date ? html`<div class="kt-sub">${formatDate(r.grn_date)}</div>` : ""}`
+                  : html`<span class="kt-sub">chưa có</span>`}</td>
+                <td class="num">${r.grn_amount
+                  ? html`${formatVND(r.grn_amount)}${Math.abs((r.grn_amount || 0) - (r.total_amount || 0)) > 1
+                      ? html`<div class="kt-sub" style="color:var(--kt-warning)">lệch ${formatVNDShort((r.grn_amount || 0) - (r.total_amount || 0))}</div>`
+                      : ""}`
+                  : html`<span class="kt-sub">—</span>`}</td>
+                <td><span class="kt-badge kt-badge--${WP_TONE[r.status] || "gray"}">${r.status}</span></td>
+                <td>${res.can_manage
+                  ? html`<button class="kt-btn kt-btn--outline kt-btn--sm wp-edit" data-name="${r.name}">
+                      <i class="fas fa-pen"></i></button>`
+                  : ""}</td>
+              </tr>`)}
+            </tbody>
+          </table></div>
+          ${pager(res, "đợt giao")}
+        </div></div>`}
+  `);
+
+  bindPager(container, state);
+  const st = container.querySelector("#wp-status");
+  if (st) st.addEventListener("change", (e) => {
+    state.wpStatus = e.target.value; state.page = 1; loadTab(container, state);
+  });
+  const nw = container.querySelector("#wp-new");
+  if (nw) nw.addEventListener("click", () => openWinPendingEdit(container, state, null));
+  const sd = container.querySelector("#wp-seed");
+  if (sd) sd.addEventListener("click", () => pickWinPendingSeed(container, state));
+  container.querySelectorAll(".wp-edit").forEach((b) => {
+    const row = rows.find((r) => r.name === b.dataset.name);
+    b.addEventListener("click", () => openWinPendingEdit(container, state, row));
+  });
+}
+
+// ── Thêm / sửa một đợt giao ────────────────────────────────────────────────
+async function openWinPendingEdit(container, state, row) {
+  const modal = openModal({
+    title: row ? `Đợt giao PO ${row.po_no}` : "Thêm đợt giao",
+    icon: "fa-truck",
+    maxWidth: 700,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+
+  let cus = { rows: [], message: "" };
+  try { cus = await api.mtWinCustomers(); } catch (e) { cus = { rows: [], message: e.message }; }
+  const r = row || {};
+
+  setHTML(modal.body, html`
+    ${cus.message ? html`<div class="kt-sub" style="color:var(--kt-warning);margin-bottom:10px">${cus.message}</div>` : ""}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <label>Số PO VCM
+        <input class="kt-input" id="wp-po" value="${r.po_no || ""}" ${row ? "readonly" : ""}>
+        ${row ? html`<div class="kt-sub">PO là khóa của đợt giao — không sửa được.</div>` : ""}
+      </label>
+      <label>Bên mua (chi nhánh Win)
+        <select class="kt-input" id="wp-cus">
+          <option value="">— chọn —</option>
+          ${(cus.rows || []).map((c) => html`<option value="${c.name}" ${r.customer === c.name ? "selected" : ""}>${c.customer_name || c.name}</option>`)}
+        </select>
+      </label>
+      <label>Ngày giao hàng
+        <input type="date" class="kt-input" id="wp-date" value="${r.delivery_date || ""}"></label>
+      <label>Trạng thái
+        <select class="kt-input" id="wp-st">
+          ${["Đang giao", "Đã nhận - chờ xuất HĐ", "Đã xuất hóa đơn", "Hủy"].map((x) =>
+            html`<option value="${x}" ${(r.status || "Đang giao") === x ? "selected" : ""}>${x}</option>`)}
+        </select></label>
+      <label>Tiền trước VAT (dự kiến)
+        <input type="number" class="kt-input" id="wp-net" value="${r.amount_before_vat || ""}"></label>
+      <label>Tiền VAT (dự kiến)
+        <input type="number" class="kt-input" id="wp-vat" value="${r.vat_amount || ""}"></label>
+      <label>Số phiếu nhập kho Win
+        <input class="kt-input" id="wp-grn" value="${r.grn_no || ""}"></label>
+      <label>Ngày nhập kho
+        <input type="date" class="kt-input" id="wp-grnd" value="${r.grn_date || ""}"></label>
+      <label>Tiền theo phiếu nhập kho
+        <input type="number" class="kt-input" id="wp-grna" value="${r.grn_amount || ""}">
+        <div class="kt-sub">Lệch với tiền dự kiến thì xuất hóa đơn theo SỐ THỰC NHẬN,
+          phần chênh làm xuất trả.</div></label>
+      <label>Hóa đơn đã xuất
+        <input class="kt-input" id="wp-si" value="${r.sales_invoice || ""}"
+          placeholder="mã Sales Invoice"></label>
+    </div>
+    <label style="display:block;margin-top:10px">Ghi chú
+      <textarea class="kt-input" id="wp-note" rows="3">${r.note || ""}</textarea></label>
+
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <button class="kt-btn kt-btn--success" id="wp-save"><i class="fas fa-check"></i> Lưu</button>
+      ${row && row.status !== "Đã xuất hóa đơn"
+        ? html`<button class="kt-btn kt-btn--danger kt-btn--sm" id="wp-del" style="margin-left:auto">
+            <i class="fas fa-trash"></i> Xóa
+          </button>`
+        : ""}
+    </div>
+  `);
+
+  const val = (id) => modal.body.querySelector(id).value.trim();
+  modal.body.querySelector("#wp-save").addEventListener("click", async () => {
+    const btn = modal.body.querySelector("#wp-save");
+    btn.disabled = true;
+    try {
+      const out = await api.mtWinPendingSave({
+        name: row ? row.name : undefined,
+        po_no: val("#wp-po"), customer: val("#wp-cus"),
+        delivery_date: val("#wp-date"), status: val("#wp-st"),
+        amount_before_vat: val("#wp-net") || 0, vat_amount: val("#wp-vat") || 0,
+        grn_no: val("#wp-grn"), grn_date: val("#wp-grnd"),
+        grn_amount: val("#wp-grna") || 0,
+        sales_invoice: val("#wp-si"), note: val("#wp-note"),
+      });
+      toast(out.message, "success");
+      modal.close();
+      loadTab(container, state);
+    } catch (e) {
+      toast(e.message, "error");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  const del = modal.body.querySelector("#wp-del");
+  if (del) del.addEventListener("click", async () => {
+    del.disabled = true;
+    try {
+      const out = await api.mtWinPendingDelete(row.name);
+      toast(out.message, "success");
+      modal.close();
+      loadTab(container, state);
+    } catch (e) {
+      toast(e.message, "error");
+      del.disabled = false;
+    }
+  });
+}
+
+// ── Khởi tạo danh sách từ file theo dõi công nợ Win ────────────────────────
+function pickWinPendingSeed(container, state) {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".xlsx,.xls,.xlsm";
+  inp.addEventListener("change", () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    const fr = new FileReader();
+    fr.onload = () => openWinPendingSeed(container, state, String(fr.result).split(",").pop());
+    fr.readAsDataURL(f);
+  });
+  inp.click();
+}
+
+async function openWinPendingSeed(container, state, content) {
+  const modal = openModal({
+    title: "Khởi tạo đợt giao từ file công nợ WinCommerce",
+    icon: "fa-file-import",
+    maxWidth: 860,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  let res;
+  try {
+    res = await api.mtWinPendingSeedPreview(content);
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+
+  setHTML(modal.body, html`
+    <div class="kt-sub" style="margin-bottom:12px">${res.note}</div>
+    ${res.blocked.length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+          <div class="kt-card-body kt-sub">
+            <b>${res.blocked.length} dòng bị chặn</b> — ${res.blocked.map((b) => b.reason).filter((v, i, a) => a.indexOf(v) === i).join(" · ")}
+          </div></div>`
+      : ""}
+    ${!res.n
+      ? html`<div class="kt-empty"><p>Không có dòng nào để khởi tạo.</p></div>`
+      : html`<div class="kt-table-wrap" style="max-height:44vh;overflow:auto">
+          <table class="kt-table">
+            <thead><tr><th>PO VCM</th><th>Bên mua ghi trong file</th>
+              <th class="num">Trước VAT</th><th class="num">VAT</th><th class="num">Tổng</th></tr></thead>
+            <tbody>${res.rows.map((r) => html`<tr>
+              <td><code>${r.po_no || "—"}</code></td>
+              <td>${r.party || html`<span class="kt-sub">—</span>`}</td>
+              <td class="num">${formatVND(r.amount_before_vat)}</td>
+              <td class="num">${formatVND(r.vat_amount)}</td>
+              <td class="num"><b>${formatVND(r.total_amount)}</b></td>
+            </tr>`)}</tbody>
+          </table></div>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap">
+          <span><b>${res.n} đợt giao · ${formatVND(res.total_amount)}</b></span>
+          <button class="kt-btn kt-btn--success" id="wp-seed-go" style="margin-left:auto">
+            <i class="fas fa-check"></i> Tạo ${res.n} đợt giao
+          </button>
+        </div>`}
+  `);
+
+  const go = modal.body.querySelector("#wp-seed-go");
+  if (go) go.addEventListener("click", async () => {
+    go.disabled = true;
+    try {
+      const out = await api.mtWinPendingSeedCommit({ content, expected_hash: res.plan_hash });
+      toast(out.message, (out.failed || []).length ? "error" : "success");
+      if (out.warning) toast(out.warning, "error");
+      modal.close();
+      loadTab(container, state);
+    } catch (e) {
+      toast(e.message, "error");
+      go.disabled = false;
+    }
   });
 }
