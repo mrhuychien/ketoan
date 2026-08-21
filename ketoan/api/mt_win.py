@@ -74,12 +74,16 @@ def _po_column():
 
 
 def _win_customers(company):
-    """Khách hàng thuộc chuỗi WinCommerce."""
-    if not frappe.db.has_column("Customer", "custom_mt_chain"):
-        return []
-    return frappe.get_all("Customer",
-                          filters={"custom_mt_chain": WIN_CHAIN, "disabled": 0},
-                          pluck="name", limit_page_length=0)
+    """Khách hàng thuộc chuỗi WinCommerce.
+
+    Dùng CHUNG `mt.chain_customers` với mọi màn hình khác. Bản cũ chỉ đọc field
+    khai `Customer.custom_mt_chain`, nên khách đã có bảng kê WinCommerce mà kế
+    toán chưa kịp khai field thì hiện là "WinCommerce" ở màn công nợ nhưng BIẾN
+    MẤT khỏi danh sách gom hồ sơ Win — và cái mất chính là cái làm hồ sơ nộp tiền.
+    """
+    from ketoan.api.mt import chain_customers
+
+    return chain_customers(WIN_CHAIN)
 
 
 def _candidates(company, from_date, to_date, customer=None):

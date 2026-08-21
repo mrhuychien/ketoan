@@ -157,13 +157,30 @@ def _si_index(company, chain):
     # bảng kê vẫn lập được (cơ sở là số của CHUỖI, không phải hóa đơn của mình).
     if not frappe.db.has_column("Sales Invoice", "custom_misa_inv_no"):
         return {}
-    rows = frappe.db.sql("""
+
+    # CHỈ hóa đơn của khách thuộc CHÍNH chuỗi này.
+    #
+    # Bản cũ nhận `chain` rồi bỏ qua, lập chỉ mục toàn bộ hóa đơn của công ty.
+    # Chỉ mục khóa theo SỐ hóa đơn đã chuẩn hóa, KHÔNG kèm ký hiệu — nên một số
+    # hóa đơn trong file của Central Retail có thể khớp DUY NHẤT vào một hóa đơn
+    # bán cho khách Winmart (khác ký hiệu, trùng số). `len(cands) == 1` nên không
+    # cờ mập mờ nào bật, và dòng bảng kê chiết khấu đi kèm hóa đơn của chuỗi khác
+    # — trên một chứng từ hai bên ký.
+    #
+    # Chuỗi chưa có khách nào -> chỉ mục RỖNG, mọi dòng báo "chưa khớp hóa đơn".
+    # Đó là câu trả lời trung thực; khớp bừa sang chuỗi khác thì không.
+    from ketoan.api.mt import _customer_in_clause, chain_customers
+
+    p = {"company": company}
+    cus = _customer_in_clause(chain_customers(chain), p)
+    rows = frappe.db.sql(f"""
         SELECT si.name, si.custom_misa_inv_no AS inv_no,
                si.grand_total, si.base_net_total, si.posting_date, si.customer
         FROM `tabSales Invoice` si
         WHERE si.company = %(company)s AND si.docstatus = 1
           AND IFNULL(si.custom_misa_inv_no, '') != ''
-    """, {"company": company}, as_dict=True)
+          AND {cus}
+    """, p, as_dict=True)
     idx = {}
     for r in rows:
         idx.setdefault(norm_inv_no(r.inv_no), []).append(r)

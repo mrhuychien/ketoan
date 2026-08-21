@@ -335,6 +335,7 @@ function chainCard(c) {
           ${c.we_issue_discount ? html`<span class="kt-badge kt-badge--gray">mình xuất HĐ chiết khấu</span>` : ""}
           ${c.has_dossier ? html`<span class="kt-badge kt-badge--gray">có hồ sơ nộp</span>` : ""}
           ${!c.can_read_payment ? html`<span class="kt-badge kt-badge--gray">chưa đọc được file thanh toán</span>` : ""}
+          ${!c.n_customers ? html`<span class="kt-badge kt-badge--red">chưa gán khách hàng</span>` : ""}
         </div>
 
         ${jobs.length
@@ -451,6 +452,21 @@ function chainShell(state, board) {
           : ""}
       </div>
     </div>
+
+    ${!c.n_customers
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)">
+          <div class="kt-card-body">
+            <div style="font-weight:600;color:var(--kt-danger)">
+              <i class="fas fa-user-slash"></i>
+              Chưa có khách hàng nào thuộc chuỗi ${state.chain}
+            </div>
+            <div class="kt-sub" style="margin-top:6px">
+              Mọi danh sách dưới đây sẽ TRỐNG — không phải vì kỳ này không có gì, mà vì
+              hệ thống chưa biết khách nào thuộc chuỗi này. Về trang chuỗi rồi bấm
+              <b>Gán chuỗi cho khách</b>.
+            </div>
+          </div></div>`
+      : ""}
 
     ${!c.can_read_payment
       ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">

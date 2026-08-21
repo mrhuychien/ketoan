@@ -209,6 +209,16 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
     """, as_dict=True)
     n_orphan = cint(orphan[0].n) if orphan else 0
 
+    # Khách hàng của từng chuỗi, theo ĐÚNG bản đồ mà mọi bộ lọc dùng.
+    # Chuỗi 0 khách -> mọi danh sách trong bàn làm việc của nó sẽ TRỐNG, và màn
+    # hình trống trông y hệt "kỳ này không có gì". Phải nói ra là chưa gán khách.
+    from ketoan.api.mt import _customer_chain_map
+
+    cus_map, _amb = _customer_chain_map()
+    n_cus = {}
+    for _cus, ch in cus_map.items():
+        n_cus[ch] = n_cus.get(ch, 0) + 1
+
     caps = _capabilities()
     out = []
     for label in MT_CHAINS:
@@ -232,6 +242,7 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
         out.append({
             "chain": label,
             "chain_key": cap.get("chain_key"),
+            "n_customers": cint(n_cus.get(label)),
             "can_read_payment": bool(cap.get("can_read_payment")),
             "we_issue_discount": bool(cap.get("we_issue_discount")),
             "has_dossier": bool(cap.get("has_dossier")),

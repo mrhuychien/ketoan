@@ -567,10 +567,18 @@ def _parser_chains():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _invoice_page(company, from_date, to_date, where, search, page_size, offset, sort=None,
-                  customer=None):
+                  customer=None, chain=None):
     p = {"company": company, "fd": from_date, "td": to_date, "tol": PAID_TOLERANCE,
          "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT, "limit": page_size, "offset": offset}
     mt = _mt_clause(p)
+    # Lọc theo CHUỖI. Hóa đơn không mang trường chuỗi — nó thuộc chuỗi nào là do
+    # KHÁCH HÀNG của nó thuộc chuỗi nào (SOP §0.2: Customer = chuỗi).
+    #
+    # Trước đây `get_invoices` NHẬN `chain` nhưng chỉ chuyển xuống nhánh khấu trừ;
+    # ba rổ hóa đơn thì bỏ qua im lặng. Giao diện xếp theo chuỗi vì thế hiện lẫn
+    # hóa đơn mọi chuỗi ngay trong bàn làm việc của một chuỗi.
+    if chain:
+        where += " AND " + _customer_in_clause(chain_customers(chain), p)
     # Lọc theo KHÁCH: kế toán MT đối chiếu trên đầu từng khách, không phải trên
     # cả kênh. Lọc bằng tham số ràng buộc, không nối chuỗi vào SQL.
     if customer:
@@ -729,11 +737,13 @@ def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None
     else:
         source = "erp"
         rows, total = _invoice_page(company, from_date, to_date, _BUCKET_WHERE[bucket],
-                                    search, page_size, offset, customer=customer)
+                                    search, page_size, offset, customer=customer,
+                                    chain=chain)
 
     return {
         "bucket": bucket,
         "source": source,
+        "chain": chain or "",
         "customer": customer,
         "rows": rows,
         "total": total,
@@ -792,6 +802,43 @@ def _customer_chain_map():
         # Đã khai tường minh thì hết mập mờ — bỏ khỏi danh sách cần xử lý.
         ambiguous = [a for a in ambiguous if a["customer"] not in named]
     return mapping, ambiguous
+
+
+def chain_customers(chain):
+    """Khách hàng thuộc một chuỗi — MỘT quy tắc duy nhất cho cả app.
+
+    Dùng `_customer_chain_map()`: field khai `Customer.custom_mt_chain` THẮNG,
+    không khai thì suy từ bảng kê đã nạp, mập mờ (khách bị gán hai chuỗi) thì
+    KHÔNG thuộc chuỗi nào.
+
+    VÌ SAO PHẢI DÙNG CHUNG: trước đây `mt_win._win_customers` chỉ đọc field khai,
+    còn `get_customer_summary` dùng bản đồ đầy đủ. Khách đã có bảng kê WinCommerce
+    mà kế toán chưa kịp khai field thì hiện là "WinCommerce" ở màn công nợ nhưng
+    BIẾN MẤT khỏi danh sách gom hồ sơ Win — hai màn hình nói hai đằng về cùng một
+    khách, và cái mất là cái làm hồ sơ nộp tiền.
+    """
+    mapping, _ambiguous = _customer_chain_map()
+    return sorted(cus for cus, ch in mapping.items() if ch == chain)
+
+
+def _customer_in_clause(names, params, prefix="cc", alias="si"):
+    """Mệnh đề `IN (...)` bằng tham số ràng buộc, KHÔNG nối chuỗi vào SQL.
+
+    Danh sách RỖNG trả về `1 = 0` — nghĩa là KHÔNG GÌ CẢ.
+
+    Đây là chốt quan trọng nhất của hàm: bỏ qua bộ lọc khi danh sách rỗng thì
+    màn hình "chuỗi X" hiện TOÀN BỘ hóa đơn của MỌI chuỗi. Đó đúng là lỗi đã
+    xảy ra — vào Central Retail mà thấy hóa đơn AEON, Winmart, Mega Market.
+    Rỗng phải là rỗng.
+    """
+    if not names:
+        return "1 = 0"
+    keys = []
+    for i, n in enumerate(names):
+        k = "%s%d" % (prefix, i)
+        params[k] = n
+        keys.append("%%(%s)s" % k)
+    return "%s.customer IN (%s)" % (alias, ", ".join(keys))
 
 
 UNASSIGNED = "Chưa gán chuỗi"

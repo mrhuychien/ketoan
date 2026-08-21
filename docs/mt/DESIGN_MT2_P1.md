@@ -560,7 +560,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-B4** đọc Rebate Settlement Emart (PDF) -> BKCK | `32e0f08` | `rebate_pdf_check` · `discount_sheet_check` |
 | **MT2-G** đóng hạng mục "khớp tự động dòng Ghi giảm" bằng phép đo | `165cf30` | `clawback_check` |
 | **MT2-H** soát trước deploy: 3 lỗi thật, bịt vùng mù "kiểm không bao giờ GHI" | `04a72e2` | `discount_sheet_check` · `rebate_pdf_check` |
-| **MT2-I** giao diện xếp lại theo CHUỖI + vòng đời tháng | *(commit này)* | `ui_board_check` |
+| **MT2-I** giao diện xếp lại theo CHUỖI + vòng đời tháng | `26101e7` | `ui_board_check` |
+| **MT2-J** bộ lọc chuỗi thật sự lọc — gom về MỘT quy tắc | *(commit này)* | `chain_filter_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -568,7 +569,8 @@ Chạy toàn bộ, không cần bench:
 for t in regression_check crosscheck_mt2 mutation_check \
          store_seed_check je_plan_check je_submit_check \
          discount_basis_check discount_sheet_check win_dossier_check \
-         debt_due_check rebate_pdf_check clawback_check ui_board_check; do
+         debt_due_check rebate_pdf_check clawback_check ui_board_check \
+         chain_filter_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -790,3 +792,55 @@ khách (một chuỗi có nhiều pháp nhân: Central Retail 2 EB, Co.op ~8 đ�
 **`ui_board_check.py`** khóa hợp đồng giữa hai file — loại lỗi này không bao giờ
 ném exception: đổi tên `we_issue_discount` ở Python thì `c[...]` ra `undefined`
 và bước im lặng biến mất khỏi **mọi** chuỗi.
+
+## MT2-J — bộ lọc chuỗi thật sự lọc
+
+Nhìn thấy bằng mắt trên site: vào bàn làm việc của **Central Retail** mà danh
+sách hóa đơn hiện cả AEON, Winmart, Mega Market.
+
+### Lỗi gốc — tham số NHẬN RỒI BỎ QUA
+
+`mt.get_invoices` khai tham số `chain` và chỉ chuyển xuống nhánh khấu trừ; ba rổ
+hóa đơn gọi `_invoice_page(...)` **không truyền**, mà hàm đó thậm chí không có
+tham số ấy. Không lỗi, không cảnh báo — người gọi tưởng đã lọc. Giao diện xếp
+theo chuỗi (MT2-I) biến nó từ "chưa dùng tới" thành "sai ngay trước mắt".
+
+Hóa đơn không mang trường chuỗi: nó thuộc chuỗi nào là do **khách hàng** của nó
+thuộc chuỗi nào (SOP §0.2 — Customer = chuỗi).
+
+### Lỗi kèm theo — HAI quy tắc "khách nào thuộc chuỗi nào"
+
+| Nơi | Quy tắc cũ |
+|---|---|
+| `mt._customer_chain_map()` | field khai thắng → không khai thì suy từ bảng kê → mập mờ thì không thuộc chuỗi nào |
+| `mt_win._win_customers` | **chỉ** field khai |
+| `mt_debt._fetch` | **chỉ** field khai (`c.custom_mt_chain = …`) |
+
+Khách đã có bảng kê WinCommerce mà kế toán chưa kịp khai field thì hiện là
+"WinCommerce" ở màn công nợ nhưng **biến mất** khỏi danh sách gom hồ sơ Win — và
+cái mất chính là cái làm hồ sơ nộp tiền. Nay cả ba dùng chung
+`mt.chain_customers()`.
+
+`mt_debt._enrich` cũng gán `chain` theo bản đồ thay vì đọc cột thô: nếu lọc và
+gộp chạy hai quy tắc thì hóa đơn lọt qua bộ lọc rồi rơi vào nhóm chuỗi rỗng khi
+gộp — tiền biến khỏi mọi thẻ chuỗi.
+
+### Lỗi thứ ba — bảng kê chiết khấu nối nhầm hóa đơn chuỗi khác
+
+`mt_discount._si_index(company, chain)` cũng nhận `chain` rồi bỏ qua: nó lập chỉ
+mục **toàn bộ** hóa đơn của công ty, khóa theo **số** hóa đơn đã chuẩn hóa
+(không kèm ký hiệu). Một số hóa đơn trong file Central Retail có thể khớp **duy
+nhất** vào một hóa đơn bán cho khách Winmart → `len(cands) == 1` nên không cờ mập
+mờ nào bật, và dòng BKCK đi kèm hóa đơn của chuỗi khác, trên một chứng từ hai
+bên ký.
+
+### `_customer_in_clause` — rỗng là rỗng
+
+Chốt quan trọng nhất: danh sách khách rỗng trả về `1 = 0`, **không** phải bỏ qua
+bộ lọc. Bỏ qua khi rỗng chính là cách lỗi trên tái sinh — "chuỗi X" hiện toàn bộ
+mọi chuỗi. Kèm theo: chuỗi chưa gán khách nào thì bàn làm việc **nói ra**, vì
+màn hình trống trông y hệt "kỳ này không có gì".
+
+`chain_filter_check.py` không kiểm "hàm có nhận tham số" mà kiểm **câu SQL phát
+ra** có ràng buộc đúng tên khách không, cộng một phép AST quét mọi hàm nhận
+`chain` mà thân hàm không dùng tới.

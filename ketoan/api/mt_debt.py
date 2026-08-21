@@ -52,6 +52,9 @@ from frappe.utils import add_days, cint, cstr, flt, getdate, nowdate
 from ketoan.api._guard import guard_manager, guard_mt
 from ketoan.api.mt import (
     PAID_TOLERANCE,
+    _customer_chain_map,
+    _customer_in_clause,
+    chain_customers,
     KIND_DEDUCT,
     KIND_PAYMENT,
     _company,
@@ -144,8 +147,11 @@ def _fetch(company, as_of, chain=None, customer=None, search=None):
 
     extra = ""
     if chain:
-        p["chain"] = chain
-        extra += " AND c.custom_mt_chain = %(chain)s"
+        # DÙNG CHUNG quy tắc "khách nào thuộc chuỗi nào" với mọi màn hình khác
+        # (`mt.chain_customers`). Lọc thẳng `c.custom_mt_chain` là quy tắc HẸP
+        # HƠN: nó bỏ sót khách đã có bảng kê của chuỗi mà chưa kịp khai field,
+        # nên cùng một chuỗi ra hai tập khách ở hai màn hình.
+        extra += " AND " + _customer_in_clause(chain_customers(chain), p)
     if customer:
         p["customer"] = customer
         extra += " AND si.customer = %(customer)s"
@@ -183,11 +189,19 @@ def _fetch(company, as_of, chain=None, customer=None, search=None):
 
 
 def _enrich(rows, as_of):
-    """Gắn ngày đến hạn, số ngày quá hạn, rổ — cho từng hóa đơn."""
+    """Gắn ngày đến hạn, số ngày quá hạn, rổ — cho từng hóa đơn.
+
+    CHUỖI của hóa đơn cũng gán ở đây, bằng ĐÚNG bản đồ mà bộ lọc dùng. Nếu để
+    nguyên cột `custom_mt_chain` đọc thẳng từ SQL thì lọc và gộp chạy theo hai
+    quy tắc: khách chưa khai field sẽ lọt qua bộ lọc (vì bản đồ suy được chuỗi
+    cho họ) rồi rơi vào nhóm chuỗi rỗng khi gộp — tiền biến khỏi mọi thẻ chuỗi.
+    """
     as_of = getdate(as_of)
+    mapping, _amb = _customer_chain_map()
     out = []
     for r in rows:
         d = dict(r)
+        d["chain"] = mapping.get(cstr(r.get("customer"))) or ""
         due, source, conflict = _resolve_due(r, as_of)
         d["due_date"] = cstr(due) if due else None
         d["due_source"] = source
