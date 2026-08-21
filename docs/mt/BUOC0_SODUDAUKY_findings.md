@@ -16,12 +16,13 @@ chiều ngược nhau:
 | Hóa đơn **đã có** trong ERPNext, đã trả xong trước khi có phần mềm — không bảng kê nào ghi lại | công nợ **bị thổi phồng** |
 | Hóa đơn **chưa có** trong ERPNext (cũ hơn go-live) mà vẫn treo tiền | công nợ **bị hụt** |
 
-Hai lỗi này **không bù nhau**. File Excel đã có sẵn cả `Số đã trả` lẫn `Số còn nợ`
-cho từng hóa đơn — nhập đúng hai cột đó là xử được cả hai chiều.
+Hai lỗi này **không bù nhau**. Cách xử đã chốt ở **§7**: chỉ nhập hóa đơn **còn
+nợ** + một **ngày chuyển giao**, phần trước ngày đó không có trong danh sách thì
+mặc định đã tất toán.
 
 ---
 
-## 2. Số đo được — đây là số dư sẽ mang sang
+## 2. Số đo được — nợ GỘP (chưa trừ ghi giảm, xem §6)
 
 | Chuỗi | Dòng | Còn nợ | **Số dư đầu kỳ** | Đã trả trong lịch sử |
 |---|---:|---:|---:|---:|
@@ -35,6 +36,7 @@ cho từng hóa đơn — nhập đúng hai cột đó là xử được cả ha
 | **TỔNG** | **9.497** | **1.167** | **5.059.095.894** | **108.379.009.079** |
 
 Cả bảy khớp **từng đồng** với dòng `TỔNG CỘNG` mà chính file in ra.
+Đây là nợ **gộp**; số thật sự mang sang là **4.875.127.168đ** — xem §6.
 
 ---
 
@@ -112,32 +114,80 @@ dữ liệu ngoài cột 200). Chốt chống OOM của `read_sheets` từ chố
 
 ---
 
-## 5. Sheet phụ — bỏ qua nhưng phải nói ra
+## 5. Sheet phụ
 
-| File | Sheet phụ |
-|---|---|
-| Central Retail | `hd ghi giam` (451 dòng) |
-| WinCommerce | `hd ghi giam` (1.038 dòng) · `Sheet1` |
-| Saigon Co.op | `HOA DON TRA LAI` (879 dòng) · `Sheet1` |
-| AEON, Mega | `Sheet1` |
+| File | Sheet phụ | Xử lý |
+|---|---|---|
+| Central Retail | `hd ghi giam` (310 dòng dữ liệu) | **đọc** — xem §6 |
+| WinCommerce | `hd ghi giam` (1.033 dòng) · `Sheet1` | **đọc** — xem §6 |
+| Saigon Co.op | `HOA DON TRA LAI` (701 dòng) · `Sheet1` | **đọc** — xem §6 |
+| AEON, Mega | `Sheet1` | rỗng, bỏ qua kèm cảnh báo |
 
-Các sheet này **không** có khối `Dịch vụ/TỔNG/Số đã trả/Số còn nợ` nên không lọt
-vào bảng công nợ. Chúng vẫn được **đếm và báo ra** — hóa đơn ghi giảm và hóa đơn
-trả lại là tiền thật, chỉ là chưa thuộc phạm vi số dư đầu kỳ.
+`Sheet1` rỗng thì bỏ qua nhưng vẫn **đếm và báo ra**, không im lặng.
 
 ---
 
-## 6. Còn phải chốt
+## 6. Sheet ghi giảm — loại dữ liệu THỨ HAI
 
-1. **Ngày chốt số dư.** File có ghi vài mốc rời rạc và không thống nhất
-   (`CÔNG NỢ KHỚP 30/06/2026` ở Emart nhưng cột tổng ra số khác;
-   `KHỚP CÔNG NỢ TẠI NGÀY 19/1…` ở Mega). ⇒ Kế toán **nhập tay** ngày chốt cho
-   mỗi lần nhập, không đọc từ file.
+Kế toán mô tả: *"theo dõi các hóa đơn xuất trả, hóa đơn dịch vụ siêu thị xuất cho
+mình"*. Cả hai đều **làm giảm** số phải thu. Bỏ qua là nhập **thừa** công nợ.
 
-2. **Nối với hóa đơn trong ERPNext.** Số hóa đơn trong Excel là số MISA đã chuẩn
-   hóa được, nhưng **chưa đo** tỷ lệ khớp vì cần database thật. Dòng khớp được →
-   ghi lịch sử đã trả cho đúng hóa đơn đó; dòng không khớp → nợ đầu kỳ độc lập.
+Ba file có sheet này, và **chính file tự in ra số nợ ròng** — phép đối chiếu mạnh
+nhất có được, vì parser không được tự nghĩ ra số mà phải ra đúng số kế toán đã
+tính tay:
 
-3. **Có sinh bút toán không.** Đề xuất: **không**. Số dư đầu kỳ là bản ghi nhận
-   để màn hình công nợ đúng, không phải chứng từ kế toán. Bút toán số dư đầu kỳ
-   trên sổ cái là việc riêng của kế toán tổng hợp, làm một lần trên ERPNext.
+| Chuỗi | Sheet chính | − ghi giảm | **Nợ ròng** | File tự in |
+|---|---:|---:|---:|---|
+| Central Retail | 1.632.866.040 | 952.935 | **1.631.913.105** | ✅ |
+| Saigon Co.op | 1.112.097.060 | 132.250.823 | **979.846.237** | ✅ |
+| WinCommerce | 1.329.879.654 | 50.764.968 | **1.279.114.686** | ✅ |
+
+⇒ **Tổng nợ ròng đầu kỳ = 4.875.127.168đ**, không phải 5.059.095.894đ.
+Chênh **183.968.726đ**.
+
+**Central Retail không đặt nhãn** cho hai cột `đã cấn trừ` / `còn lại` — header
+chỉ tới `TỔNG`. Không đếm cột mù, mà **đề xuất rồi chứng minh**: thử mọi cặp cột
+sau `TỔNG`, giữ cặp thỏa `TỔNG − đã cấn trừ = còn lại` trên ≥90% dòng dữ liệu.
+Soát trên **dòng dữ liệu** chứ không trên dòng tổng — dòng tổng của sheet ghi
+giảm WinCommerce tự nó cũng hỏng (in 10.042.710.309 trong khi các dòng cộng ra
+15.998.326.629; **dải SUM hụt thứ ba** trong bộ file này).
+
+---
+
+## 7. Mô hình nhập — ghi nhận cái CHƯA trả, mặc định phần còn lại đã trả
+
+Kế toán chốt hướng: thay vì nhập cả 9.497 dòng để ghi từng hóa đơn đã trả bao
+nhiêu, chỉ nhập **hóa đơn còn nợ** + một **ngày chuyển giao**; hóa đơn trước ngày
+đó mà không có trong danh sách thì **mặc định đã tất toán**.
+
+| | Nhập cả 9.497 dòng | **Chỉ nhập 1.167 dòng còn nợ** |
+|---|---|---|
+| Phải tin cột | `Số đã trả` **và** `Số còn nợ` | chỉ `Số còn nợ` |
+| Dòng phải soi tay | 9.497 | **1.167** |
+| Hóa đơn sót khỏi Excel | thành "còn nợ" | thành "đã trả" |
+
+Cột `Số còn nợ` là cột đã khớp **từng đồng** ở cả bảy file, nên tin nó là hợp lý.
+
+⚠ **Chiều rủi ro bị lật.** Hóa đơn sót khỏi Excel giờ âm thầm thành *đã trả* thay
+vì âm thầm thành *còn nợ*. Chốt chặn: khi nhập phải **đếm và hiện ra** có bao
+nhiêu hóa đơn trong ERPNext bị tự động tất toán và tổng bao nhiêu tiền. Con số đó
+bất thường thì nhìn là biết.
+
+---
+
+## 8. Còn phải chốt
+
+1. **Ngày chuyển giao.** Kế toán nhập tay, không đọc từ file — các mốc ghi trong
+   file rời rạc và mâu thuẫn (`CÔNG NỢ KHỚP 30/06/2026` ở Emart nhưng cột tổng ra
+   số khác; `KHỚP CÔNG NỢ TẠI NGÀY 19/1…` ở Mega).
+
+2. **Chỉ nhập MỘT LẦN.** File này chỉ đưa lên một lần để chuyển giao. ⇒ Chuỗi đã
+   nhập rồi thì **chặn nhập lại**, trừ khi xóa bản cũ — nhập hai lần là cộng đôi
+   gần 5 tỷ.
+
+3. **Nối với hóa đơn trong ERPNext.** Số hóa đơn trong Excel chuẩn hóa được,
+   nhưng **chưa đo** tỷ lệ khớp vì cần database thật.
+
+4. **Không sinh bút toán.** Số dư đầu kỳ là bản ghi nhận để màn hình công nợ
+   đúng, không phải chứng từ kế toán. Bút toán số dư đầu kỳ trên sổ cái là việc
+   riêng của kế toán tổng hợp, làm một lần trên ERPNext.

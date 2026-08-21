@@ -51,7 +51,18 @@ CASES = [
     ("congno_wincommerce.xlsx",    "WinCommerce",    41_698_172_526, 40_368_292_872, 1_329_879_654, 279),
 ]
 
-GRAND_TOTAL = 5_059_095_894      # tổng số dư đầu kỳ cả bảy chuỗi
+GRAND_TOTAL = 5_059_095_894      # nợ GỘP cả bảy chuỗi (chỉ sheet hóa đơn mình xuất)
+
+# Ba chuỗi có sheet ghi giảm. `stated_net` là con số CHÍNH FILE TỰ IN RA —
+# đây là phép đối chiếu mạnh nhất của cả bộ kiểm: parser không được tự nghĩ ra
+# số ròng, nó phải ra đúng số kế toán đã tính tay trong file.
+NET_CASES = [
+    ("Central Retail",    952_935, 1_631_913_105),
+    ("Saigon Co.op",  132_250_823,   979_846_237),
+    ("WinCommerce",    50_764_968, 1_279_114_686),
+]
+
+NET_TOTAL = 4_875_127_168        # nợ RÒNG cả bảy chuỗi — số thật sự mang sang
 
 
 def main():
@@ -93,25 +104,75 @@ def main():
             errs.append(f"TỔNG {r['computed']['gross']:,.0f} != {gross:,}")
         if round(r["computed"]["paid"]) != paid:
             errs.append(f"đã trả {r['computed']['paid']:,.0f} != {paid:,}")
-        if round(t["opening_debt"]) != remaining:
-            errs.append(f"còn nợ {t['opening_debt']:,.0f} != {remaining:,}")
+        if round(t["opening_debt_gross"]) != remaining:
+            errs.append(f"nợ gộp {t['opening_debt_gross']:,.0f} != {remaining:,}")
         if t["n_open"] != n_open:
             errs.append(f"{t['n_open']} dòng còn nợ != {n_open}")
         if not r["reconciled"]:
             errs.append("ba cột quyết định số dư KHÔNG khớp: %s" % r["blocking"])
-        grand += t["opening_debt"]
+        grand += t["opening_debt_gross"]
         ok = not errs
         print(f"  {'✅' if ok else '❌'} {chain:<15} {t['n_rows']:>5} dòng · "
-              f"{t['n_open']:>4} còn nợ · {t['opening_debt']:>16,.0f}đ")
+              f"{t['n_open']:>4} còn nợ · gộp {t['opening_debt_gross']:>16,.0f}đ")
         for e in errs:
             print(f"       └─ {e}")
         bad += not ok
 
     print("-" * 84)
     ok = round(grand) == GRAND_TOTAL
-    print(f"  {'✅' if ok else '❌'} TỔNG SỐ DƯ ĐẦU KỲ CẢ BẢY CHUỖI: {grand:,.0f}đ "
+    print(f"  {'✅' if ok else '❌'} TỔNG NỢ GỘP CẢ BẢY CHUỖI: {grand:,.0f}đ "
           f"(mong {GRAND_TOTAL:,})")
     bad += not ok
+
+    # ── 1b. Sheet GHI GIẢM — mỗi file tự in ra nợ RÒNG, phải khớp ────────
+    #
+    # Kế toán mô tả sheet này: "hóa đơn xuất trả, hóa đơn dịch vụ siêu thị xuất
+    # cho mình". Cả hai đều LÀM GIẢM số phải thu. Bỏ qua nó là nhập THỪA công nợ
+    # đúng 183.968.726đ.
+    print("-" * 84)
+    net_grand = 0.0
+    for chain, ded_open, stated_net in NET_CASES:
+        r = results.get(chain)
+        if not r:
+            continue
+        t = r["totals"]
+        errs = []
+        if round(t["deduction_open"]) != ded_open:
+            errs.append(f"ghi giảm {t['deduction_open']:,.0f} != {ded_open:,}")
+        if round(t["opening_debt"]) != stated_net:
+            errs.append(f"nợ ròng {t['opening_debt']:,.0f} != {stated_net:,}")
+        ok = not errs
+        print(f"  {'✅' if ok else '❌'} {chain:<15} gộp {t['opening_debt_gross']:>15,.0f} "
+              f"− ghi giảm {t['deduction_open']:>13,.0f} = {t['opening_debt']:>15,.0f}đ"
+              f"{'  (= số file tự in)' if ok and stated_net else ''}")
+        for e in errs:
+            print(f"       └─ {e}")
+        bad += not ok
+    for chain in ("AEON", "Emart", "LOTTE", "Mega Market"):
+        r = results.get(chain)
+        if not r:
+            continue
+        ok = r["totals"]["deduction_open"] == 0
+        print(f"  {'✅' if ok else '❌'} {chain:<15} không có sheet ghi giảm -> "
+              f"nợ ròng = nợ gộp")
+        bad += not ok
+    net_grand = sum(r["totals"]["opening_debt"] for r in results.values())
+    ok = round(net_grand) == NET_TOTAL
+    print(f"  {'✅' if ok else '❌'} TỔNG NỢ RÒNG — con số THẬT SỰ mang sang: "
+          f"{net_grand:,.0f}đ (mong {NET_TOTAL:,})")
+    bad += not ok
+
+    # Cột 'đã cấn trừ' / 'còn lại' của Central Retail KHÔNG có nhãn — phải suy ra
+    # bằng cách ĐỀ XUẤT rồi CHỨNG MINH, không đếm cột mù.
+    r = results.get("Central Retail")
+    if r and r["deductions"]:
+        d = r["deductions"][0]
+        ok = (not d["unreadable"]) and d["columns"].get("paid") == 7 \
+            and d["columns"].get("remaining") == 8
+        print(f"  {'✅' if ok else '❌'} Central Retail: hai cột cuối của sheet ghi giảm "
+              f"KHÔNG có nhãn -> suy ra cột {d['columns'].get('paid')}/{d['columns'].get('remaining')} "
+              f"bằng phép `TỔNG − đã cấn trừ = còn lại`")
+        bad += not ok
 
     # ── 2. Bẫy 1 — tiêu đề trong file nói dối ────────────────────────────
     print("-" * 84)

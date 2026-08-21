@@ -222,6 +222,137 @@ def detect_chain(grid):
     return hits[0] if len(hits) == 1 else None
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SHEET GHI GIẢM — loại dữ liệu THỨ HAI, không phải phụ lục
+#
+# Kế toán mô tả: "theo dõi các hóa đơn xuất trả, hóa đơn dịch vụ siêu thị xuất
+# cho mình". Hai thứ đó ĐỀU làm giảm số phải thu, nên bỏ qua sheet này là nhập
+# THỪA công nợ.
+#
+# Đo trên file thật — mỗi file TỰ IN RA số nợ ròng, và cả ba lần đều khớp:
+#
+#     Central Retail  1.632.866.040 −     952.935 = 1.631.913.105
+#     WinCommerce     1.329.879.654 −  50.764.968 = 1.279.114.686
+#     Saigon Co.op    1.112.097.060 − 132.250.823 =   979.846.237
+#
+# Tổng chênh 183.968.726đ. Chỉ đọc sheet chính là nhập thừa đúng ngần ấy.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Dò sheet ghi giảm theo TÊN vì bố cục cột khác nhau quá nhiều giữa các file.
+DEDUCTION_SHEETS = ("hdghigiam", "hoadontralai")
+
+DED_GROSS_LABELS = ("tong",)
+DED_NET_LABELS = ("truocthue", "dichvu")
+DED_PAID_LABELS = ("dacantru", "sodatra")
+
+
+def _is_deduction_sheet(name):
+    return _norm(name) in DEDUCTION_SHEETS
+
+
+def _ded_columns(grid):
+    """Cột của sheet ghi giảm: TỔNG, đã cấn trừ, còn lại. Trả (dòng đầu dữ liệu, cột).
+
+    CENTRAL RETAIL KHÔNG ĐẶT NHÃN cho hai cột cuối — header chỉ tới `TỔNG`.
+    Không được đếm cột mù (`TỔNG`+1, `TỔNG`+2): đó là đoán, đoán sai thì lấy
+    nhầm cột ngày làm cột tiền.
+
+    Cách làm: ĐỀ XUẤT rồi CHỨNG MINH. Thử mọi cặp cột đứng sau `TỔNG`, giữ cặp
+    thỏa `TỔNG − đã cấn trừ = còn lại` trên ĐA SỐ dòng dữ liệu. Không cặp nào
+    thỏa -> trả None, tầng trên DỪNG.
+
+    Soát trên DÒNG DỮ LIỆU chứ không trên dòng tổng: dòng tổng của sheet ghi
+    giảm WinCommerce tự nó đã hỏng (in 10.042.710.309 trong khi các dòng cộng ra
+    15.998.326.629 — lại một dải SUM hụt nữa), lấy nó làm chuẩn là loại nhầm
+    đúng cặp cột cần tìm.
+    """
+    hdr = None
+    cols = {}
+    for r in range(1, min(len(grid), HEADER_LIMIT) + 1):
+        found = {}
+        for c, txt in enumerate(_row_texts(grid[r - 1]), start=1):
+            k = _norm(txt)
+            if not k:
+                continue
+            if k in DED_GROSS_LABELS:
+                found.setdefault("gross", c)
+            elif k in DED_NET_LABELS:
+                found.setdefault("net", c)
+            elif k in DED_PAID_LABELS:
+                found.setdefault("paid", c)
+        if "gross" in found:
+            hdr, cols = r, found
+            break
+    if not hdr:
+        return None, {}
+
+    gross_c = cols["gross"]
+    start = None
+    for r in range(hdr + 1, min(hdr + 5, len(grid)) + 1):
+        if to_number(_g(grid, r, gross_c)) is not None:
+            start = r + 1
+            break
+    if not start or start > len(grid):
+        return None, {}
+
+    window = grid[start - 1:start + 300]
+    ncols = max((len(row) for row in window), default=0)
+    best, best_hits = None, 0
+    for pc in range(gross_c + 1, min(ncols, gross_c + 6) + 1):
+        for rc in range(pc + 1, min(ncols, gross_c + 7) + 1):
+            hits = tried = 0
+            for r in range(start, min(start + 300, len(grid)) + 1):
+                g = to_number(_g(grid, r, gross_c))
+                if g is None:
+                    continue
+                tried += 1
+                p = to_number(_g(grid, r, pc))
+                rm = to_number(_g(grid, r, rc))
+                if abs(flt(g) - flt(p or 0) - flt(rm or 0)) <= MONEY_EPS:
+                    hits += 1
+            if tried and hits > best_hits and hits >= tried * 0.9:
+                best, best_hits = (pc, rc), hits
+    if not best:
+        return None, {}
+    cols["paid"], cols["remaining"] = best
+    return start, cols
+
+
+def _read_deductions(sheets):
+    """Đọc MỌI sheet ghi giảm trong file."""
+    out = []
+    for name, grid in sheets:
+        if not _is_deduction_sheet(name):
+            continue
+        start, cols = _ded_columns(grid)
+        if not start:
+            out.append({"sheet": name, "n_rows": 0, "gross": 0.0, "offset": 0.0,
+                        "remaining": 0.0, "unreadable": True})
+            continue
+        g_sum = o_sum = r_sum = 0.0
+        n = 0
+        for r in range(start, len(grid) + 1):
+            g = to_number(_g(grid, r, cols["gross"]))
+            p = to_number(_g(grid, r, cols["paid"]))
+            rm = to_number(_g(grid, r, cols["remaining"]))
+            if g is None and p is None and rm is None:
+                continue
+            n += 1
+            g_sum += flt(g or 0)
+            o_sum += flt(p or 0)
+            r_sum += flt(rm or 0)
+        out.append({
+            "sheet": name,
+            "columns": {k: v for k, v in sorted(cols.items())},
+            "n_rows": n,
+            "gross": round(g_sum, 2),
+            "offset": round(o_sum, 2),
+            "remaining": round(r_sum, 2),
+            "unreadable": False,
+        })
+    return out
+
+
 def _pick_sheet(sheets):
     """Sheet công nợ = sheet có dòng header tiền. Nhiều sheet trúng -> lấy cái đầu.
 
@@ -231,6 +362,8 @@ def _pick_sheet(sheets):
     """
     live = []
     for name, grid in sheets:
+        if _is_deduction_sheet(name):
+            continue      # đọc riêng ở `_read_deductions`, không lẫn vào bảng chính
         r, cols = _find_money_header(grid)
         if r:
             live.append((name, grid, r, cols))
@@ -336,7 +469,18 @@ def read_opening(content, chain=None):
         warnings.append("File KHÔNG có cột số hóa đơn — không nối được với hóa đơn "
                         "trong ERPNext, mọi dòng sẽ là nợ đầu kỳ độc lập.")
 
+    # ── Sheet ghi giảm: hóa đơn CHUỖI xuất cho mình + hóa đơn mình xuất trả ──
+    deductions = _read_deductions(sheets)
+    ded_open = round(sum(flt(d["remaining"]) for d in deductions), 2)
+    for d in deductions:
+        if d.get("unreadable"):
+            warnings.append(
+                "Sheet ghi giảm '%s' KHÔNG dò được cặp cột 'đã cấn trừ' / 'còn lại' "
+                "(không cặp nào thỏa `TỔNG − đã cấn trừ = còn lại`). Phần ghi giảm của "
+                "chuỗi này CHƯA được trừ — số dư đang là số GỘP." % d["sheet"])
+
     open_rows = [x for x in rows if abs(flt(x["remaining"])) > MONEY_EPS]
+    gross_debt = round(sum(flt(x["remaining"]) for x in rows), 2)
 
     return {
         "chain": chain,
@@ -356,10 +500,18 @@ def read_opening(content, chain=None):
         "reconciled": not bad_critical,
         "blocking": [c["label"] for c in bad_critical],
         "warnings": warnings,
+        "deductions": deductions,
         "totals": {
             "n_rows": len(rows),
             "n_open": len(open_rows),
-            "opening_debt": round(sum(flt(x["remaining"]) for x in rows), 2),
+            # Nợ GỘP: chỉ cộng sheet hóa đơn mình xuất.
+            "opening_debt_gross": gross_debt,
+            # Ghi giảm chưa cấn trừ: hóa đơn chuỗi xuất cho mình + mình xuất trả.
+            "deduction_open": ded_open,
+            # Nợ RÒNG — con số thật sự mang sang. Ba file có sheet ghi giảm đều
+            # TỰ IN RA số này và cả ba đều khớp với phép trừ dưới đây.
+            "opening_debt": round(gross_debt - ded_open, 2),
+            "n_deduction_rows": sum(d["n_rows"] for d in deductions),
             "paid_history": round(sum(flt(x["paid"]) for x in rows), 2),
             "gross": computed["gross"],
         },
