@@ -251,6 +251,14 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 
 /* ===== Workspace landing (3 sections) ===== */
 .kt-ws-sections { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+
+/* Thẻ chuỗi siêu thị trên bảng điều khiển MT. Bấm được, nên PHẢI trông bấm
+   được: `cursor:pointer` một mình không đủ tín hiệu — bản đầu để thẻ giống hệt
+   thẻ tĩnh bên cạnh nên không ai biết là bấm vào được. */
+.kt-chain-card { transition: border-color .12s, box-shadow .12s, transform .12s; }
+.kt-chain-card:hover { border-color: var(--kt-primary); box-shadow: 0 4px 14px rgba(0,0,0,.08); transform: translateY(-1px); }
+.kt-chain-card:active { transform: none; }
+.kt-chain-card:focus-visible { outline: 2px solid var(--kt-primary); outline-offset: 2px; }
 .kt-ws-items { display: flex; flex-direction: column; gap: 8px; }
 .kt-ws-item { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid var(--kt-border); border-radius: var(--kt-r-md); background: var(--kt-bg-input); transition: border-color .12s, background .12s; }
 .kt-ws-item:hover { border-color: var(--kt-primary); background: #fff; }

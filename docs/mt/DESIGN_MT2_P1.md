@@ -559,7 +559,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-F** công nợ MT đến hạn theo term (patch v0_0_16) | `899501a` | `debt_due_check` |
 | **MT2-B4** đọc Rebate Settlement Emart (PDF) -> BKCK | `32e0f08` | `rebate_pdf_check` · `discount_sheet_check` |
 | **MT2-G** đóng hạng mục "khớp tự động dòng Ghi giảm" bằng phép đo | `165cf30` | `clawback_check` |
-| **MT2-H** soát trước deploy: 3 lỗi thật, bịt vùng mù "kiểm không bao giờ GHI" | *(commit này)* | `discount_sheet_check` · `rebate_pdf_check` |
+| **MT2-H** soát trước deploy: 3 lỗi thật, bịt vùng mù "kiểm không bao giờ GHI" | `04a72e2` | `discount_sheet_check` · `rebate_pdf_check` |
+| **MT2-I** giao diện xếp lại theo CHUỖI + vòng đời tháng | *(commit này)* | `ui_board_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -567,7 +568,7 @@ Chạy toàn bộ, không cần bench:
 for t in regression_check crosscheck_mt2 mutation_check \
          store_seed_check je_plan_check je_submit_check \
          discount_basis_check discount_sheet_check win_dossier_check \
-         debt_due_check rebate_pdf_check clawback_check; do
+         debt_due_check rebate_pdf_check clawback_check ui_board_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -737,3 +738,55 @@ Bộ kiểm không thể chạm tới, phải bấm tay sau `bench migrate`:
 3. **Sinh + duyệt Journal Entry** với account/company/cost center thật.
 4. **Tải file Excel về** (`export_dossier` dùng `frappe.local.response`).
 5. **Print Format BKCK** dựng Jinja trên bản ghi thật.
+
+## MT2-I — giao diện xếp lại theo chuỗi
+
+**Vấn đề**: bảy tab ngang xếp theo CHỨC NĂNG (thanh toán · chiết khấu · công nợ
+chuỗi · bút toán · bảng kê CK · hồ sơ Win · đến hạn). Mỗi tab đúng, nhưng kế
+toán MT làm việc theo CHUỖI — hôm nay xử LOTTE cho xong, mai tới Central Retail.
+Bảy tab buộc họ tự ghép bảy màn hình trong đầu mới thấy "chuỗi này còn thiếu gì".
+
+**Bố cục mới — hai tầng:**
+
+| Tầng | Nội dung |
+|---|---|
+| **0 · Bảng chuỗi** | Mỗi chuỗi một thẻ: còn bao nhiêu việc, việc gì, nợ bao nhiêu, quá hạn bao nhiêu. Chuỗi nhiều việc nhất lên trước. |
+| **1 · Bàn làm việc** | Vào một chuỗi → các bước theo ĐÚNG thứ tự vòng đời tháng (SOP §1), chỉ hiện bước chuỗi đó thực sự có. |
+
+Bước trong bàn làm việc, theo SOP §1:
+
+| | Bước | Hiện khi |
+|---|---|---|
+| B3 | Chiết khấu mình xuất | `we_issue_discount` |
+| — | Hồ sơ nộp | `has_dossier` (chỉ WinCommerce) |
+| B4 | Đối soát thanh toán | luôn |
+| B4 | Bút toán | luôn |
+| B5 | Công nợ đến hạn | luôn |
+
+**Ẩn bước là quyết định nghiệp vụ, không phải dọn màn hình.** Saigon Co.op
+không hiện "Chiết khấu mình xuất" vì chiết khấu 17,75% bị trừ tại nguồn và
+**Co.op xuất hóa đơn** — hiện bước đó là mời kế toán xuất một hóa đơn mình không
+được phép xuất. Ẩn thì phải kèm **lý do** (`get_chain().steps[].reason`), ẩn câm
+là kế toán tưởng portal thiếu tính năng.
+
+**Ba năng lực đọc từ nguồn thật, không chép bảng thứ tư:**
+`mt_advice.PARSERS` · `mt_discount_read.DISCOUNT_CHAIN_LABEL` · `mt_win.WIN_CHAIN`.
+Thêm parser Mega mà quên sửa bảng chép thì màn hình nói dối về đúng cái vừa làm.
+
+**Ba màn hình liên chuỗi được giữ** vì chúng là việc liên chuỗi thật: duyệt bút
+toán hàng loạt · công nợ đến hạn toàn kênh (SOP §5, hàng tuần) · công nợ theo
+khách (một chuỗi có nhiều pháp nhân: Central Retail 2 EB, Co.op ~8 đơn vị).
+
+**Dọn được trong lúc làm:**
+- Hai thanh chọn rổ chồng nhau ở bước thanh toán (`invoiceTable` tự vẽ một
+  thanh, `loadTab` vẽ thanh nữa) → gộp về **một** thanh bốn rổ.
+- "Quản lý thanh toán" và "Quản lý chiết khấu" từng là hai tab riêng nên trông
+  như hai nghiệp vụ; thực ra là **hai mặt của cùng một file** → nay là hai rổ
+  của cùng một bước.
+- `state.chain` từng bị ô chọn chuỗi đổi ngầm khi đang ở trong một chuỗi → ô đó
+  nay ẩn trong bàn làm việc.
+- Bộ lọc khách hàng nay bị xóa khi đổi chuỗi (mang sang chuỗi khác là lọc ngầm).
+
+**`ui_board_check.py`** khóa hợp đồng giữa hai file — loại lỗi này không bao giờ
+ném exception: đổi tên `we_issue_discount` ở Python thì `c[...]` ra `undefined`
+và bước im lặng biến mất khỏi **mọi** chuỗi.

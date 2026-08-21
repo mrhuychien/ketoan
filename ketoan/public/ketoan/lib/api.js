@@ -215,6 +215,11 @@ export const api = {
   mtWinSubmitted: (name) => callMethod(NS + "mt_win.mark_submitted", withCompany({ name })),
   mtWinExport: (name) => downloadPost(NS + "mt_win.export_dossier", withCompany({ name })),
 
+  // Bảng điều khiển theo CHUỖI — màn hình đầu tiên của kênh MT. Một lời gọi
+  // trả về tiến độ cả năm bước cho mọi chuỗi.
+  mtBoard: (a) => callMethod(NS + "mt_hub.get_board", withCompany(a)),
+  mtChainDesk: (chain, a) => callMethod(NS + "mt_hub.get_chain", withCompany({ chain, ...a })),
+
   // Công nợ MT đến hạn (SOP §5, việc hàng tuần). Số còn nợ tính từ DÒNG BẢNG KÊ
   // chứ không từ outstanding_amount — kênh MT không tạo Payment Entry.
   mtDueSummary: (a) => callMethod(NS + "mt_debt.get_due_summary", withCompany(a)),

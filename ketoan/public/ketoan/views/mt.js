@@ -16,21 +16,57 @@ import { toast } from "../components/toast.js";
 
 const q = encodeURIComponent;
 
-const TABS = [
-  { key: "thanh-toan", label: "Quản lý thanh toán", icon: "fa-money-check-dollar",
-    hint: "Hóa đơn bán cho chuỗi và tiền chuỗi đã trả theo BẢNG KÊ. Một hóa đơn có thể được trả làm nhiều kỳ — cột 'đã nhận' là tổng cộng dồn của mọi bảng kê." },
-  { key: "chiet-khau", label: "Quản lý chiết khấu", icon: "fa-percent",
-    hint: "Các khoản chuỗi TRỪ LẠI: chiết khấu, phí dịch vụ, hàng trả lại, khoản khác. Phần lớn không gắn với hóa đơn nào nên đây là danh sách DÒNG bảng kê, không phải danh sách hóa đơn." },
-  { key: "chuoi", label: "Công nợ chung của chuỗi", icon: "fa-store",
-    hint: "Gộp theo chuỗi siêu thị. Ánh xạ khách hàng → chuỗi lấy từ bảng kê kế toán đã chốt; hệ thống KHÔNG tự đoán từ tên khách." },
-  { key: "but-toan", label: "Bút toán", icon: "fa-file-invoice-dollar",
-    hint: "Sinh bút toán NHÁP từ bảng kê. Hệ thống không bao giờ tự ghi sổ — người duyệt mới ghi. Tài khoản lấy từ cấu hình, không hardcode." },
-  { key: "bkck", label: "Bảng kê chiết khấu", icon: "fa-file-signature",
-    hint: "Chiều MÌNH xuất hóa đơn: nạp file doanh số của chuỗi → lập bảng kê (BKCK) → chốt lấy số → xuất hóa đơn CK trên MISA → ghi số về → sinh bút toán." },
-  { key: "ho-so-win", label: "Hồ sơ Winmart", icon: "fa-folder-open",
-    hint: "Bảng kê hồ sơ nộp cho WinCommerce. Win chỉ xử lý thanh toán khi file PDF hóa đơn đặt ĐÚNG TÊN — hệ thống sinh tên chuẩn, không để gõ tay." },
-  { key: "den-han", label: "Công nợ đến hạn", icon: "fa-clock",
-    hint: "Hóa đơn còn nợ xếp theo tuổi nợ, tính từ hạn thanh toán khai trên từng khách. Khách CHƯA khai hạn nằm rổ riêng — hệ thống không đoán 45 ngày cho ai." },
+// ═══════════════════════════════════════════════════════════════════════════
+// BÀN LÀM VIỆC XẾP THEO CHUỖI, KHÔNG THEO CHỨC NĂNG
+//
+// Bản cũ có bảy tab ngang: thanh toán · chiết khấu · công nợ chuỗi · bút toán ·
+// bảng kê CK · hồ sơ Win · đến hạn. Mỗi tab đúng về mặt chức năng, nhưng kế
+// toán MT không làm việc theo chức năng — họ làm theo CHUỖI: hôm nay xử LOTTE
+// cho xong, mai tới Central Retail. Bảy tab buộc họ tự ghép bảy màn hình lại
+// trong đầu mới thấy "chuỗi này còn thiếu gì".
+//
+// Bản này hai tầng:
+//   · Tầng 0 — BẢNG CHUỖI: mỗi chuỗi một thẻ, hiện còn bao nhiêu việc.
+//   · Tầng 1 — BÀN LÀM VIỆC: vào một chuỗi, các bước xếp theo ĐÚNG thứ tự
+//     vòng đời tháng của SOP §1.
+//
+// Hai màn hình LIÊN CHUỖI được giữ lại vì chúng là việc liên chuỗi thật:
+// duyệt bút toán hàng loạt, và công nợ đến hạn (việc hàng tuần, SOP §5).
+// ═══════════════════════════════════════════════════════════════════════════
+
+// `need` = cờ năng lực ở `mt_hub.get_board` phải bật thì bước mới hiện.
+// Ẩn bước chuỗi KHÔNG có là điều đúng: hiện bước "lập bảng kê chiết khấu" cho
+// Saigon Co.op là mời kế toán xuất một hóa đơn mình không được phép xuất
+// (Co.op trừ 17,75% tại nguồn và CO.OP xuất hóa đơn).
+const STEPS = [
+  { key: "chiet-khau", no: "3", label: "Chiết khấu mình xuất", icon: "fa-file-signature",
+    need: "we_issue_discount", count: ["sheets_draft", "sheets_await_invoice"],
+    hint: "Nạp file doanh số/TBCK → lập bảng kê BKCK → chốt lấy số → xuất hóa đơn CK trên MISA → ghi số về → sinh bút toán." },
+  { key: "ho-so", no: "", label: "Hồ sơ nộp", icon: "fa-folder-open",
+    need: "has_dossier", count: ["dossiers_draft"],
+    hint: "Bảng kê Excel + PDF hóa đơn đặt ĐÚNG TÊN. Win không xử lý thanh toán khi hồ sơ sai tên." },
+  { key: "thanh-toan", no: "4", label: "Đối soát thanh toán", icon: "fa-money-check-dollar",
+    need: null, count: ["advices_unreconciled", "lines_unmatched", "lines_review"],
+    hint: "Nạp bảng kê của chuỗi → hệ khớp từng dòng với hóa đơn → xử lý dòng chưa khớp và dòng cần review." },
+  { key: "but-toan", no: "4", label: "Bút toán", icon: "fa-file-invoice-dollar",
+    need: null, count: ["draft_je"],
+    hint: "Sinh bút toán NHÁP từ bảng kê rồi duyệt từng cái. Hệ thống không bao giờ tự ghi sổ." },
+  { key: "cong-no", no: "5", label: "Công nợ đến hạn", icon: "fa-clock",
+    need: null, count: [],
+    hint: "Hóa đơn của chuỗi này còn nợ, xếp theo tuổi nợ tính từ hạn khai trên khách." },
+];
+
+// Màn hình liên chuỗi — KHÔNG thuộc chuỗi nào.
+const GLOBAL_VIEWS = [
+  { key: "g-but-toan", label: "Duyệt bút toán toàn kênh", icon: "fa-stamp",
+    hint: "Duyệt/xóa bút toán nháp của MỌI chuỗi trong một lần." },
+  { key: "g-cong-no", label: "Công nợ đến hạn toàn kênh", icon: "fa-clock",
+    hint: "Việc hàng tuần của SOP §5: nhắc/đòi hóa đơn sắp và quá hạn trên cả kênh." },
+  // Một chuỗi có thể có NHIỀU pháp nhân (Central Retail 2 EB, Saigon Co.op ~8
+  // đơn vị, LOTTE tách chi nhánh). Số gộp theo chuỗi không đi đòi được — phải
+  // xuống tới từng pháp nhân mới biết gọi cho ai.
+  { key: "g-khach", label: "Công nợ theo khách hàng", icon: "fa-building",
+    hint: "Xuống từng pháp nhân của mỗi chuỗi. Một chuỗi thường có nhiều pháp nhân xuất hóa đơn riêng." },
 ];
 
 // Rổ tuổi nợ — khóa phải trùng `mt_debt.BUCKETS`. Nhãn hiển thị lấy từ backend.
@@ -43,12 +79,6 @@ const DUE_TONE = {
   chua_khai_han: "gray",
 };
 
-// Rổ hóa đơn của tab 1 — đúng khóa mà backend nhận (mt.get_invoices).
-const INV_BUCKETS = [
-  { key: "chua_thanh_toan", label: "Chưa thu đủ" },
-  { key: "da_thanh_toan", label: "Đã thu đủ" },
-  { key: "tat_ca", label: "Tất cả" },
-];
 
 // Danh sách chuỗi siêu thị đến TỪ BACKEND (`get_overview.chain_options`), khai
 // gốc ở ketoan/install.py: MT_CHAINS.
@@ -99,206 +129,438 @@ export async function render({ container, query }) {
   setHTML(container, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
 
   const state = {
-    tab: TABS.some((t) => t.key === query?.tab) ? query.tab : "thanh-toan",
-    bucket: INV_BUCKETS.some((b) => b.key === query?.bucket) ? query.bucket : "chua_thanh_toan",
+    // TẦNG: "bang" = bảng chuỗi · "chuoi" = bàn làm việc của một chuỗi ·
+    // "toan-kenh" = màn hình liên chuỗi.
+    view: query?.chain ? "chuoi" : (query?.g ? "toan-kenh" : "bang"),
+    chain: query?.chain || "",
+    step: query?.step || "",
+    global: query?.g || "",
+
+    bucket: PAY_VIEWS.some((b) => b.key === query?.bucket) ? query.bucket : "chua_thanh_toan",
     from: query?.from || monthsAgo(3),
     to: query?.to || todayISO(),
-    chain: query?.chain || "",
-    // Lọc theo KHÁCH, dùng chung cho cả ba tab: kế toán MT đối chiếu trên đầu
-    // từng pháp nhân chứ không phải trên cả kênh.
     customer: query?.customer || "",
-    // Tab 3 xem theo "khach" (chi tiết từng khách) hay "chuoi" (nhìn tổng).
-    // Mặc định theo khách vì đó mới là cái đi đòi nợ được.
     chainView: query?.view === "chuoi" ? "chuoi" : "khach",
     search: "",
     page: 1,
-    // Chốt tay liên kết đi qua guard_manager ở backend. Hiện nút cho người không
-    // có quyền chỉ tạo ra một cú bấm để nhận lỗi — nên ẩn hẳn.
     canManage: false,
-    // Tab 'Bút toán': lọc theo trạng thái bút toán của bảng kê.
     jeState: query?.je_state || "",
-    // Tab 'Bút toán' có hai cách nhìn: theo BẢNG KÊ (sinh bút toán) và theo
-    // BÚT TOÁN (duyệt). Tách ra vì hai việc khác nhau, hai quyền khác nhau.
     jeView: query?.je_view === "duyet" ? "duyet" : "bang-ke",
-    // Bút toán đang tick để duyệt/xóa hàng loạt.
     jePicked: new Set(),
     jeKind: query?.je_kind || "",
     bkckStatus: query?.bkck_status || "",
     winStatus: query?.win_status || "",
-    // '0' = nháp chờ duyệt (mặc định), '1' = đã ghi sổ.
     jeDocstatus: query?.je_docstatus === "1" ? "1" : "0",
+    dueBucket: "tat_ca",
+    dueAsOf: "",
+    board: null,
   };
 
-  let ov;
+  await paint(container, state);
+}
+
+// Vẽ lại toàn bộ màn hình theo `state.view`. Gọi lại sau mỗi lần đổi tầng.
+async function paint(container, state) {
+  setHTML(container, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+  let board;
   try {
-    ov = await api.mtOverview({ from_date: state.from, to_date: state.to });
+    board = await api.mtBoard({ from_date: state.from, to_date: state.to });
   } catch (e) {
     setHTML(container, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
     return;
   }
+  state.board = board;
+  state.canManage = !!board.can_manage;
+  state.chainOptions = (board.chains || []).map((c) => c.chain);
+  state.chainParsers = (board.chains || []).filter((c) => c.can_read_payment).map((c) => c.chain);
 
-  state.canManage = !!ov.can_import;   // backend: is_chief()
-  // Danh sách chuỗi lấy từ backend — xem chú thích ở CHAINS_FALLBACK.
-  state.chainOptions = Array.isArray(ov.chain_options) ? ov.chain_options : [];
-  state.chainParsers = Array.isArray(ov.chain_parsers) ? ov.chain_parsers : [];
-  setHTML(container, shell(state, ov));
-  bind(container, state, ov);
+  if (state.view === "chuoi") {
+    const hit = (board.chains || []).find((c) => c.chain === state.chain);
+    if (!hit) { state.view = "bang"; state.chain = ""; }
+  }
+
+  if (state.view === "bang") {
+    setHTML(container, boardShell(state, board));
+    bindBoard(container, state);
+    return;
+  }
+  if (state.view === "toan-kenh") {
+    setHTML(container, globalShell(state, board));
+    bindShellCommon(container, state);
+    await loadTab(container, state);
+    return;
+  }
+  setHTML(container, chainShell(state, board));
+  bindShellCommon(container, state);
   await loadTab(container, state);
 }
 
-// ── Khung màn hình ─────────────────────────────────────────────────────────
-function shell(state, ov) {
-  const b = ov.buckets || {};
-  const chua = b.chua_thanh_toan || {};
-  const da = b.da_thanh_toan || {};
-  const ck = b.chiet_khau || {};
-  const debt = ov.debt || {};
-  const att = ov.attention || {};
-  const unmatched = att.unmatched_payment_lines || {};
+function syncHash(state) {
+  const p = [`from=${state.from}`, `to=${state.to}`];
+  if (state.view === "chuoi") { p.push(`chain=${q(state.chain)}`, `step=${state.step}`); }
+  else if (state.view === "toan-kenh") { p.push(`g=${state.global}`); }
+  history.replaceState(null, "", `#/cong-no-mt?${p.join("&")}`);
+}
 
+// ── Thanh ngày, dùng chung mọi tầng ────────────────────────────────────────
+function dateBar(state) {
+  return html`
+    <input type="date" class="kt-input kt-input--sm" id="mt-from" value="${state.from}">
+    <span class="kt-sub">→</span>
+    <input type="date" class="kt-input kt-input--sm" id="mt-to" value="${state.to}">`;
+}
+
+const BASIS_NOTE = html`
+  <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+    <div class="kt-card-body kt-sub">
+      <b>Số ở đây tính từ BẢNG KÊ CỦA CHUỖI, không phải số dư sổ cái.</b>
+      Kênh MT cố ý <b>không</b> tạo Payment Entry — bút toán do người duyệt.
+      Vì vậy <code>outstanding_amount</code> của ERPNext chưa trừ tiền chuỗi đã trả.
+    </div>
+  </div>`;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TẦNG 0 — BẢNG CHUỖI
+// ═══════════════════════════════════════════════════════════════════════════
+
+function boardShell(state, board) {
+  const t = board.totals || {};
+  const chains = board.chains || [];
   return html`
     <div class="kt-view-head">
       <div>
-        <div class="kt-view-title"><i class="fas fa-store"></i> Công nợ MT</div>
-        <div class="kt-sub">
-          Kênh siêu thị hiện đại — đối chiếu hóa đơn bán ra với bảng kê thanh toán của chuỗi.
-        </div>
+        <div class="kt-view-title"><i class="fas fa-store"></i> Kênh siêu thị (MT)</div>
+        <div class="kt-sub">Chọn một chuỗi để làm. Mỗi chuỗi có vòng đời tháng riêng.</div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input type="date" class="kt-input kt-input--sm" id="mt-from" value="${state.from}">
-        <span class="kt-sub">→</span>
-        <input type="date" class="kt-input kt-input--sm" id="mt-to" value="${state.to}">
-        ${ov.can_import
-          ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="mt-import"><i class="fas fa-file-import"></i> Nạp bảng kê</button>`
-          : ""}
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${dateBar(state)}</div>
+    </div>
+
+    <div class="kt-stats kt-mb">
+      <div class="kt-stat">
+        <div class="kt-stat-label"><i class="fas fa-list-check"></i> Việc đang chờ</div>
+        <div class="kt-stat-value ${t.todo ? "warn" : ""}">${t.todo || 0}</div>
+        <div class="kt-stat-sub">trên ${chains.filter((c) => c.todo).length} chuỗi</div>
+      </div>
+      <div class="kt-stat">
+        <div class="kt-stat-label"><i class="fas fa-file-invoice-dollar"></i> Bút toán nháp</div>
+        <div class="kt-stat-value ${t.draft_je ? "warn" : ""}">${t.draft_je || 0}</div>
+        <div class="kt-stat-sub">chờ người duyệt — hệ không tự ghi sổ</div>
+      </div>
+      <div class="kt-stat">
+        <div class="kt-stat-label"><i class="fas fa-hourglass-half"></i> Chuỗi còn nợ</div>
+        <div class="kt-stat-value">${formatVNDShort(t.debt)}</div>
+        <div class="kt-stat-sub">tính đến ${formatDate(board.as_of)}</div>
+      </div>
+      <div class="kt-stat">
+        <div class="kt-stat-label"><i class="fas fa-clock"></i> Trong đó quá hạn</div>
+        <div class="kt-stat-value ${t.debt_overdue ? "danger" : ""}">${formatVNDShort(t.debt_overdue)}</div>
+        <div class="kt-stat-sub">theo hạn khai trên từng khách</div>
       </div>
     </div>
 
-    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
-      <div class="kt-card-body kt-sub">
-        <b>Số ở màn hình này tính từ BẢNG KÊ CỦA CHUỖI, không phải số dư sổ cái.</b>
-        Hệ thống cố ý <b>không</b> tự tạo Payment Entry / Journal Entry từ file nhập —
-        nó chỉ ghi nhận và đánh dấu. Sau khi soi xong, kế toán tự lập chứng từ hạch toán.
-        Vì vậy <code>outstanding_amount</code> của ERPNext vẫn chưa trừ tiền chuỗi đã trả.
-      </div>
-    </div>
+    ${BASIS_NOTE}
 
-    ${unmatched.count
+    ${board.orphan_advices
       ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)">
           <div class="kt-card-body">
             <div style="font-weight:600;color:var(--kt-danger)">
               <i class="fas fa-triangle-exclamation"></i>
-              ${unmatched.count} dòng thanh toán chưa nối được hóa đơn — ${formatVND(unmatched.amount)}
+              ${board.orphan_advices} bảng kê KHÔNG điền công ty
             </div>
             <div class="kt-sub" style="margin-top:6px">
-              Tiền đã về theo bảng kê nhưng máy không biết của hóa đơn nào. Mở bảng kê trên Desk
-              (<a target="_blank" href="/desk/mt-payment-advice">MT Payment Advice</a>) để xem, hoặc chốt tay
-              liên kết ngay trên dòng thanh toán ở tab "Quản lý thanh toán".
+              Chúng không được tính vào công ty nào nên biến khỏi mọi thẻ chuỗi ở dưới —
+              tiền trong đó đang mất hút. Mở
+              <a target="_blank" href="/app/mt-payment-advice?company=">MT Payment Advice</a>
+              điền công ty cho từng cái.
             </div>
           </div></div>`
       : ""}
 
-    ${att.need_review_lines
-      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
-          <div class="kt-card-body kt-sub">
-            <b>${att.need_review_lines} dòng đang ở mức "Cần review".</b>
-            Máy khớp được nhưng không chắc — thường là Emart (chuỗi không cấp ký hiệu hóa đơn,
-            chỉ khớp được bằng số + ngày + tiền) hoặc dòng có nhiều hóa đơn ứng viên.
-            Người phải xác nhận, đừng coi là đã khớp.
-          </div></div>`
-      : ""}
+    <div class="kt-ws-sections kt-mb">
+      ${chains.map((c) => chainCard(c))}
+    </div>
 
-    <div class="kt-stats kt-mb">
-      <div class="kt-stat kt-row-link" data-goto="chua_thanh_toan" style="cursor:pointer">
-        <div class="kt-stat-label"><i class="fas fa-hourglass-half"></i> Hóa đơn chưa thu đủ</div>
-        <div class="kt-stat-value warn">${chua.count || 0}</div>
-        <div class="kt-stat-sub">còn thiếu ${formatVNDShort(chua.remaining)}</div>
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="font-weight:600;margin-bottom:4px"><i class="fas fa-layer-group"></i> Việc trên toàn kênh</div>
+      <div class="kt-sub" style="margin-bottom:10px">
+        Hai việc dưới đây làm một lượt cho mọi chuỗi, không tách theo chuỗi.
       </div>
-      <div class="kt-stat kt-row-link" data-goto="da_thanh_toan" style="cursor:pointer">
-        <div class="kt-stat-label"><i class="fas fa-circle-check"></i> Hóa đơn đã thu đủ</div>
-        <div class="kt-stat-value">${da.count || 0}</div>
-        <div class="kt-stat-sub">${formatVNDShort(da.collected)}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${GLOBAL_VIEWS.map((g) => html`
+          <button class="kt-btn kt-btn--outline kt-btn--sm" data-global="${g.key}">
+            <i class="fas ${g.icon}"></i> ${g.label}
+          </button>`)}
+        <button class="kt-btn kt-btn--outline kt-btn--sm" data-setup="stores">
+          <i class="fas fa-shop"></i> Điểm siêu thị
+        </button>
+        <button class="kt-btn kt-btn--outline kt-btn--sm" data-setup="assign">
+          <i class="fas fa-link"></i> Gán chuỗi cho khách
+        </button>
+        ${state.canManage
+          ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" data-setup="accounts">
+              <i class="fas fa-sliders"></i> Tài khoản hạch toán
+            </button>
+            <button class="kt-btn kt-btn--outline kt-btn--sm" data-setup="terms">
+              <i class="fas fa-calendar-day"></i> Hạn thanh toán
+            </button>`
+          : ""}
       </div>
-      <div class="kt-stat kt-row-link" data-goto="chiet_khau" style="cursor:pointer">
-        <div class="kt-stat-label"><i class="fas fa-percent"></i> Chuỗi trừ lại</div>
-        <div class="kt-stat-value danger">${ck.count || 0}</div>
-        <div class="kt-stat-sub">${formatVNDShort(ck.amount)} — chiết khấu · phí · ghi giảm</div>
+    </div></div>
+  `;
+}
+
+// Một thẻ chuỗi. Chỉ liệt kê VIỆC PHẢI LÀM, không liệt kê hiện trạng: thẻ nào
+// cũng đầy số thì không thẻ nào nổi lên được.
+function chainCard(c) {
+  const jobs = [];
+  if (c.advices_unreconciled) jobs.push({ n: c.advices_unreconciled, t: "bảng kê chưa đối chiếu", tone: "danger" });
+  if (c.lines_unmatched) jobs.push({ n: c.lines_unmatched, t: "dòng tiền chưa nối hóa đơn", tone: "danger" });
+  if (c.lines_review) jobs.push({ n: c.lines_review, t: "dòng cần người xác nhận", tone: "warning" });
+  if (c.draft_je) jobs.push({ n: c.draft_je, t: "bút toán nháp chờ duyệt", tone: "warning" });
+  if (c.sheets_draft) jobs.push({ n: c.sheets_draft, t: "bảng kê chiết khấu chưa chốt", tone: "warning" });
+  if (c.sheets_await_invoice) jobs.push({ n: c.sheets_await_invoice, t: "bảng kê chờ ghi số hóa đơn CK", tone: "warning" });
+  if (c.dossiers_draft) jobs.push({ n: c.dossiers_draft, t: "hồ sơ Win chưa nộp", tone: "warning" });
+
+  return html`
+    <div class="kt-card kt-chain-card" data-chain="${c.chain}" style="cursor:pointer">
+      <div class="kt-card-body">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="font-weight:600;font-size:15px">${c.chain}</div>
+          <span class="kt-badge kt-badge--${c.todo ? "yellow" : "green"}" style="margin-left:auto">
+            ${c.todo ? `${c.todo} việc` : "xong"}
+          </span>
+        </div>
+
+        <div class="kt-sub" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+          ${c.we_issue_discount ? html`<span class="kt-badge kt-badge--gray">mình xuất HĐ chiết khấu</span>` : ""}
+          ${c.has_dossier ? html`<span class="kt-badge kt-badge--gray">có hồ sơ nộp</span>` : ""}
+          ${!c.can_read_payment ? html`<span class="kt-badge kt-badge--gray">chưa đọc được file thanh toán</span>` : ""}
+        </div>
+
+        ${jobs.length
+          ? html`<div style="margin-top:10px">
+              ${jobs.map((j) => html`<div class="kt-sub" style="margin-top:3px">
+                <b style="color:var(--kt-${j.tone})">${j.n}</b> ${j.t}
+              </div>`)}
+            </div>`
+          : html`<div class="kt-sub" style="margin-top:10px">Không còn việc nào trong khoảng đang xem.</div>`}
+
+        <div class="kt-sub" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--kt-border)">
+          Còn nợ <b>${formatVNDShort(c.debt)}</b>
+          ${c.debt_overdue
+            ? html` · quá hạn <b style="color:var(--kt-danger)">${formatVNDShort(c.debt_overdue)}</b>`
+            : ""}
+          ${c.debt_unknown_term
+            ? html` · <span style="color:var(--kt-warning)">${c.debt_unknown_term} HĐ chưa khai hạn</span>`
+            : ""}
+        </div>
       </div>
-      <div class="kt-stat">
-        <div class="kt-stat-label"><i class="fas fa-file-invoice-dollar"></i> Công nợ chuỗi (đến ${formatDate(debt.as_of)})</div>
-        <div class="kt-stat-value ${(debt.estimate || 0) > 0 ? "warn" : ""}">${formatVNDShort(debt.estimate)}</div>
-        <div class="kt-stat-sub">${debt.unpaid_count || 0} hóa đơn chưa thu đủ · đã trừ ${formatVNDShort(debt.credit_notes)} trả hàng</div>
+    </div>`;
+}
+
+function bindBoard(container, state) {
+  bindDates(container, state);
+  container.querySelectorAll(".kt-chain-card").forEach((el) => {
+    el.addEventListener("click", () => {
+      state.chain = el.dataset.chain;
+      state.view = "chuoi";
+      state.step = "";
+      state.page = 1;
+      state.customer = "";   // bộ lọc khách của chuỗi trước không còn nghĩa
+      state.search = "";
+      syncHash(state);
+      paint(container, state);
+    });
+  });
+  container.querySelectorAll("button[data-global]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.global = b.dataset.global;
+      state.view = "toan-kenh";
+      state.chain = "";
+      state.page = 1;
+      syncHash(state);
+      paint(container, state);
+    });
+  });
+  bindSetup(container, state);
+}
+
+// Các màn thiết lập đều là modal — không đổi tầng, nên không paint lại.
+function bindSetup(container, state) {
+  container.querySelectorAll("button[data-setup]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const k = b.dataset.setup;
+      if (k === "stores") return openStores(container, state);
+      if (k === "assign") return openChainAssign(container, state);
+      if (k === "accounts") return openAccountMap();
+      if (k === "terms") return openCreditTerms(container, state);
+    });
+  });
+}
+
+function bindDates(container, state) {
+  const from = container.querySelector("#mt-from");
+  const to = container.querySelector("#mt-to");
+  if (!from || !to) return;
+  const onDate = () => {
+    state.from = from.value;
+    state.to = to.value;
+    state.page = 1;
+    syncHash(state);
+    paint(container, state);
+  };
+  from.addEventListener("change", onDate);
+  to.addEventListener("change", onDate);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TẦNG 1 — BÀN LÀM VIỆC CỦA MỘT CHUỖI
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Bước nào hiện cho chuỗi này. Ẩn bước chuỗi không có, nhưng nói LÝ DO ở dưới.
+function stepsFor(c) {
+  return STEPS.filter((s) => !s.need || c[s.need]);
+}
+
+function chainShell(state, board) {
+  const c = (board.chains || []).find((x) => x.chain === state.chain) || {};
+  const steps = stepsFor(c);
+  if (!steps.some((s) => s.key === state.step)) state.step = steps[0] ? steps[0].key : "thanh-toan";
+  const cur = steps.find((s) => s.key === state.step) || STEPS[2];
+
+  return html`
+    <div class="kt-view-head">
+      <div>
+        <div class="kt-view-title">
+          <button class="kt-btn kt-btn--outline kt-btn--sm" id="mt-back" style="margin-right:10px">
+            <i class="fas fa-arrow-left"></i> Mọi chuỗi
+          </button>
+          <i class="fas fa-store"></i> ${state.chain}
+        </div>
+        <div class="kt-sub">
+          ${c.todo ? `${c.todo} việc đang chờ` : "Không còn việc nào trong khoảng đang xem"} ·
+          còn nợ ${formatVNDShort(c.debt)}${c.debt_overdue ? ` · quá hạn ${formatVNDShort(c.debt_overdue)}` : ""}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${dateBar(state)}
+        ${state.canManage && c.can_read_payment
+          ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="mt-import">
+              <i class="fas fa-file-import"></i> Nạp bảng kê thanh toán
+            </button>`
+          : ""}
       </div>
     </div>
 
-    <div class="kt-segment kt-mb" id="mt-tabs">
-      ${TABS.map((t) => html`<button data-tab="${t.key}" class="${state.tab === t.key ? "is-active" : ""}">${t.label}</button>`)}
+    ${!c.can_read_payment
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+          <div class="kt-card-body kt-sub">
+            Chưa có tầng đọc file thanh toán cho <b>${state.chain}</b> — chưa có file mẫu thật
+            để viết, và đọc bừa bằng parser chuỗi khác là sai tiền. Dữ liệu đã nạp trước đó vẫn
+            xem được ở đây; chỉ chưa nạp file mới được.
+          </div></div>`
+      : ""}
+
+    <div class="kt-segment kt-mb" id="mt-steps">
+      ${steps.map((s) => {
+        const n = (s.count || []).reduce((a, k) => a + (c[k] || 0), 0);
+        return html`<button data-step="${s.key}" class="${state.step === s.key ? "is-active" : ""}">
+          ${s.no ? html`<span class="kt-sub">B${s.no}</span> ` : ""}${s.label}${n ? ` (${n})` : ""}
+        </button>`;
+      })}
     </div>
 
     <div class="kt-card kt-mb"><div class="kt-card-body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <i class="fas fa-circle-info kt-sub"></i>
-      <span class="kt-sub" id="mt-hint">${TABS.find((t) => t.key === state.tab).hint}</span>
+      <i class="fas ${cur.icon} kt-sub"></i>
+      <span class="kt-sub" id="mt-hint">${cur.hint}</span>
       <input class="kt-input kt-input--sm" id="mt-search" placeholder="Tìm số hóa đơn / khách / siêu thị…"
-        style="margin-left:auto;min-width:240px${state.tab === "chuoi" ? ";display:none" : ""}">
+        style="margin-left:auto;min-width:220px">
     </div></div>
 
     <div id="mt-body"></div>
   `;
 }
 
-function bind(container, state) {
-  const syncHash = () => {
-    const url = `#/cong-no-mt?tab=${state.tab}&bucket=${state.bucket}&from=${state.from}&to=${state.to}`
-      + (state.chain ? `&chain=${q(state.chain)}` : "");
-    history.replaceState(null, "", url);
-  };
+// ═══════════════════════════════════════════════════════════════════════════
+// TẦNG 1' — MÀN HÌNH LIÊN CHUỖI
+// ═══════════════════════════════════════════════════════════════════════════
 
-  container.querySelector("#mt-tabs").addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-tab]");
-    if (!btn) return;
-    state.tab = btn.dataset.tab;
-    state.page = 1;   // tab khác, số trang cũ vô nghĩa
-    container.querySelectorAll("#mt-tabs button").forEach((x) => x.classList.toggle("is-active", x === btn));
-    container.querySelector("#mt-hint").textContent = TABS.find((t) => t.key === state.tab).hint;
-    // Tab "công nợ chuỗi" là bảng tổng hợp, không có ô tìm kiếm nào áp dụng được.
-    const s = container.querySelector("#mt-search");
-    if (s) s.style.display = state.tab === "chuoi" ? "none" : "";
-    syncHash();
-    loadTab(container, state);
+function globalShell(state, board) {
+  const g = GLOBAL_VIEWS.find((x) => x.key === state.global) || GLOBAL_VIEWS[0];
+  state.global = g.key;
+  return html`
+    <div class="kt-view-head">
+      <div>
+        <div class="kt-view-title">
+          <button class="kt-btn kt-btn--outline kt-btn--sm" id="mt-back" style="margin-right:10px">
+            <i class="fas fa-arrow-left"></i> Mọi chuỗi
+          </button>
+          <i class="fas ${g.icon}"></i> ${g.label}
+        </div>
+        <div class="kt-sub">Toàn kênh MT — không lọc theo chuỗi.</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${dateBar(state)}</div>
+    </div>
+
+    ${BASIS_NOTE}
+
+    <div class="kt-segment kt-mb" id="mt-globals">
+      ${GLOBAL_VIEWS.map((x) => html`<button data-global="${x.key}"
+        class="${state.global === x.key ? "is-active" : ""}">${x.label}</button>`)}
+    </div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <i class="fas fa-circle-info kt-sub"></i>
+      <span class="kt-sub">${g.hint}</span>
+      <input class="kt-input kt-input--sm" id="mt-search" placeholder="Tìm số hóa đơn / khách / siêu thị…"
+        style="margin-left:auto;min-width:220px">
+    </div></div>
+
+    <div id="mt-body"></div>
+  `;
+}
+
+// ── Ràng buộc dùng chung cho hai tầng có `#mt-body` ────────────────────────
+function bindShellCommon(container, state) {
+  bindDates(container, state);
+
+  const back = container.querySelector("#mt-back");
+  if (back) back.addEventListener("click", () => {
+    state.view = "bang";
+    state.chain = "";
+    state.global = "";
+    state.page = 1;
+    state.customer = "";
+    state.search = "";
+    syncHash(state);
+    paint(container, state);
   });
 
-  container.querySelectorAll("[data-goto]").forEach((el) => {
-    el.addEventListener("click", () => {
-      const goto = el.dataset.goto;
-      state.page = 1;
-      if (goto === "chiet_khau") {
-        state.tab = "chiet-khau";
-      } else {
-        state.tab = "thanh-toan";
-        state.bucket = goto;
-      }
-      const btn = container.querySelector(`#mt-tabs button[data-tab="${state.tab}"]`);
-      container.querySelectorAll("#mt-tabs button").forEach((x) => x.classList.toggle("is-active", x === btn));
-      container.querySelector("#mt-hint").textContent = TABS.find((t) => t.key === state.tab).hint;
-      syncHash();
-      loadTab(container, state);
-    });
+  const steps = container.querySelector("#mt-steps");
+  if (steps) steps.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-step]");
+    if (!btn || btn.dataset.step === state.step) return;
+    state.step = btn.dataset.step;
+    state.page = 1;
+    state.search = "";
+    syncHash(state);
+    paint(container, state);
   });
 
-  const from = container.querySelector("#mt-from");
-  const to = container.querySelector("#mt-to");
-  // Đổi khoảng ngày thì mọi thẻ tổng ở đầu màn hình cũng phải tính lại → nạp lại
-  // cả view qua hash, đừng chỉ nạp lại bảng bên dưới (số đầu trang sẽ nói dối).
-  const onDate = () => {
-    state.from = from.value;
-    state.to = to.value;
-    location.hash = `/cong-no-mt?tab=${state.tab}&bucket=${state.bucket}&from=${state.from}&to=${state.to}`;
-  };
-  from.addEventListener("change", onDate);
-  to.addEventListener("change", onDate);
+  const globals = container.querySelector("#mt-globals");
+  if (globals) globals.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-global]");
+    if (!btn || btn.dataset.global === state.global) return;
+    state.global = btn.dataset.global;
+    state.page = 1;
+    state.search = "";
+    syncHash(state);
+    paint(container, state);
+  });
 
   let timer = null;
-  container.querySelector("#mt-search").addEventListener("input", (e) => {
+  const s = container.querySelector("#mt-search");
+  if (s) s.addEventListener("input", (e) => {
     state.search = e.target.value.trim();
     state.page = 1;   // lọc lại phải về trang đầu, không thì rơi vào trang trống
     clearTimeout(timer);
@@ -309,28 +571,42 @@ function bind(container, state) {
   if (imp) imp.addEventListener("click", () => pickFile(container, state));
 }
 
-// ── Nạp nội dung theo tab ──────────────────────────────────────────────────
+// ── Nạp nội dung theo bước đang mở ─────────────────────────────────────────
+//
+// Mọi loader bên dưới đều đã đọc `state.chain`, nên vào bàn làm việc của một
+// chuỗi là chúng tự lọc — không phải sửa loader nào.
 async function loadTab(container, state) {
   const body = container.querySelector("#mt-body");
   if (!body) return;
   setHTML(body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
 
-  if (state.tab === "chuoi") return loadChains(container, state);
-  if (state.tab === "bkck") return loadBkck(container, state);
-  if (state.tab === "ho-so-win") return loadWinDossiers(container, state);
-  if (state.tab === "den-han") return loadDueDebt(container, state);
-  if (state.tab === "but-toan") {
+  if (state.view === "toan-kenh") {
+    if (state.global === "g-cong-no") return loadDueDebt(container, state);
+    if (state.global === "g-khach") return loadChains(container, state);
+    return loadJeApproval(container, state);
+  }
+
+  if (state.step === "chiet-khau") return loadBkck(container, state);
+  if (state.step === "ho-so") return loadWinDossiers(container, state);
+  if (state.step === "cong-no") return loadDueDebt(container, state);
+  if (state.step === "but-toan") {
     return state.jeView === "duyet"
       ? loadJeApproval(container, state)
       : loadJournals(container, state);
   }
 
-  const bucket = state.tab === "chiet-khau" ? "chiet_khau" : state.bucket;
+  // Bước "Đối soát thanh toán": hai cách nhìn cùng một bảng kê.
+  //   · Hóa đơn & tiền về — hóa đơn bán ra và tiền chuỗi đã trả cho từng cái.
+  //   · Khoản chuỗi trừ lại — chiết khấu/phí/ghi giảm, phần lớn KHÔNG gắn hóa đơn.
+  // Bản cũ để hai cái này thành hai TAB NGANG riêng ("Quản lý thanh toán" và
+  // "Quản lý chiết khấu") nên trông như hai nghiệp vụ khác nhau, trong khi
+  // chúng là hai mặt của cùng một file.
+  const bucket = state.bucket === "chiet_khau" ? "chiet_khau" : state.bucket;
   let res;
   try {
     res = await api.mtInvoices(bucket, {
       from_date: state.from, to_date: state.to, search: state.search,
-      page: state.page, chain: state.tab === "chiet-khau" ? (state.chain || undefined) : undefined,
+      page: state.page, chain: state.chain || undefined,
       customer: state.customer || undefined,
     });
   } catch (e) {
@@ -345,20 +621,42 @@ async function loadTab(container, state) {
     return loadTab(container, state);
   }
 
-  if (state.tab === "chiet-khau") {
-    setHTML(body, html`${customerFilterBar(state)}${deductionTable(state, res)}`);
-    bindChainFilter(container, state);
+  const head = html`
+    <div class="kt-card kt-mb"><div class="kt-card-body" style="display:flex;gap:8px;flex-wrap:wrap">
+      ${PAY_VIEWS.map((v) => html`<button
+        class="kt-btn kt-btn--sm ${state.bucket === v.key ? "" : "kt-btn--outline"}"
+        data-payview="${v.key}">${v.label}</button>`)}
+    </div></div>`;
+
+  if (bucket === "chiet_khau") {
+    setHTML(body, html`${head}${customerFilterBar(state)}${deductionTable(state, res)}`);
   } else {
-    setHTML(body, html`${customerFilterBar(state)}${invoiceTable(state, res)}`);
-    bindBuckets(container, state);
+    setHTML(body, html`${head}${customerFilterBar(state)}${invoiceTable(state, res)}`);
     bindRelink(container, state);
   }
+  container.querySelectorAll("button[data-payview]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.bucket = b.dataset.payview;
+      state.page = 1;
+      loadTab(container, state);
+    });
+  });
   bindCustomerFilter(container, state);
   bindPager(container, state);
 }
 
-// ── Chia trang ─────────────────────────────────────────────────────────────
-// Tổng ở đây là tổng THẬT của cả rổ (backend đếm riêng bằng COUNT), không phải
+// Bốn cách nhìn của bước "Đối soát thanh toán" — khóa đúng như `mt.get_invoices`.
+// Ba rổ đầu là HÓA ĐƠN, rổ cuối là DÒNG BẢNG KÊ: khoản chuỗi trừ lại phần lớn
+// không gắn với hóa đơn nào (phí hỗ trợ, chiết khấu tháng, NET OFF) nên không
+// đếm thành hóa đơn được. Cùng một file, hai mặt.
+const PAY_VIEWS = [
+  { key: "chua_thanh_toan", label: "Hóa đơn chưa thu đủ" },
+  { key: "da_thanh_toan", label: "Hóa đơn đã thu đủ" },
+  { key: "tat_ca", label: "Tất cả hóa đơn" },
+  { key: "chiet_khau", label: "Khoản chuỗi trừ lại" },
+];
+
+
 // số dòng đang hiển thị — đọc nhầm hai con số này là đếm sót.
 function pager(res, unit) {
   const total = res.total || 0;
@@ -407,15 +705,13 @@ function bindPager(container, state) {
   });
 }
 
-// ── Tab 1: Quản lý thanh toán ──────────────────────────────────────────────
+// Bảng hóa đơn của bước "Đối soát thanh toán".
+// KHÔNG tự vẽ thanh chọn rổ ở đây: `loadTab` đã vẽ MỘT thanh chung cho cả bốn
+// rổ (kể cả "Khoản chuỗi trừ lại"). Bản cũ vẽ ở cả hai chỗ nên trên màn hình
+// có hai thanh chọn chồng nhau, mỗi thanh biết một phần sự thật.
 function invoiceTable(state, res) {
   const tol = res.tolerance || 0;
   return html`
-    <div class="kt-segment kt-mb" id="mt-buckets">
-      ${INV_BUCKETS.map((x) => html`<button data-bucket="${x.key}"
-        class="${state.bucket === x.key ? "is-active" : ""}">${x.label}</button>`)}
-    </div>
-
     <div class="kt-card"><div class="kt-card-body">
       ${!res.rows.length
         ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i><p>Không có hóa đơn nào trong rổ này.</p></div>`
@@ -480,16 +776,6 @@ function paymentCell(r, canManage) {
   </div>`;
 }
 
-function bindBuckets(container, state) {
-  container.querySelectorAll("#mt-buckets button[data-bucket]").forEach((b) => {
-    b.addEventListener("click", () => {
-      if (state.bucket === b.dataset.bucket) return;
-      state.bucket = b.dataset.bucket;
-      state.page = 1;
-      loadTab(container, state);
-    });
-  });
-}
 
 // ── Tab 2: Quản lý chiết khấu (dòng khấu trừ, KHÔNG phải hóa đơn) ───────────
 function deductionTable(state, res) {
@@ -539,9 +825,17 @@ function deductionTable(state, res) {
     </div></div>`;
 }
 
+// Ô chọn chuỗi CHỈ có nghĩa ở màn hình liên chuỗi. Trong bàn làm việc của một
+// chuỗi, chuỗi đã cố định bởi điều hướng — để ô này ở đó thì người dùng đổi
+// chuỗi trong ô mà tiêu đề màn hình vẫn ghi chuỗi cũ, hai chỗ nói hai đằng.
 function bindChainFilter(container, state) {
   const sel = container.querySelector("#mt-chain");
   if (!sel) return;
+  if (state.view === "chuoi") {
+    const wrap = sel.closest("label") || sel;
+    wrap.style.display = "none";
+    return;
+  }
   sel.addEventListener("change", () => {
     state.chain = sel.value;
     state.page = 1;
@@ -1246,8 +1540,10 @@ async function loadCustomers(container, state) {
                 <td class="num"><b>${formatVND(r.net_received_est)}</b></td>
                 <td class="num" style="white-space:nowrap">
                   ${r.customer && r.customer !== "Chưa gán khách"
-                    ? html`<button class="kt-btn-icon" data-drill-inv="${r.customer}" title="Xem hóa đơn của khách này"><i class="fas fa-file-invoice"></i></button>
-                           <button class="kt-btn-icon" data-drill-ded="${r.customer}" title="Xem khoản khấu trừ của khách này"><i class="fas fa-percent"></i></button>`
+                    ? html`<button class="kt-btn-icon" data-drill-inv="${r.customer}" data-drill-chain="${r.chain}"
+                             title="Mở bàn làm việc của chuỗi, lọc sẵn khách này"><i class="fas fa-file-invoice"></i></button>
+                           <button class="kt-btn-icon" data-drill-ded="${r.customer}" data-drill-chain="${r.chain}"
+                             title="Xem khoản chuỗi trừ lại của khách này"><i class="fas fa-percent"></i></button>`
                     : ""}
                 </td>
               </tr>`)}
@@ -1307,20 +1603,40 @@ function bindViewSwitch(container, state) {
 // Bấm từ dòng khách sang đúng danh sách của khách đó — đây là thao tác chính
 // khi đối chiếu: nhìn số tổng thấy lệch thì mở ngay chi tiết của khách đó.
 function bindDrill(container, state) {
-  const go = (tab, customer, bucket) => {
+  // Bấm từ dòng khách -> vào BÀN LÀM VIỆC CỦA CHUỖI chứa khách đó, mở bước
+  // "Đối soát thanh toán", lọc sẵn khách. Hai nút chỉ khác nhau ở RỔ.
+  //
+  // Phải mang theo CHUỖI: màn hình này chạy được ở cả tầng liên chuỗi. Chỉ đổi
+  // `state.step` mà không đổi tầng thì `loadTab` vẫn rẽ vào nhánh liên chuỗi và
+  // cú bấm không có tác dụng gì — im lặng.
+  const go = (bucket, btn, customer) => {
+    const chain = btn.dataset.drillChain;
     state.customer = customer;
-    state.tab = tab;
-    if (bucket) state.bucket = bucket;
+    state.bucket = bucket;
+    state.step = "thanh-toan";
     state.page = 1;
     state.search = "";
-    const btn = container.querySelector(`#mt-tabs button[data-tab="${tab}"]`);
-    if (btn) container.querySelectorAll("#mt-tabs button").forEach((x) => x.classList.toggle("is-active", x === btn));
-    loadTab(container, state);
+    const known = chain && (state.chainOptions || []).includes(chain);
+    if (known) {
+      state.view = "chuoi";
+      state.chain = chain;
+      syncHash(state);
+      return paint(container, state);
+    }
+    // Khách CHƯA GÁN CHUỖI thì không có bàn làm việc nào để mở. Nói ra thay vì
+    // để cú bấm không có tác dụng gì.
+    if (state.view !== "chuoi") {
+      state.customer = "";
+      toast("Khách này chưa được gán chuỗi siêu thị — gán chuỗi rồi mới mở được "
+            + "bàn làm việc. Dùng nút 'Gán chuỗi cho khách' ở trang chuỗi.", "error");
+      return;
+    }
+    return loadTab(container, state);
   };
   container.querySelectorAll("button[data-drill-inv]").forEach((b) =>
-    b.addEventListener("click", () => go("thanh-toan", b.dataset.drillInv, "tat_ca")));
+    b.addEventListener("click", () => go("tat_ca", b, b.dataset.drillInv)));
   container.querySelectorAll("button[data-drill-ded]").forEach((b) =>
-    b.addEventListener("click", () => go("chiet-khau", b.dataset.drillDed)));
+    b.addEventListener("click", () => go("chiet_khau", b, b.dataset.drillDed)));
 }
 
 
@@ -3339,12 +3655,17 @@ async function renderWinDetail(container, state, modal, name) {
 //      rổ quá hạn, nên nếu không đếm riêng thì nó im lặng biến mất.
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Trong bàn làm việc, chuỗi do ĐIỀU HƯỚNG quyết định — không để bộ lọc cũ của
+// màn hình toàn kênh lọc ngầm dữ liệu của chuỗi đang mở.
+const dueChainOf = (state) =>
+  (state.view === "chuoi" ? state.chain : state.dueChain) || undefined;
+
 async function loadDueDebt(container, state) {
   const body = container.querySelector("#mt-body");
   let sum;
   try {
     sum = await api.mtDueSummary({ as_of: state.dueAsOf || undefined,
-                                   chain: state.dueChain || undefined,
+                                   chain: dueChainOf(state),
                                    search: state.search || undefined });
   } catch (e) {
     setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
@@ -3356,7 +3677,7 @@ async function loadDueDebt(container, state) {
   let list;
   try {
     list = await api.mtDueInvoices({
-      as_of: state.dueAsOf, chain: state.dueChain || undefined,
+      as_of: state.dueAsOf, chain: dueChainOf(state),
       search: state.search || undefined,
       bucket: state.dueBucket, page: state.page, page_size: 50,
     });
@@ -3376,7 +3697,7 @@ async function loadDueDebt(container, state) {
         <span class="kt-sub">·</span>
         <span>Quá hạn <b style="color:var(--kt-danger)">${formatVND(sum.overdue)}</b>
               / ${sum.overdue_count} HĐ</span>
-        ${state.dueChain
+        ${state.view !== "chuoi" && state.dueChain
           ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="dd-clear-chain">
               <i class="fas fa-xmark"></i> chỉ chuỗi ${state.dueChain}
             </button>`
@@ -3486,6 +3807,7 @@ async function loadDueDebt(container, state) {
   });
   container.querySelectorAll("tr.dd-chain").forEach((tr) => {
     tr.addEventListener("click", () => {
+      if (state.view === "chuoi") return;   // đã ở trong một chuỗi rồi
       // Chuỗi rỗng = khách chưa gán chuỗi; lọc theo nó thì backend bỏ qua bộ lọc
       // và trả về TOÀN BỘ — im lặng sai. Chặn ngay ở đây.
       if (!tr.dataset.chain) return;
