@@ -77,6 +77,10 @@ from ketoan.api import mt_opening
 from ketoan.misa_integration.doctype.misa_invoice_snapshot.misa_invoice_snapshot import (
     norm_inv_no,
 )
+from ketoan.mt.doctype.mt_opening_match.mt_opening_match import (
+    ROLE_RETURN,
+    ROLE_SALE,
+)
 from ketoan.mt.doctype.mt_opening_balance.mt_opening_balance import (
     KIND_IN_ERP,
     RESOLUTION_SKIP,
@@ -389,6 +393,33 @@ def commit_import(content, expected_hash, chain=None, golive=None, cutover=None,
             "match_confidence": r.get("match_confidence"),
             "note": r.get("note"),
         })
+    # Liên kết máy tự nối phải vào BẢNG `matches` — `sales_invoice` trên dòng
+    # giờ chỉ là bản sao được tính lại từ đó. Chỉ ghi `sales_invoice` thôi thì
+    # `_sync_matches` sẽ xóa sạch nó ngay ở lần validate đầu tiên.
+    auto = [r for r in rows if r.get("sales_invoice")]
+    info = {}
+    if auto:
+        keys = {"m%d" % i: r["sales_invoice"] for i, r in enumerate(auto)}
+        for x in frappe.db.sql(
+            "SELECT name, grand_total, is_return, posting_date, return_against "
+            "FROM `tabSales Invoice` WHERE name IN (%s)"
+            % ", ".join("%%(m%d)s" % i for i in range(len(auto))), keys, as_dict=True):
+            info[x.name] = x
+    for i, r in enumerate(auto):
+        x = info.get(r["sales_invoice"])
+        if not x:
+            continue
+        is_ret = cint(x.is_return)
+        doc.append("matches", {
+            "line_no": rows.index(r) + 1,
+            "sales_invoice": x.name,
+            "role": ROLE_RETURN if is_ret else ROLE_SALE,
+            "si_amount": -abs(flt(x.grand_total)) if is_ret else abs(flt(x.grand_total)),
+            "si_is_return": is_ret,
+            "si_posting_date": x.posting_date,
+            "return_against": x.return_against,
+        })
+
     for d in res["deductions"]:
         doc.append("deductions", {
             "sheet": d.get("sheet"), "n_rows": cint(d.get("n_rows")),
@@ -518,6 +549,8 @@ def _line_out(l):
         "paid": flt(l.paid), "returns": flt(l.returns), "remaining": flt(l.remaining),
         "sales_invoice": l.sales_invoice, "match_method": l.match_method,
         "match_confidence": l.match_confidence, "resolution": l.resolution,
+        "n_matched_docs": cint(l.n_matched_docs),
+        "match_amount": flt(l.match_amount), "match_diff": flt(l.match_diff),
         "note": l.note,
     }
 
@@ -536,55 +569,157 @@ def _row(doc, row):
     frappe.throw(_("Không có dòng số {0} trong bản số dư này").format(row))
 
 
-@frappe.whitelist()
-def set_line(name, row, sales_invoice=None, resolution=None, note=None, company=None):
-    """Nối tay một dòng sang hóa đơn, hoặc đánh dấu 'Bỏ qua'."""
-    guard_manager()
-    _require_tables()
-    _tables()
-    company = _company(company)
-    doc = _load(name, company)
+def _editable(doc):
     if doc.status == STATUS_FINAL:
         frappe.throw(_(
             "Bản số dư của {0} đã CHỐT — sửa liên kết bây giờ là đổi tập hóa đơn còn "
             "nợ dưới chân các màn hình đang dùng. Mở lại về '{1}' trước."
         ).format(doc.chain, STATUS_DRAFT))
 
+
+def _check_invoice(si, doc, company):
+    """Chứng từ này có được phép nối vào bản số dư của chuỗi đó không."""
+    got = frappe.db.get_value(
+        "Sales Invoice", si,
+        ["company", "customer", "docstatus", "is_return", "grand_total",
+         "posting_date", "return_against"], as_dict=True)
+    if not got:
+        frappe.throw(_("Không có chứng từ {0}").format(si))
+    if cstr(got.company) != cstr(company):
+        frappe.throw(_("Chứng từ {0} thuộc công ty khác").format(si))
+    if cint(got.docstatus) != 1:
+        frappe.throw(_("Chứng từ {0} chưa ghi sổ — nối vào đây là giữ lại một chứng từ "
+                       "chưa tồn tại về mặt sổ sách.").format(si))
+    allowed = set(chain_customers(doc.chain))
+    if allowed and got.customer not in allowed:
+        frappe.throw(_(
+            "Chứng từ {0} là của khách {1}, không thuộc chuỗi {2}. Nối chéo chuỗi là giữ "
+            "nhầm hóa đơn của chuỗi này và tất toán oan hóa đơn của chuỗi kia."
+        ).format(si, got.customer, doc.chain))
+    return got
+
+
+@frappe.whitelist()
+def add_match(name, row, sales_invoice, note=None, company=None):
+    """Nối THÊM một chứng từ ERPNext vào một dòng số dư.
+
+    Một hóa đơn MISA có thể ứng với NHIỀU chứng từ ERPNext. Ca thật:
+
+        MISA 5449 = 4.893.696đ
+          ├─ hóa đơn đi          +5.893.696
+          └─ hóa đơn trả về      −1.000.000   (siêu thị không nhận vì bẹp méo)
+
+    Chiều tiền lấy từ chính chứng từ (`is_return`), KHÔNG do người gõ — gõ tay
+    dấu là mở đường cho một lần gõ nhầm làm lệch cả dòng.
+    """
+    guard_manager()
+    _require_tables()
+    _tables()
+    company = _company(company)
+    doc = _load(name, company)
+    _editable(doc)
     l = _row(doc, row)
-    if sales_invoice is not None:
-        si = cstr(sales_invoice).strip()
-        if si:
-            got = frappe.db.get_value("Sales Invoice", si,
-                                      ["company", "customer", "docstatus"], as_dict=True)
-            if not got:
-                frappe.throw(_("Không có hóa đơn {0}").format(si))
-            if cstr(got.company) != cstr(company):
-                frappe.throw(_("Hóa đơn {0} thuộc công ty khác").format(si))
-            if cint(got.docstatus) != 1:
-                frappe.throw(_("Hóa đơn {0} chưa ghi sổ — nối vào đây là giữ lại một hóa "
-                               "đơn chưa tồn tại về mặt sổ sách.").format(si))
-            allowed = set(chain_customers(doc.chain))
-            if allowed and got.customer not in allowed:
-                frappe.throw(_(
-                    "Hóa đơn {0} là của khách {1}, không thuộc chuỗi {2}. Nối chéo chuỗi "
-                    "là giữ nhầm hóa đơn của chuỗi này và tất toán oan hóa đơn của chuỗi "
-                    "kia.").format(si, got.customer, doc.chain))
-            dup = [x for x in doc.lines
-                   if cstr(x.sales_invoice) == si and cint(x.idx) != cint(row)]
-            if dup:
-                frappe.throw(_("Hóa đơn {0} đã được nối cho dòng {1}. Một hóa đơn chỉ "
-                               "còn nợ MỘT lần.").format(si, dup[0].idx))
-            l.match_method = "nguoi_chot"
-            l.match_confidence = CONF_SURE
-        else:
-            l.match_method = "nguoi_go_lien_ket"
-            l.match_confidence = CONF_NONE
-        l.sales_invoice = si or None
+
+    si = cstr(sales_invoice).strip()
+    if not si:
+        frappe.throw(_("Chưa chọn chứng từ nào."))
+    if any(cstr(m.sales_invoice) == si and cint(m.line_no) == cint(row)
+           for m in doc.matches or []):
+        frappe.throw(_("Chứng từ {0} đã nối vào dòng này rồi.").format(si))
+
+    got = _check_invoice(si, doc, company)
+    is_ret = cint(got.is_return)
+    doc.append("matches", {
+        "line_no": cint(row),
+        "sales_invoice": si,
+        "role": ROLE_RETURN if is_ret else ROLE_SALE,
+        # DẤU lấy từ `is_return`, không lấy từ dấu của `grand_total`: ERPNext để
+        # credit note mang số âm, nhưng quy ước đó không phải chỗ nào cũng giữ.
+        "si_amount": -abs(flt(got.grand_total)) if is_ret else abs(flt(got.grand_total)),
+        "si_is_return": is_ret,
+        "si_posting_date": got.posting_date,
+        "return_against": got.return_against,
+        "note": note or None,
+    })
+    l.match_method = "nguoi_chot"
+    l.match_confidence = CONF_SURE
+    doc.save()
+    frappe.db.commit()
+
+    warn = ""
+    if is_ret and not cstr(got.return_against):
+        warn = _(
+            "Chứng từ trả về {0} KHÔNG khai `Return Against` — nó không tự trừ vào hóa "
+            "đơn nào, nên công nợ đang cao hơn thực tế {1} đ. Nối vào đây chỉ ghi lại "
+            "quan hệ, KHÔNG sửa được con số. Mở chứng từ, điền `Return Against` rồi số "
+            "tự đúng."
+        ).format(si, "{:,.0f}".format(abs(flt(got.grand_total))))
+    return {"row": cint(row), "line": _line_out(l),
+            "matches": _matches_out(doc, row),
+            "n_unmatched": cint(doc.n_unmatched),
+            "warning": warn,
+            "message": _("Đã nối {0} vào dòng {1}. Cộng các chứng từ: {2} đ, file ghi "
+                         "{3} đ, lệch {4} đ.").format(
+                si, row, "{:,.0f}".format(flt(l.match_amount)),
+                "{:,.0f}".format(flt(l.gross)), "{:,.0f}".format(flt(l.match_diff)))}
+
+
+@frappe.whitelist()
+def remove_match(name, row, sales_invoice, company=None):
+    """Gỡ một liên kết khỏi dòng."""
+    guard_manager()
+    _require_tables()
+    _tables()
+    company = _company(company)
+    doc = _load(name, company)
+    _editable(doc)
+    l = _row(doc, row)
+
+    si = cstr(sales_invoice).strip()
+    keep = [m for m in doc.matches or []
+            if not (cstr(m.sales_invoice) == si and cint(m.line_no) == cint(row))]
+    if len(keep) == len(doc.matches or []):
+        frappe.throw(_("Dòng {0} không nối chứng từ {1}.").format(row, si))
+    doc.matches = []
+    for m in keep:
+        doc.append("matches", {k: m.get(k) for k in
+                               ("line_no", "sales_invoice", "role", "si_amount",
+                                "si_is_return", "si_posting_date", "return_against", "note")})
+    if not doc.matches_of(row):
+        l.match_method = "nguoi_go_lien_ket"
+        l.match_confidence = CONF_NONE
+    doc.save()
+    frappe.db.commit()
+    return {"row": cint(row), "line": _line_out(l),
+            "matches": _matches_out(doc, row),
+            "n_unmatched": cint(doc.n_unmatched),
+            "message": _("Đã gỡ {0} khỏi dòng {1}.").format(si, row)}
+
+
+@frappe.whitelist()
+def set_line(name, row, resolution=None, note=None, company=None):
+    """Đánh dấu 'Bỏ qua' hoặc ghi chú cho một dòng.
+
+    Việc NỐI đã tách sang `add_match` / `remove_match`: một dòng có thể ứng với
+    nhiều chứng từ, nên nó không còn là một ô để gán nữa.
+    """
+    guard_manager()
+    _require_tables()
+    _tables()
+    company = _company(company)
+    doc = _load(name, company)
+    _editable(doc)
+    l = _row(doc, row)
+
     if resolution is not None:
         r = cstr(resolution).strip()
         if r and r != RESOLUTION_SKIP:
             frappe.throw(_("Chỉ nhận '{0}' hoặc để trống ở ô người chốt.")
                          .format(RESOLUTION_SKIP))
+        if r and doc.matches_of(row):
+            frappe.throw(_("Dòng {0} đang nối {1} chứng từ — gỡ hết rồi mới đánh dấu "
+                           "'{2}' được.").format(row, len(doc.matches_of(row)),
+                                                 RESOLUTION_SKIP))
         l.resolution = r or None
     if note is not None:
         l.note = note or None
@@ -592,9 +727,18 @@ def set_line(name, row, sales_invoice=None, resolution=None, note=None, company=
     doc.save()
     frappe.db.commit()
     return {"row": cint(row), "line": _line_out(l),
+            "matches": _matches_out(doc, row),
             "n_unmatched": cint(doc.n_unmatched),
             "message": _("Đã lưu dòng {0}. Còn {1} dòng treo.").format(
                 row, cint(doc.n_unmatched))}
+
+
+def _matches_out(doc, row):
+    return [{"sales_invoice": m.sales_invoice, "role": m.role,
+             "si_amount": flt(m.si_amount), "si_is_return": cint(m.si_is_return),
+             "si_posting_date": cstr(m.si_posting_date or ""),
+             "return_against": m.return_against, "note": m.note}
+            for m in doc.matches_of(row)]
 
 
 @frappe.whitelist()
@@ -661,11 +805,12 @@ def search_invoices(name, row, q=None, company=None, limit=20):
     rows = frappe.db.sql("""
         SELECT si.name, si.posting_date, si.customer, si.customer_name,
                ABS(si.grand_total) AS grand_total,
+               si.is_return, si.return_against,
                IFNULL(rt.returned, 0) AS returned,
                {no_col} AS inv_no, {ser_col} AS inv_series
         FROM `tabSales Invoice` si
         {join}
-        WHERE si.docstatus = 1 AND si.company = %(company)s AND si.is_return = 0
+        WHERE si.docstatus = 1 AND si.company = %(company)s
           AND {where}
         ORDER BY {order}
         LIMIT %(limit)s
@@ -675,16 +820,27 @@ def search_invoices(name, row, q=None, company=None, limit=20):
     # Xếp lại theo mức GẦN, và nói rõ vì sao — người đang phải quyết bằng mắt.
     want_no = norm_inv_no(l.inv_no or "")
     want_amt = abs(flt(l.gross or 0))
+    linked = {cstr(m.sales_invoice) for m in doc.matches_of(row)}
+    # Phần CÒN THIẾU của dòng — sau khi đã nối được vài chứng từ, ứng viên đáng
+    # gợi ý là cái bù đúng chỗ hụt, không phải cái bằng tổng ban đầu.
+    gap = round(flt(l.gross) - flt(l.match_amount), 2) if doc.matches_of(row) else want_amt
+
     for r in rows:
         why = []
         if want_no and norm_inv_no(r.inv_no) == want_no:
             why.append("trùng số hóa đơn")
         if want_amt and _amount_hits(r, want_amt):
             why.append("trùng số tiền")
+        if gap and abs(abs(flt(r.grand_total)) - abs(gap)) <= PAID_TOLERANCE:
+            why.append("bù đúng phần còn thiếu")
         if l.inv_date and cstr(r.posting_date) == cstr(l.inv_date):
             why.append("trùng ngày")
         r["why"] = why
         r["net_due"] = round(flt(r.grand_total) - flt(r.returned), 2)
+        # Chứng từ trả về vào đây với dấu ÂM — để người nhìn thấy ngay nó sẽ
+        # TRỪ vào phép cộng chứ không cộng thêm.
+        r["signed"] = -abs(flt(r.grand_total)) if cint(r.is_return) else abs(flt(r.grand_total))
+        r["linked"] = 1 if cstr(r.name) in linked else 0
         r["rank"] = -len(why)
     rows.sort(key=lambda r: r["rank"])
 
@@ -702,13 +858,14 @@ def search_invoices(name, row, q=None, company=None, limit=20):
     return {
         "rows": rows,
         "line": _line_out(l),
+        "matches": _matches_out(doc, row),
         "chain": doc.chain,
         "message": msg,
         "note": _(
-            "Một hóa đơn MISA sau khi điều chỉnh tương ứng HAI chứng từ ERPNext: hóa đơn "
-            "gốc và phiếu trả hàng. Ở đây chỉ chọn HÓA ĐƠN GỐC — phần trả lại đã tự trừ "
-            "vào nó qua `Return Against`, nên cột 'còn phải thu' đã là số sau khi trừ. "
-            "Nối thêm phiếu trả hàng nữa là trừ hai lần."),
+            "Một hóa đơn MISA có thể ứng với NHIỀU chứng từ ERPNext — ví dụ hóa đơn đi "
+            "cộng hóa đơn trả về khi siêu thị không nhận hàng bẹp méo. Bấm 'Chọn' lần "
+            "lượt từng cái; hóa đơn trả về vào với dấu TRỪ. Cộng lại phải ra đúng số "
+            "trong file thì mới chốt được."),
     }
 
 
@@ -738,10 +895,10 @@ def _settled_query(company, chain, cutover, parent, params):
           AND si.posting_date <= %(cut)s
           AND {in_cus} AND {mt}
           AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < (ABS(si.grand_total) - IFNULL(rt.returned, 0)) - %(tol)s
-          AND NOT EXISTS (SELECT 1 FROM `tabMT Opening Invoice` oi
-                          WHERE oi.parent = %(parent)s
-                            AND oi.parenttype = 'MT Opening Balance'
-                            AND oi.sales_invoice = si.name)
+          AND NOT EXISTS (SELECT 1 FROM `tabMT Opening Match` om
+                          WHERE om.parent = %(parent)s
+                            AND om.parenttype = 'MT Opening Balance'
+                            AND om.sales_invoice = si.name)
     """.format(join=join, in_cus=in_cus, mt=mt)
 
 
@@ -764,6 +921,7 @@ def finalize_preview(name, company=None, limit=50):
         """ + base + " ORDER BY si.posting_date DESC LIMIT %(limit)s", p, as_dict=True)
 
     left = doc.unresolved()
+    off = doc.amount_off()
     kept = [l for l in (doc.lines or []) if cstr(l.sales_invoice)]
     return {
         "name": doc.name, "chain": doc.chain, "status": doc.status,
@@ -774,6 +932,9 @@ def finalize_preview(name, company=None, limit=50):
         "amount_kept": round(sum(flt(l.remaining) for l in kept), 2),
         "n_unresolved": len(left),
         "unresolved": [_line_out(l) for l in left[:50]],
+        "n_amount_off": len(off),
+        "amount_off": [_line_out(l) for l in off[:50]],
+        "amount_off_total": round(sum(flt(l.match_diff) for l in off), 2),
         "n_pre_golive": cint(doc.n_pre_golive),
         "n_no_invoice": cint(doc.n_no_invoice),
         "ready": not left,

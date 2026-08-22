@@ -34,6 +34,8 @@
   "n_settled",
   "sec_lines",
   "lines",
+  "sec_match",
+  "matches",
   "sec_ded",
   "deductions",
   "sec_note",
@@ -228,6 +230,18 @@
    "fieldtype": "Table",
    "label": "Dòng còn nợ",
    "options": "MT Opening Invoice"
+  },
+  {
+   "description": "MỘT dòng trong file có thể ứng với NHIỀU chứng từ ERPNext: hóa đơn gốc + hóa đơn trả về.",
+   "fieldname": "sec_match",
+   "fieldtype": "Section Break",
+   "label": "Nối sang chứng từ ERPNext"
+  },
+  {
+   "fieldname": "matches",
+   "fieldtype": "Table",
+   "label": "Liên kết",
+   "options": "MT Opening Match"
   },
   {
    "fieldname": "sec_ded",

@@ -198,15 +198,133 @@ def main():
           f"THU — đúng ca 1 hóa đơn MISA ↔ 2 chứng từ ERPNext")
     bad += not ok
 
-    ok = "Nối thêm phiếu trả hàng nữa là trừ hai lần" in body
-    print(f"  {'✅' if ok else '❌'} nói thẳng chỉ chọn HÓA ĐƠN GỐC, không nối phiếu trả "
-          f"hàng — nối cả hai là trừ hai lần")
+    ok = "hóa đơn trả về vào với dấu TRỪ" in body
+    print(f"  {'✅' if ok else '❌'} nói thẳng nối được NHIỀU chứng từ, hóa đơn trả về vào "
+          f"với dấu TRỪ, cộng lại phải ra đúng số trong file")
     bad += not ok
 
     js = open(os.path.join(rc.REPO, "ketoan/public/ketoan/views/mt.js"),
               encoding="utf-8").read()
     ok = "r.net_due" in js and "r.why" in js
     print(f"  {'✅' if ok else '❌'} màn hình có hiện hai thứ đó, không chỉ nằm trong payload")
+    bad += not ok
+
+    # ── 2e. MỘT hóa đơn MISA ↔ NHIỀU chứng từ ERPNext ───────────────────
+    #
+    # Ca thật, hóa đơn MISA 5449 của Central Retail:
+    #     file ghi      4.893.696
+    #     ERPNext       +5.893.696  (hàng đi)
+    #                   −1.000.000  (hàng trả về — siêu thị không nhận vì bẹp méo)
+    #                   ─────────
+    #                    4.893.696  ✓
+    # Mô hình một-dòng-một-hóa-đơn không ghi được vế thứ hai, và mất luôn phép
+    # cộng chứng minh con số.
+    print("-" * 82)
+
+    class _Doc(ob.MTOpeningBalance, _D):
+        def append(self, key, val):
+            self.setdefault(key, []).append(_D(val))
+            return self[key][-1]
+
+    def mk_line(**kw):
+        base = dict(idx=1, kind=ob.KIND_IN_ERP, inv_no="00005449", gross=4_893_696.0,
+                    remaining=4_893_696.0, sales_invoice=None, resolution=None)
+        base.update(kw)
+        return _D(**base)
+
+    def mk_doc(matches):
+        d = _Doc(company=COMPANY, chain="Central Retail", status=ob.STATUS_DRAFT,
+                 cutover_date="2026-07-31", golive_date="2026-05-01", name="OB-CR",
+                 opening_debt_gross=4_893_696.0, lines=[mk_line()],
+                 deductions=[], matches=[_D(m) for m in matches])
+        return d
+
+    SALE = {"line_no": 1, "sales_invoice": "SI-DI", "role": "Hóa đơn gốc",
+            "si_amount": 5_893_696.0, "si_is_return": 0, "return_against": None}
+    RET = {"line_no": 1, "sales_invoice": "SI-TRA", "role": "Hóa đơn trả về",
+           "si_amount": -1_000_000.0, "si_is_return": 1, "return_against": "SI-DI"}
+
+    d = mk_doc([SALE, RET])
+    d._sync_matches()
+    d._recount()
+    l = d.lines[0]
+    ok = (l.n_matched_docs == 2 and l.match_amount == 4_893_696.0
+          and l.match_diff == 0.0 and l.sales_invoice == "SI-DI")
+    print(f"  {'✅' if ok else '❌'} nối 2 chứng từ: +5.893.696 − 1.000.000 = "
+          f"{l.match_amount:,.0f} — KHỚP số trong file, lệch {l.match_diff:,.0f}")
+    bad += not ok
+
+    ok = l.sales_invoice == "SI-DI"
+    print(f"  {'✅' if ok else '❌'} `sales_invoice` trên dòng là BẢN SAO của hóa đơn GỐC "
+          f"(`{l.sales_invoice}`), không phải hóa đơn trả về")
+    bad += not ok
+
+    d1 = mk_doc([SALE])
+    d1._sync_matches(); d1._recount()
+    # `match_diff` = file − đã nối. Nối thiếu hóa đơn TRẢ VỀ thì phần đã nối
+    # LỚN hơn file, nên lệch mang dấu ÂM. Đúng chiều, không phải lỗi dấu.
+    ok = d1.lines[0].match_diff == -1_000_000.0 and len(d1.amount_off()) == 1
+    print(f"  {'✅' if ok else '❌'} nối THIẾU hóa đơn trả về -> lệch "
+          f"{d1.lines[0].match_diff:,.0f} và bị đếm vào danh sách phải xem")
+    bad += not ok
+
+    d1.status = ob.STATUS_FINAL
+    try:
+        d1._check_ready_to_finalize()
+        print("  ✅ nhưng VẪN chốt được — liên kết chỉ giữ hóa đơn ở rổ nợ, số tiền lấy "
+              "từ ERPNext nên lệch này không sai đồng nào")
+    except Exception as e:                                          # noqa: BLE001
+        print(f"  ❌ chặn chốt vì lệch tổng — chặn nhầm chỗ: {str(e)[:60]}")
+        bad += 1
+
+    d2 = mk_doc([SALE, dict(RET, line_no=2)])
+    d2.lines.append(mk_line(idx=2, inv_no="00005450"))
+    try:
+        d2._check_matches()
+        print("  ✅ hai dòng nối hai chứng từ KHÁC nhau -> cho phép")
+    except Exception as e:                                          # noqa: BLE001
+        print(f"  ❌ chặn nhầm: {str(e)[:60]}")
+        bad += 1
+
+    d3 = mk_doc([SALE, dict(SALE, line_no=2)])
+    try:
+        d3._check_matches()
+        print("  ❌ cùng MỘT chứng từ nối cho hai dòng -> KHÔNG chặn")
+        bad += 1
+    except Exception as e:                                          # noqa: BLE001
+        ok = "SI-DI" in str(e) and "MỘT dòng" in str(e)
+        print(f"  {'✅' if ok else '❌'} cùng một chứng từ nối cho HAI dòng -> chặn")
+        bad += not ok
+
+    d4 = mk_doc([SALE, RET])
+    d4._sync_matches(); d4._recount()
+    ok = not d4.unresolved()
+    print(f"  {'✅' if ok else '❌'} dòng đã có liên kết thì không còn nằm trong 'còn treo'")
+    bad += not ok
+
+    # Luật tất toán phải đọc BẢNG LIÊN KẾT, không đọc bản sao trên dòng.
+    mtsrc = open(os.path.join(rc.REPO, "ketoan/api/mt.py"), encoding="utf-8").read()
+    ok = "tabMT Opening Match" in mtsrc and "tabMT Opening Invoice" not in mtsrc
+    print(f"  {'✅' if ok else '❌'} luật tất toán đọc `MT Opening Match` — đọc bản sao trên "
+          f"dòng là bỏ sót mọi chứng từ thứ hai trở đi")
+    bad += not ok
+
+    st_src = open(os.path.join(rc.REPO, "ketoan/api/mt_opening_store.py"),
+                  encoding="utf-8").read()
+    body = re.split(r"\n(?=\S)", st_src.split("def search_invoices")[1])[0]
+    ok = "AND si.is_return = 0" not in body
+    print(f"  {'✅' if ok else '❌'} danh sách ứng viên KHÔNG loại hóa đơn trả về — không "
+          f"thì chính vế thứ hai không bao giờ chọn được")
+    bad += not ok
+
+    body_add = re.split(r"\n(?=\S)", st_src.split("def add_match")[1])[0]
+    ok = "is_ret else abs(flt(got.grand_total))" in body_add
+    print(f"  {'✅' if ok else '❌'} DẤU của chứng từ suy từ `is_return`, không do người gõ")
+    bad += not ok
+
+    ok = "return_against" in body_add and "cao hơn thực tế" in body_add
+    print(f"  {'✅' if ok else '❌'} nối hóa đơn trả về KHÔNG khai `Return Against` -> cảnh "
+          f"báo rõ là công nợ đang cao hơn thực tế")
     bad += not ok
 
     # ── 3. Một hóa đơn chỉ giữ lại MỘT lần ──────────────────────────────
@@ -247,7 +365,7 @@ def main():
     expr = mt.opening_settled_expr(p, COMPANY)
     ok = ("obd0" in p and p["obd0"] == "2026-07-31" and p["obp0"] == "OB-1"
           and "KH-1" in p.values() and "KH-2" in p.values()
-          and "MT Opening Invoice" in expr and "NOT EXISTS" in expr)
+          and "MT Opening Match" in expr and "NOT EXISTS" in expr)
     print(f"  {'✅' if ok else '❌'} có bản chốt -> điều kiện dựng bằng THAM SỐ ràng buộc "
           f"({len([k for k in p if k.startswith('ob0c')])} khách của chuỗi, mốc {p.get('obd0')})")
     bad += not ok
@@ -276,8 +394,8 @@ def main():
     w_unpaid = mt._bucket_where("chua_thanh_toan", p, COMPANY)
     w_all = mt._bucket_where("tat_ca", {}, COMPANY)
     w_paid = mt._bucket_where("da_thanh_toan", {}, COMPANY)
-    ok = "MT Opening Invoice" in w_unpaid and "MT Opening Invoice" not in w_all \
-        and "MT Opening Invoice" not in w_paid
+    ok = "MT Opening Match" in w_unpaid and "MT Opening Match" not in w_all \
+        and "MT Opening Match" not in w_paid
     print(f"  {'✅' if ok else '❌'} rổ 'chưa thanh toán' áp luật; rổ 'tất cả' và 'đã "
           f"thanh toán' KHÔNG — vẫn tra lại được hóa đơn cũ")
     bad += not ok
@@ -290,7 +408,7 @@ def main():
 
     mtsrc = open(os.path.join(rc.REPO, "ketoan/api/mt.py"), encoding="utf-8").read()
     n_def = len(re.findall(r"^def opening_settled_expr", mtsrc, re.M))
-    n_sql = len(re.findall(r"tabMT Opening Invoice", mtsrc))
+    n_sql = len(re.findall(r"tabMT Opening Match", mtsrc))
     ok = n_def == 1 and n_sql == 1
     print(f"  {'✅' if ok else '❌'} luật diễn đạt ĐÚNG MỘT LẦN trong mt.py "
           f"({n_def} định nghĩa, {n_sql} câu SQL nhắc bảng)")
@@ -321,7 +439,7 @@ def main():
         pass                     # chỉ cần các câu SQL đã dựng xong
     frappe.db.sql, mt.channel_group_clause = keep_sql, keep_group
 
-    hit = [" ".join(x.split()) for x in caught if "MT Opening Invoice" in x]
+    hit = [" ".join(x.split()) for x in caught if "MT Opening Match" in x]
     ok = (len(hit) == 1 and hit[0].count("(") == hit[0].count(")")
           and "%(obd0)s" in hit[0] and "%(ob0c0)s" in hit[0])
     print(f"  {'✅' if ok else '❌'} câu SQL của Tổng quan dựng được: đúng {len(hit)}/"
@@ -401,18 +519,8 @@ def main():
           f"và dòng đó KHÔNG giữ hóa đơn nào lại")
     bad += not ok
 
-    doc = mk(status=ob.STATUS_FINAL, lines=[
-        L(idx=1, kind=ob.KIND_IN_ERP, remaining=100.0, sales_invoice="SI-A"),
-        L(idx=2, kind=ob.KIND_IN_ERP, remaining=200.0, sales_invoice="SI-A"),
-    ])
-    try:
-        doc.validate()
-        print("  ❌ hai dòng nối cùng một hóa đơn -> VẪN cho chốt")
-        bad += 1
-    except Exception as e:                                          # noqa: BLE001
-        ok = "SI-A" in str(e) and "MỘT lần" in str(e)
-        print(f"  {'✅' if ok else '❌'} hai dòng nối cùng hóa đơn -> chặn chốt")
-        bad += not ok
+    # (phép "hai dòng nối cùng một chứng từ" nằm ở mục 2e — nó đã chuyển sang
+    # `_check_matches` trên bảng liên kết, không còn dựa vào `lines`.)
 
     # ── 10. Xóa bản đã chốt -> chặn ─────────────────────────────────────
     print("-" * 82)

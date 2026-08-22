@@ -568,7 +568,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-K4** cất số dư đầu kỳ + luật tất toán trước ngày chuyển giao | `fbb77d5` | `opening_store_check` |
 | **MT2-M** parser thanh toán Mega Market — chuỗi cuối cùng | `3742487` | `mega_check` · `regression_check` · `crosscheck_mt2` |
 | **MT2-N** hàng trả lại trừ vào chính hóa đơn gốc (1 lần bán = 2 chứng từ) | `672665e` `57f83c2` | `debt_due_check` · `opening_store_check` |
-| **MT2-N2** ô tìm ứng viên tìm SAI CHỖ — đường nối tay chết từ đầu | *(commit này)* | `opening_store_check` |
+| **MT2-N2** ô tìm ứng viên tìm SAI CHỖ — đường nối tay chết từ đầu | `10508c9` | `opening_store_check` |
+| **MT2-P** một hóa đơn MISA nối được NHIỀU chứng từ ERPNext | *(commit này)* | `opening_store_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -683,6 +684,62 @@ sao** từng cái được xếp lên trên:
 Mỗi ứng viên hiện `Tổng`, `− trả lại`, và `Còn phải thu`. Ca thật trên màn hình:
 hóa đơn gốc 5.893.696 − trả lại 1.000.000 = **4.893.696** — đúng số dòng 1432
 của file Central Retail, và cả ba lý do cùng bật.
+
+### Một hóa đơn MISA ↔ NHIỀU chứng từ ERPNext
+
+Ca thật, hóa đơn MISA **5449** của Central Retail:
+
+```
+file công nợ ghi                4.893.696
+ERPNext:  hóa đơn đi           +5.893.696
+          hóa đơn trả về       −1.000.000   siêu thị không nhận vì hàng bẹp méo
+                               ──────────
+                                4.893.696   ✓
+```
+
+Hóa đơn trả về được lập trên ERPNext **để không ảnh hưởng kho**. Nó là chứng từ
+thứ hai của cùng một lần bán.
+
+#### Vì sao phải là bảng liên kết, không phải một field
+
+Một field `sales_invoice` chỉ giữ được một đầu. Giữ đầu nào cũng mất vế kia — và
+mất luôn **phép cộng chứng minh con số**, thứ mà kế toán cần để tin. "Đã nối" chỉ
+là một cái tick; nó không nói được đã nối **đủ** hay chưa.
+
+Nên: child table **`MT Opening Match`** — `line_no` · `sales_invoice` · `role` ·
+`si_amount` (có dấu) · `si_is_return` · `return_against`.
+
+`MT Opening Invoice.sales_invoice` **vẫn còn nhưng thành BẢN SAO**, luôn tính lại
+từ bảng liên kết trong `validate` nên không bao giờ lệch. Luật tất toán đọc
+**bảng liên kết**, không đọc bản sao — đọc bản sao là bỏ sót mọi chứng từ thứ hai
+trở đi.
+
+#### Dấu suy từ chứng từ, không do người gõ
+
+`si_amount` = `−|grand_total|` khi `is_return`, ngược lại `+|grand_total|`. Cho
+người gõ dấu là mở đường cho một lần gõ nhầm làm lệch cả dòng. ERPNext có để
+credit note mang số âm, nhưng quy ước đó không phải chỗ nào cũng giữ — nên đọc
+`is_return`, không đọc dấu.
+
+#### Danh sách ứng viên phải hiện CẢ hóa đơn trả về
+
+Bản trước lọc `si.is_return = 0`. Giữ nguyên thì chính vế thứ hai **không bao giờ
+chọn được**. Giờ hiện cả hai, hóa đơn trả về hiện với dấu **trừ** để nhìn là biết
+nó sẽ trừ vào phép cộng. Sau khi đã nối được vài chứng từ, thêm một lý do gợi ý:
+**"bù đúng phần còn thiếu"**.
+
+#### Lệch tổng: CẢNH BÁO, không chặn
+
+Liên kết chỉ có **một** tác dụng — giữ hóa đơn ở lại rổ nợ. **Số tiền nợ lấy từ
+chính ERPNext** (`_NET_DUE`), không lấy từ file. Nên một dòng nối thiếu hóa đơn
+trả về **không sai đồng nào**; nó chỉ làm hồ sơ đối chiếu kém đầy đủ.
+
+Chặn một thứ không đổi số nào là chặn nhầm chỗ, và sẽ đẩy kế toán đi tìm cách
+lách. Nên `finalize_preview` **đếm và bày ra** (`amount_off`) để người quyết.
+
+Ngược lại, hai chuyện vẫn **chặn cứng** vì chúng đổi số thật:
+- dòng nhóm `co_hoa_don` **chưa nối gì** và chưa ai bảo bỏ qua;
+- **một chứng từ nối cho hai dòng** — giữ nó lại hai lần.
 
 ### Số dư đầu kỳ — một luật ĐỌC, không phải bút toán
 

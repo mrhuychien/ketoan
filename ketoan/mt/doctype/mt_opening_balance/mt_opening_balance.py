@@ -32,7 +32,7 @@ Trạng thái `Nháp` không bật luật gì cả — nhập vào, soi, nối t
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import cstr, flt
+from frappe.utils import cint, cstr, flt
 
 STATUS_DRAFT = "Nháp"
 STATUS_FINAL = "Đã chốt"
@@ -45,11 +45,17 @@ KIND_IN_ERP = "co_hoa_don"
 
 RESOLUTION_SKIP = "Bỏ qua"
 
+# Lệch cho phép khi cộng các chứng từ đã nối so với số trong file. Tiền VND
+# nguyên đồng nên đúng ra phải bằng 0; 1đ chỉ để chống rác dấu phẩy động.
+MATCH_EPS = 1.0
+
 
 class MTOpeningBalance(Document):
     def validate(self):
         self._check_one_per_chain()
         self._check_dates()
+        self._check_matches()
+        self._sync_matches()
         self._recount()
         if self.status == STATUS_FINAL:
             self._check_ready_to_finalize()
@@ -78,6 +84,44 @@ class MTOpeningBalance(Document):
                 "gõ nhầm một trong hai ngày."
             ).format(self.cutover_date, self.golive_date))
 
+    # ── nối MỘT dòng với NHIỀU chứng từ ─────────────────────────────────
+    def matches_of(self, line_no):
+        return [m for m in (self.matches or []) if cint(m.line_no) == cint(line_no)]
+
+    def _sync_matches(self):
+        """Dồn liên kết về MỘT nguồn: bảng `matches`.
+
+        `MT Opening Invoice.sales_invoice` chỉ còn là BẢN SAO để hiện ra và để
+        tra nhanh — luôn tính lại từ `matches`, nên không bao giờ lệch. Chứng từ
+        gốc được ưu tiên; dòng chỉ nối chứng từ trả về thì lấy cái đó.
+
+        `match_amount` là TỔNG CÓ DẤU của các chứng từ đã nối. Đây mới là thứ
+        chứng minh con số: hóa đơn MISA 4.893.696 = +5.893.696 − 1.000.000.
+        Không có phép cộng này thì "đã nối" chỉ là một cái tick, không nói được
+        đã nối ĐỦ hay chưa.
+        """
+        for l in self.lines or []:
+            ms = self.matches_of(l.idx)
+            sale = [m for m in ms if not cint(m.si_is_return)]
+            l.sales_invoice = (sale or ms)[0].sales_invoice if ms else None
+            l.match_amount = round(sum(flt(m.si_amount) for m in ms), 2) if ms else 0.0
+            l.match_diff = round(flt(l.gross) - flt(l.match_amount), 2) if ms else 0.0
+            l.n_matched_docs = len(ms)
+
+    def _check_matches(self):
+        """Một chứng từ ERPNext chỉ được thuộc về ĐÚNG MỘT dòng."""
+        seen = {}
+        for m in self.matches or []:
+            si = cstr(m.sales_invoice)
+            if not si:
+                continue
+            if si in seen and seen[si] != cint(m.line_no):
+                frappe.throw(_(
+                    "Chứng từ {0} đang nối cho cả dòng {1} lẫn dòng {2}. Một chứng từ chỉ "
+                    "thuộc về MỘT dòng công nợ — nối hai nơi là giữ nó lại hai lần."
+                ).format(si, seen[si], m.line_no))
+            seen[si] = cint(m.line_no)
+
     def _recount(self):
         """Đếm lại từ chính các dòng — KHÔNG tin con số client gửi lên."""
         lines = self.lines or []
@@ -103,11 +147,20 @@ class MTOpeningBalance(Document):
             sum(flt(l.remaining) for l in lines if l.kind == KIND_NO_INVOICE), 2)
         self.debt_carried = round(flt(self.opening_debt) - flt(self.no_invoice_amount), 2)
 
+    def amount_off(self):
+        """Dòng đã nối mà TỔNG các chứng từ khác số trong file.
+
+        Thường là nối thiếu hóa đơn trả về. Không sai tiền, nhưng là dấu hiệu
+        rõ nhất của một dòng chưa nối xong.
+        """
+        return [l for l in (self.lines or [])
+                if self.matches_of(l.idx) and abs(flt(l.match_diff)) > MATCH_EPS]
+
     def unresolved(self):
         """Dòng 'phải khớp ERPNext' chưa nối hóa đơn và cũng chưa ai bảo bỏ qua."""
         return [l for l in (self.lines or [])
                 if l.kind == KIND_IN_ERP
-                and not cstr(l.sales_invoice)
+                and not self.matches_of(l.idx)
                 and cstr(l.resolution) != RESOLUTION_SKIP]
 
     # ── chặn 2: không chốt khi còn dòng treo ─────────────────────────────
@@ -124,12 +177,17 @@ class MTOpeningBalance(Document):
                      ", ".join(cstr(l.inv_no or "(trống)") for l in left[:5]),
                      RESOLUTION_SKIP))
 
-        dup = _duplicate_invoices(self.lines or [])
-        if dup:
-            frappe.throw(_(
-                "Cùng một hóa đơn ERPNext bị nối cho nhiều dòng: {0}. Một hóa đơn chỉ "
-                "còn nợ MỘT lần — nối trùng là giữ nhầm hóa đơn và bỏ sót hóa đơn khác."
-            ).format(", ".join(dup[:5])))
+        # Cộng các chứng từ đã nối phải ra đúng số dòng trong file. KHÔNG chặn
+        # chốt khi lệch, và đây là quyết định có cân nhắc:
+        #
+        #   Liên kết chỉ có MỘT tác dụng — giữ hóa đơn ở lại rổ nợ. SỐ TIỀN nợ
+        #   thì lấy từ chính ERPNext (`_NET_DUE`), không lấy từ file. Nên một
+        #   dòng nối thiếu hóa đơn trả về KHÔNG làm sai đồng nào; nó chỉ làm hồ
+        #   sơ đối chiếu kém đầy đủ.
+        #
+        # Chặn một thứ không đổi số nào là chặn nhầm chỗ, và sẽ đẩy kế toán đi
+        # tìm cách lách. Thay vào đó `finalize_preview` đếm và bày ra để người
+        # quyết — xem `amount_off()`.
 
     def on_trash(self):
         if self.status == STATUS_FINAL:
@@ -137,18 +195,6 @@ class MTOpeningBalance(Document):
                 "Bản số dư đầu kỳ của {0} đã CHỐT — xóa là mọi hóa đơn trước ngày chốt "
                 "quay lại rổ công nợ cùng lúc. Mở lại về '{1}' trước nếu thật sự cần."
             ).format(self.chain, STATUS_DRAFT))
-
-
-def _duplicate_invoices(lines):
-    seen, dup = set(), []
-    for l in lines:
-        si = cstr(l.sales_invoice)
-        if not si:
-            continue
-        if si in seen and si not in dup:
-            dup.append(si)
-        seen.add(si)
-    return dup
 
 
 def finalized_for(company):

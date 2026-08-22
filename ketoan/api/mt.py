@@ -443,6 +443,10 @@ def opening_settled_expr(params, company, alias="si"):
 
     BA ĐIỂM CỐ Ý:
 
+    · Đọc bảng `MT Opening Match` chứ KHÔNG đọc `MT Opening Invoice.sales_invoice`.
+      Một dòng công nợ có thể ứng với NHIỀU chứng từ ERPNext (hóa đơn gốc + hóa
+      đơn trả về), và `sales_invoice` trên dòng chỉ là BẢN SAO của liên kết
+      chính. Đọc bản sao là bỏ sót mọi chứng từ thứ hai trở đi.
     · Khách của chuỗi lấy từ `chain_customers()` — ĐÚNG một quy tắc khách->chuỗi
       của cả app (xem MT2-J). Không viết lại phép so chuỗi bằng SQL ở đây, vì
       thành quy tắc thứ hai là lại lệch.
@@ -465,10 +469,10 @@ def opening_settled_expr(params, company, alias="si"):
         params["obp%d" % i] = ob.name
         parts.append(
             "({alias}.posting_date <= %(obd{i})s AND {in_cus}"
-            " AND NOT EXISTS (SELECT 1 FROM `tabMT Opening Invoice` oi"
-            "                 WHERE oi.parent = %(obp{i})s"
-            "                   AND oi.parenttype = 'MT Opening Balance'"
-            "                   AND oi.sales_invoice = {alias}.name))"
+            " AND NOT EXISTS (SELECT 1 FROM `tabMT Opening Match` om"
+            "                 WHERE om.parent = %(obp{i})s"
+            "                   AND om.parenttype = 'MT Opening Balance'"
+            "                   AND om.sales_invoice = {alias}.name))"
             .format(alias=alias, i=i, in_cus=in_cus))
     return "(%s)" % " OR ".join(parts) if parts else "0"
 

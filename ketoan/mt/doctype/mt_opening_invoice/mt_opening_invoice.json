@@ -20,6 +20,9 @@
   "sales_invoice",
   "match_method",
   "match_confidence",
+  "n_matched_docs",
+  "match_amount",
+  "match_diff",
   "col_b",
   "resolution",
   "note"
@@ -109,11 +112,12 @@
    "label": "Nối sang ERPNext"
   },
   {
-   "description": "Dòng CÓ nối hóa đơn = hóa đơn đó vẫn còn nợ sau ngày chốt. Dòng không nối được thì không giữ được hóa đơn nào lại.",
+   "description": "BẢN SAO của liên kết chính, tính lại từ bảng 'Liên kết'. Dòng nối nhiều chứng từ thì đây là hóa đơn GỐC. Sửa ở bảng 'Liên kết', không sửa ở đây.",
    "fieldname": "sales_invoice",
    "fieldtype": "Link",
    "label": "Hóa đơn ERPNext",
-   "options": "Sales Invoice"
+   "options": "Sales Invoice",
+   "read_only": 1
   },
   {
    "fieldname": "match_method",
@@ -126,6 +130,27 @@
    "fieldtype": "Select",
    "label": "Độ tin cậy",
    "options": "\nChắc chắn\nCần review\nKhông khớp"
+  },
+  {
+   "description": "Một dòng có thể ứng với NHIỀU chứng từ ERPNext (hóa đơn gốc + hóa đơn trả về).",
+   "fieldname": "n_matched_docs",
+   "fieldtype": "Int",
+   "label": "Số chứng từ đã nối",
+   "read_only": 1
+  },
+  {
+   "description": "Tổng CÓ DẤU của các chứng từ đã nối. Phải bằng cột TỔNG hóa đơn của dòng.",
+   "fieldname": "match_amount",
+   "fieldtype": "Currency",
+   "label": "Cộng các chứng từ",
+   "read_only": 1
+  },
+  {
+   "description": "= TỔNG hóa đơn − cộng các chứng từ. Khác 0 là nối thiếu, thường là thiếu hóa đơn trả về.",
+   "fieldname": "match_diff",
+   "fieldtype": "Currency",
+   "label": "Lệch so với file",
+   "read_only": 1
   },
   {
    "fieldname": "col_b",
