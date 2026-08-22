@@ -4772,21 +4772,35 @@ async function openOpeningPick(container, state, doc, row) {
         Máy dừng ở <code>${row.match_method}</code>.
       </div>
       ${res.message ? html`<div class="kt-sub" style="color:var(--kt-warning);margin-bottom:10px">${res.message}</div>` : ""}
+      ${res.note ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-primary)">
+          <div class="kt-card-body kt-sub">${res.note}</div></div>` : ""}
       <div style="display:flex;gap:8px;margin-bottom:10px">
-        <input class="kt-input kt-input--sm" id="ob-q" placeholder="Tìm theo mã hóa đơn hoặc tên khách" value="${q || ""}">
+        <input class="kt-input kt-input--sm" id="ob-q" placeholder="Tìm theo SỐ hóa đơn, mã chứng từ, hoặc tên khách" value="${q || ""}">
         <button class="kt-btn kt-btn--outline kt-btn--sm" id="ob-find"><i class="fas fa-magnifying-glass"></i></button>
       </div>
-      <div class="kt-sub" style="margin-bottom:8px">Chỉ hiện hóa đơn của chuỗi ${res.chain}.</div>
+      <div class="kt-sub" style="margin-bottom:8px">
+        Chỉ hiện hóa đơn của chuỗi ${res.chain}, xếp cái GẦN NHẤT lên trên.
+      </div>
       ${!(res.rows || []).length
-        ? html`<div class="kt-empty"><p>Không có hóa đơn nào khớp.</p></div>`
+        ? html`<div class="kt-empty"><p>Chuỗi ${res.chain} không có hóa đơn nào khớp bộ lọc.</p></div>`
         : html`<div class="kt-table-wrap" style="max-height:40vh;overflow:auto">
             <table class="kt-table">
-              <thead><tr><th>Hóa đơn</th><th>Ngày</th><th>Khách</th><th class="num">Tổng</th><th></th></tr></thead>
+              <thead><tr>
+                <th>Số HĐ</th><th>Ngày</th><th>Khách</th>
+                <th class="num">Tổng</th><th class="num">Còn phải thu</th><th>Vì sao gợi ý</th><th></th>
+              </tr></thead>
               <tbody>${res.rows.map((r) => html`<tr>
-                <td><code>${r.name}</code></td>
+                <td>${r.inv_no
+                    ? html`<code>${r.inv_no}</code>` : html`<span class="kt-sub">—</span>`}
+                  <div class="kt-sub">${r.name}</div></td>
                 <td>${formatDate(r.posting_date)}</td>
                 <td>${r.customer_name || r.customer}</td>
-                <td class="num">${formatVND(r.grand_total)}</td>
+                <td class="num">${formatVND(r.grand_total)}
+                  ${r.returned
+                    ? html`<div class="kt-sub">− trả lại ${formatVNDShort(r.returned)}</div>`
+                    : ""}</td>
+                <td class="num"><b>${formatVND(r.net_due)}</b></td>
+                <td>${(r.why || []).map((w) => html`<span class="kt-badge kt-badge--green">${w}</span> `)}</td>
                 <td>${r.taken
                   ? html`<span class="kt-sub">đã nối dòng khác</span>`
                   : html`<button class="kt-btn kt-btn--success kt-btn--sm ob-take" data-si="${r.name}">Chọn</button>`}</td>

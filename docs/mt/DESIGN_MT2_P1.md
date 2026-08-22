@@ -567,7 +567,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-L2** đọc phiếu nhập kho Winmart (PDF) + đối soát PO/mã hàng | `8db013e` | `win_grn_check` |
 | **MT2-K4** cất số dư đầu kỳ + luật tất toán trước ngày chuyển giao | `fbb77d5` | `opening_store_check` |
 | **MT2-M** parser thanh toán Mega Market — chuỗi cuối cùng | `3742487` | `mega_check` · `regression_check` · `crosscheck_mt2` |
-| **MT2-N** hàng trả lại trừ vào chính hóa đơn gốc (1 lần bán = 2 chứng từ) | *(commit này)* | `debt_due_check` · `opening_store_check` |
+| **MT2-N** hàng trả lại trừ vào chính hóa đơn gốc (1 lần bán = 2 chứng từ) | `672665e` `57f83c2` | `debt_due_check` · `opening_store_check` |
+| **MT2-N2** ô tìm ứng viên tìm SAI CHỖ — đường nối tay chết từ đầu | *(commit này)* | `opening_store_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -642,6 +643,46 @@ thành hai hằng số `OBJ_OTHER_CHAIN` / `OBJ_DEAD_INVOICE`.
 File công nợ chuỗi có thể ghi số **sau** điều chỉnh, ERPNext giữ số **gốc**. So
 một mốc là trượt đúng nhóm hóa đơn dễ sai tiền nhất. Nên thử **cả hai**:
 `grand_total` và `grand_total − returned`. `_si_index` mang thêm cột `returned`.
+
+### Nối tay khi một hóa đơn MISA ứng với HAI chứng từ ERPNext
+
+Câu hỏi từ hiện trường: *"Hóa đơn MISA trong file Excel tương ứng 2 hóa đơn
+ERPNext (1 hóa đơn đi, 1 hóa đơn trả lại do bẹp méo). Link tay chỉ cho 1–1."*
+
+**1–1 là ĐÚNG, không phải hạn chế.** Chỉ nối **hóa đơn gốc**. Phần trả lại đã tự
+trừ vào nó qua `return_against` (MT2-N), nên cột *còn phải thu* đã là số sau khi
+trừ — đúng bằng số trong file Excel. Nối thêm phiếu trả hàng nữa là **trừ hai
+lần**.
+
+#### Nhưng có một lỗi thật, và nó nặng hơn
+
+Ô tìm ứng viên lấy số hóa đơn của dòng (`00005449`) làm từ khóa rồi so với
+
+```sql
+si.name LIKE '%00005449%'
+```
+
+`si.name` là **mã chứng từ ERPNext** (`ACC-SINV-2026-00123`) — nó **không bao giờ
+chứa số hóa đơn**. Nên màn hình luôn ra *"Không có hóa đơn nào khớp"*, với **mọi**
+dòng treo. Cả đường nối tay chết từ đầu, mà nhìn vào thì tưởng "đúng là không có
+hóa đơn nào" — hỏng theo kiểu **trông giống câu trả lời**.
+
+Số hóa đơn nằm ở `custom_misa_inv_no`. Giờ tìm ở đó, cộng cả ký hiệu, mã chứng
+từ và tên khách.
+
+#### Không bao giờ trả màn hình rỗng khi chuỗi có hóa đơn
+
+Người vào đây là vì máy đã chịu thua. Lọc cứng rồi trả rỗng là bắt họ đoán tiếp
+mà không có gì trong tay. Nên liệt kê ứng viên xếp theo mức gần, **và nói rõ vì
+sao** từng cái được xếp lên trên:
+
+1. trùng **số** hóa đơn
+2. trùng **số tiền** — thử cả trước lẫn sau khi trừ hàng trả lại
+3. gần **ngày** nhất
+
+Mỗi ứng viên hiện `Tổng`, `− trả lại`, và `Còn phải thu`. Ca thật trên màn hình:
+hóa đơn gốc 5.893.696 − trả lại 1.000.000 = **4.893.696** — đúng số dòng 1432
+của file Central Retail, và cả ba lý do cùng bật.
 
 ### Số dư đầu kỳ — một luật ĐỌC, không phải bút toán
 

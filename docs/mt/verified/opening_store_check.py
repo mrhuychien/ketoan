@@ -165,6 +165,50 @@ def main():
     print(f"  {'✅' if ok else '❌'} file ghi 1.000 (số gốc) -> cũng nối đúng `{si}`")
     bad += not ok
 
+    # ── 2d. Ô TÌM ỨNG VIÊN phải tìm đúng chỗ ────────────────────────────
+    #
+    # Lỗi đã gặp trên site thật: ô tìm lấy số hóa đơn của dòng (`00005449`) rồi
+    # so với `si.name LIKE`. `si.name` là mã chứng từ ERPNext
+    # (`ACC-SINV-2026-00123`), KHÔNG BAO GIỜ chứa số hóa đơn -> màn hình luôn ra
+    # "Không có hóa đơn nào khớp" với MỌI dòng treo. Cả đường nối tay chết, mà
+    # nhìn thì tưởng đúng là không có hóa đơn nào.
+    print("-" * 82)
+    src_st = open(os.path.join(rc.REPO, "ketoan/api/mt_opening_store.py"),
+                  encoding="utf-8").read()
+    body = re.split(r"\n(?=\S)", src_st.split("def search_invoices")[1])[0]
+
+    ok = "SI_NO_FIELD" in body
+    print(f"  {'✅' if ok else '❌'} ô tìm ứng viên tìm theo SỐ HÓA ĐƠN "
+          f"(`{mt.SI_NO_FIELD}`), không chỉ theo mã chứng từ ERPNext")
+    bad += not ok
+
+    ok = "si.name LIKE %(kw)s" in body and 'kw = cstr(q or "").strip()' in body \
+        and 'or cstr(l.inv_no' not in body
+    print(f"  {'✅' if ok else '❌'} KHÔNG tự nhồi số hóa đơn vào ô tìm rồi lọc cứng — để "
+          f"trống thì liệt kê ứng viên, không trả màn hình rỗng")
+    bad += not ok
+
+    ok = "_amount_hits" in body and '"trùng số hóa đơn"' in body
+    print(f"  {'✅' if ok else '❌'} nói rõ VÌ SAO từng ứng viên được gợi ý (trùng số / "
+          f"trùng tiền / trùng ngày)")
+    bad += not ok
+
+    ok = "rt.returned" in body and "net_due" in body
+    print(f"  {'✅' if ok else '❌'} mỗi ứng viên hiện cả phần ĐÃ TRẢ LẠI và số CÒN PHẢI "
+          f"THU — đúng ca 1 hóa đơn MISA ↔ 2 chứng từ ERPNext")
+    bad += not ok
+
+    ok = "Nối thêm phiếu trả hàng nữa là trừ hai lần" in body
+    print(f"  {'✅' if ok else '❌'} nói thẳng chỉ chọn HÓA ĐƠN GỐC, không nối phiếu trả "
+          f"hàng — nối cả hai là trừ hai lần")
+    bad += not ok
+
+    js = open(os.path.join(rc.REPO, "ketoan/public/ketoan/views/mt.js"),
+              encoding="utf-8").read()
+    ok = "r.net_due" in js and "r.why" in js
+    print(f"  {'✅' if ok else '❌'} màn hình có hiện hai thứ đó, không chỉ nằm trong payload")
+    bad += not ok
+
     # ── 3. Một hóa đơn chỉ giữ lại MỘT lần ──────────────────────────────
     print("-" * 82)
     mt._customer_chain_map = lambda: (cus_chain, {})

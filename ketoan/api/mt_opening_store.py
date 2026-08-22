@@ -57,6 +57,10 @@ from frappe.utils import cint, cstr, flt, getdate
 from ketoan.api._guard import guard_manager, guard_mt, is_chief
 from ketoan.api.mt import (
     PAID_TOLERANCE,
+    SI_NO_FIELD,
+    SI_SERIES_FIELD,
+    _has_si_field,
+    _returns_join,
     _company,
     _customer_in_clause,
     _invoice_objection,
@@ -595,7 +599,34 @@ def set_line(name, row, sales_invoice=None, resolution=None, note=None, company=
 
 @frappe.whitelist()
 def search_invoices(name, row, q=None, company=None, limit=20):
-    """Hóa đơn ứng viên cho một dòng treo — CHỈ trong chuỗi của bản số dư."""
+    """Hóa đơn ứng viên cho một dòng treo — CHỈ trong chuỗi của bản số dư.
+
+    ════════════════════════════════════════════════════════════════════════
+    LỖI BẢN ĐẦU: TÌM SỐ HÓA ĐƠN TRONG MÃ CHỨNG TỪ ERPNEXT
+    ════════════════════════════════════════════════════════════════════════
+
+    Bản đầu lấy số hóa đơn của dòng (`00005449`) làm từ khóa rồi so với
+    `si.name LIKE '%%00005449%%'`. `si.name` là mã chứng từ ERPNext
+    (`ACC-SINV-2026-00123`) — nó KHÔNG BAO GIỜ chứa số hóa đơn. Nên màn hình
+    luôn ra "Không có hóa đơn nào khớp", với MỌI dòng treo. Cả đường nối tay
+    coi như không dùng được, mà nhìn thì tưởng "đúng là không có hóa đơn nào".
+
+    Số hóa đơn nằm ở `custom_misa_inv_no`. Phải tìm ở ĐÓ.
+
+    ════════════════════════════════════════════════════════════════════════
+    KHÔNG BAO GIỜ TRẢ MÀN HÌNH RỖNG KHI CHUỖI CÓ HÓA ĐƠN
+    ════════════════════════════════════════════════════════════════════════
+
+    Người vào đây là vì máy đã chịu thua. Lọc cứng theo số rồi trả rỗng là bắt
+    họ tự đoán tiếp mà không có gì trong tay. Nên trả về ứng viên xếp theo mức
+    gần, và nói rõ vì sao từng cái được xếp lên trên:
+
+        1. trùng SỐ hóa đơn
+        2. trùng SỐ TIỀN (thử cả trước lẫn sau khi trừ hàng trả lại)
+        3. gần NGÀY nhất
+
+    Gõ từ khóa thì lọc; để trống thì liệt kê theo thứ tự trên.
+    """
     guard_mt()
     _require_tables()
     _tables()
@@ -604,35 +635,81 @@ def search_invoices(name, row, q=None, company=None, limit=20):
     l = _row(doc, row)
 
     names = chain_customers(doc.chain)
-    p = {"company": company, "limit": min(50, max(5, cint(limit) or 20))}
+    p = {"company": company, "limit": min(200, max(20, cint(limit) or 50))}
     where = [_customer_in_clause(names, p)]
-    kw = cstr(q or "").strip() or cstr(l.inv_no or "").strip()
+
+    has_no = _has_si_field(SI_NO_FIELD)
+    has_series = _has_si_field(SI_SERIES_FIELD)
+    kw = cstr(q or "").strip()
     if kw:
         p["kw"] = "%" + kw + "%"
-        where.append("(si.name LIKE %(kw)s OR si.customer_name LIKE %(kw)s)")
+        cols = ["si.name LIKE %(kw)s", "si.customer_name LIKE %(kw)s"]
+        if has_no:
+            cols.append("si.{0} LIKE %(kw)s".format(SI_NO_FIELD))
+        if has_series:
+            cols.append("si.{0} LIKE %(kw)s".format(SI_SERIES_FIELD))
+        where.append("(%s)" % " OR ".join(cols))
+
     if l.inv_date:
         p["d"] = cstr(l.inv_date)
         order = "ABS(DATEDIFF(si.posting_date, %(d)s)) ASC, si.posting_date DESC"
     else:
         order = "si.posting_date DESC"
 
+    no_col = "si.{0}".format(SI_NO_FIELD) if has_no else "''"
+    ser_col = "si.{0}".format(SI_SERIES_FIELD) if has_series else "''"
     rows = frappe.db.sql("""
         SELECT si.name, si.posting_date, si.customer, si.customer_name,
-               ABS(si.grand_total) AS grand_total
+               ABS(si.grand_total) AS grand_total,
+               IFNULL(rt.returned, 0) AS returned,
+               {no_col} AS inv_no, {ser_col} AS inv_series
         FROM `tabSales Invoice` si
-        WHERE si.docstatus = 1 AND si.company = %%(company)s AND si.is_return = 0
-          AND %s
-        ORDER BY %s
-        LIMIT %%(limit)s
-    """ % (" AND ".join(where), order), p, as_dict=True)
+        {join}
+        WHERE si.docstatus = 1 AND si.company = %(company)s AND si.is_return = 0
+          AND {where}
+        ORDER BY {order}
+        LIMIT %(limit)s
+    """.format(no_col=no_col, ser_col=ser_col, join=_returns_join(),
+               where=" AND ".join(where), order=order), p, as_dict=True)
+
+    # Xếp lại theo mức GẦN, và nói rõ vì sao — người đang phải quyết bằng mắt.
+    want_no = norm_inv_no(l.inv_no or "")
+    want_amt = abs(flt(l.gross or 0))
+    for r in rows:
+        why = []
+        if want_no and norm_inv_no(r.inv_no) == want_no:
+            why.append("trùng số hóa đơn")
+        if want_amt and _amount_hits(r, want_amt):
+            why.append("trùng số tiền")
+        if l.inv_date and cstr(r.posting_date) == cstr(l.inv_date):
+            why.append("trùng ngày")
+        r["why"] = why
+        r["net_due"] = round(flt(r.grand_total) - flt(r.returned), 2)
+        r["rank"] = -len(why)
+    rows.sort(key=lambda r: r["rank"])
 
     used = {cstr(x.sales_invoice) for x in doc.lines if cstr(x.sales_invoice)}
     for r in rows:
         r["taken"] = 1 if r.name in used else 0
-    return {"rows": rows, "line": _line_out(l), "chain": doc.chain,
-            "message": "" if names else _(
-                "Chuỗi {0} chưa gán khách hàng nào — không có hóa đơn nào để chọn."
-            ).format(doc.chain)}
+    msg = ""
+    if not names:
+        msg = _("Chuỗi {0} chưa gán khách hàng nào — không có hóa đơn nào để chọn.").format(
+            doc.chain)
+    elif not has_no:
+        msg = _("Site chưa có field `{0}` trên Sales Invoice nên không tìm được theo SỐ "
+                "hóa đơn, chỉ tìm được theo mã chứng từ và tên khách.").format(SI_NO_FIELD)
+
+    return {
+        "rows": rows,
+        "line": _line_out(l),
+        "chain": doc.chain,
+        "message": msg,
+        "note": _(
+            "Một hóa đơn MISA sau khi điều chỉnh tương ứng HAI chứng từ ERPNext: hóa đơn "
+            "gốc và phiếu trả hàng. Ở đây chỉ chọn HÓA ĐƠN GỐC — phần trả lại đã tự trừ "
+            "vào nó qua `Return Against`, nên cột 'còn phải thu' đã là số sau khi trừ. "
+            "Nối thêm phiếu trả hàng nữa là trừ hai lần."),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
