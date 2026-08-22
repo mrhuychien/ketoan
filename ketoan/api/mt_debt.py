@@ -281,6 +281,37 @@ def _rollup(rows):
     }
 
 
+def _orphan_returns(company, as_of):
+    """Phiếu trả hàng KHÔNG khai `return_against` — không trừ được vào hóa đơn nào.
+
+    Quy trình nói là luôn khai, và `_returns_join` dựa hẳn vào điều đó để trừ
+    hàng trả lại khỏi hóa đơn gốc. Nhưng "luôn khai" là CAM KẾT QUY TRÌNH, không
+    phải ràng buộc hệ thống — ERPNext cho lập credit note rời hoàn toàn.
+
+    Một phiếu rời thì không trừ vào đâu cả, và cách nó hỏng là IM LẶNG: công nợ
+    cao hơn thực tế đúng bằng số đó, không có lỗi, không có cảnh báo. Nên đếm nó
+    ra và hiện lên. Hệ thống KHÔNG tự đoán nó thuộc hóa đơn nào — đoán là ghi
+    giảm nhầm hóa đơn; người khai `return_against` rồi số tự đúng.
+    """
+    # `_mt_clause` NHÉT tham số vào chính dict truyền vào. Đưa `{}` rồi dùng dict
+    # khác để chạy là thiếu bind param -> nổ SQL. Dùng đúng một dict.
+    p = {"company": company, "as_of": getdate(as_of)}
+    row = frappe.db.sql("""
+        SELECT COUNT(*) AS n, IFNULL(SUM(ABS(r.grand_total)), 0) AS amount
+        FROM `tabSales Invoice` r
+        INNER JOIN `tabCustomer` c ON c.name = r.customer
+        WHERE r.docstatus = 1 AND r.is_return = 1
+          AND r.company = %(company)s
+          AND r.posting_date <= %(as_of)s
+          AND IFNULL(r.return_against, '') = ''
+          AND {mt}
+    """.format(mt=_mt_clause(p)), p, as_dict=True)[0]
+    return {
+        "orphan_return_count": cint(row.n),
+        "orphan_return_amount": flt(row.amount),
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Method cho portal
 # ═══════════════════════════════════════════════════════════════════════════
@@ -295,6 +326,10 @@ def get_due_summary(company=None, as_of=None, chain=None, search=None):
 
     rows = _enrich(_fetch(company, as_of, chain=chain, search=search), as_of)
     data = _rollup(rows)
+    # Đếm ở ĐÂY chứ không trong `_rollup`: `_rollup` chỉ nhận `rows`, mà phiếu
+    # trả hàng rời KHÔNG nằm trong `rows` — chính vì nó không nối vào hóa đơn
+    # nào nên nó vắng mặt khỏi mọi màn hình. Đó là lý do phải đếm riêng.
+    data.update(_orphan_returns(company, as_of))
     data["as_of"] = cstr(as_of)
     data["company"] = company
     data["chain"] = chain or ""

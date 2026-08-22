@@ -309,9 +309,15 @@ header dòng 1, **18 dòng dữ liệu**, 10 cột).
 ### K.5.1 Hai loại chứng từ — phân biệt bằng KÝ HIỆU, không bằng dấu tiền
 
 ```
-1C26THG_00004450   <- hóa đơn BÁN RA của mình   (8 dòng, tất cả DƯƠNG)
-C26TAP 3269        <- chứng từ ký hiệu khác      (10 dòng, tất cả ÂM)
+1C26THG_00004450   <- hóa đơn BÁN RA của mình         (8 dòng, tất cả DƯƠNG)
+C26TAP 3269        <- hóa đơn SIÊU THỊ XUẤT CHO MÌNH  (10 dòng, tất cả ÂM)
 ```
+
+`C26TAP` là hóa đơn Mega xuất cho mình — **kế toán xác nhận**. Trên file mẫu,
+**9/10** số này trùng đúng từng đồng với các dòng `hàng trả lại` của
+`congno_mega_market.xlsx` (3265 · 13.826.808 · 3269 · 34.057.584 · 3271 ·
+77.052.168 …), nên phần lớn là hóa đơn siêu thị xuất trả hàng. Dòng `3264` lệch
+(101.266.524 vs 103.145.022) nên **không** kết luận cả nhóm đều là hàng trả lại.
 
 Ký hiệu và số cách nhau bằng `_` (hóa đơn của mình, số đệm 0 tám chữ) hoặc bằng
 **dấu cách** (chứng từ kia, số trần) — **cùng một file dùng cả hai**.
@@ -333,6 +339,14 @@ tương ứng, và cả 8 đều đã về `Số còn nợ = 0`. Không dòng `C
 `00003264` (29/08/2024) cùng tồn tại. Đúng ca §MT2-G — dòng ghi giảm vẫn giữ số
 để kế toán đối chiếu, nhưng không đường nào cho nó nối Sales Invoice.
 
+⚠⚠ **Và đây là lý do thứ hai, nặng hơn, để không bao giờ nối.** Hàng trả lại đã
+được ghi nhận MỘT lần rồi, bằng **phiếu trả hàng trên ERPNext**
+(`is_return = 1` + `return_against`) — và từ MT2-N nó trừ thẳng vào hóa đơn gốc
+qua `_returns_join`. Nếu dòng `C26TAP` cũng nối được vào hóa đơn đó thì
+`clawed_back` trừ **thêm một lần nữa**: một lần trả hàng bị trừ **hai lần** khỏi
+công nợ. Hiện `clawed_back` luôn bằng 0 vì mọi đường nối đều bị chặn — ai định
+nới cái chặn đó phải đọc dòng này trước.
+
 ### K.5.2 File này KHÔNG có số kiểm tra nào
 
 Không dòng TỔNG CỘNG, không ô net payment, không số bảng kê. Nên `checks` để
@@ -352,8 +366,8 @@ kế toán chờ tiền vào tài khoản mà không thấy sẽ đi tìm nhầm
 
 ### K.5.4 Hạn chế còn lại
 
-File **không có cột phân loại** khoản trừ, nên 10 dòng ghi giảm không tách được
-đâu là chiết khấu, đâu là phí, đâu là hàng trả lại. Tất cả vào một nhóm
+File **không có cột phân loại** khoản trừ, nên 10 dòng hóa đơn siêu thị xuất cho
+mình không tách được đâu là hàng trả lại, đâu là chiết khấu, đâu là phí. Tất cả vào một nhóm
 `Ghi giảm` và hạch toán vào **một** tài khoản theo `MT Account Map`. Cần tách
 thì phải sửa loại dòng trên chứng từ trước khi sinh bút toán. Parser cảnh báo
 điều này ở mỗi lần nạp.

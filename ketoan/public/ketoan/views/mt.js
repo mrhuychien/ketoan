@@ -3738,6 +3738,13 @@ async function loadDueDebt(container, state) {
               <i class="fas fa-xmark"></i> chỉ chuỗi ${state.dueChain}
             </button>`
           : ""}
+        ${sum.orphan_return_count
+          ? html`<span class="kt-badge kt-badge--yellow"
+                   title="Phiếu trả hàng không khai 'trả cho hóa đơn nào' thì không trừ được vào hóa đơn gốc — công nợ đang cao hơn thực tế đúng bằng số này. Mở phiếu, điền Return Against rồi số tự đúng.">
+              ${sum.orphan_return_count} phiếu trả hàng chưa khai HĐ gốc ·
+              ${formatVNDShort(sum.orphan_return_amount)}
+            </span>`
+          : ""}
         <button class="kt-btn kt-btn--outline kt-btn--sm" id="dd-terms" style="margin-left:auto">
           <i class="fas fa-sliders"></i> Khai hạn thanh toán
         </button>

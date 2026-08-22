@@ -109,9 +109,16 @@ def main():
           f"phải lỗi đọc file")
     bad += not ok
 
-    ok = any("không tách được đâu là chiết khấu" in w.lower() for w in res["warnings"])
-    print(f"  {'✅' if ok else '❌'} nói rõ 10 dòng ghi giảm KHÔNG tách được loại — sẽ vào "
-          f"một tài khoản")
+    ok = any("HÓA ĐƠN SIÊU THỊ XUẤT CHO MÌNH" in w for w in res["warnings"]) \
+        and any("một tài khoản" in w.lower() for w in res["warnings"])
+    print(f"  {'✅' if ok else '❌'} gọi đúng tên 10 dòng kia — hóa đơn siêu thị xuất cho "
+          f"mình — và nói rõ chúng vào MỘT tài khoản")
+    bad += not ok
+
+    ded = [r for r in rows if r["row_kind"] == "ghi_giam"]
+    ok = all("siêu thị xuất cho mình" in (r["row_subtype"] or "") for r in ded)
+    print(f"  {'✅' if ok else '❌'} mỗi dòng mang đúng nhãn loại chứng từ, không phải "
+          f"'chứng từ ký hiệu ...' chung chung")
     bad += not ok
 
     # ── 3. BẪY CHÍNH: phân loại theo KÝ HIỆU, không theo DẤU ─────────────

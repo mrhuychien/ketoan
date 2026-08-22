@@ -2639,11 +2639,25 @@ def parse_fuji(sheets):
 # THG khớp ĐÚNG TỪNG ĐỒNG với cột TỔNG của hóa đơn tương ứng, và cả 8 hóa đơn đó
 # đều đã về `Số còn nợ = 0`. Không dòng `C26TAP` nào khớp được như vậy.
 #
+# `C26TAP` là **hóa đơn Mega xuất cho mình** (kế toán xác nhận). Trên file mẫu,
+# 9/10 số này trùng ĐÚNG TỪNG ĐỒNG với các dòng `hàng trả lại` của file công nợ
+# Mega (3265 · 13.826.808, 3269 · 34.057.584, 3271 · 77.052.168 …), nên phần lớn
+# là hóa đơn siêu thị xuất trả hàng. Dòng 3264 lệch (101.266.524 vs 103.145.022)
+# nên KHÔNG kết luận cả nhóm đều là hàng trả lại.
+#
 # ⚠ Số của `C26TAP` ĐỤNG số hóa đơn của mình: `C26TAP 3264` và hóa đơn
 # `00003264` (29/08/2024) cùng tồn tại. Đây đúng là ca MT2-G đã đo trên 7 chuỗi —
 # khớp dòng ghi giảm sang Sales Invoice bằng số là vơ nhầm hóa đơn của mình.
 # Dòng ghi giảm vẫn GIỮ số để kế toán nhìn, nhưng không đường nào cho nó nối
-# Sales Invoice (chặn ở `_match_row`, ở `relink_line`, và ở `_paid_subquery`).
+# Sales Invoice (chặn ở `_match_row`, ở `relink_line`, và ở `_paid_join`).
+#
+# ⚠⚠ VÀ ĐÂY LÀ LÝ DO THỨ HAI, NẶNG HƠN, ĐỂ KHÔNG BAO GIỜ NỐI:
+# hàng trả lại ĐÃ được ghi nhận một lần rồi, bằng PHIẾU TRẢ HÀNG trên ERPNext
+# (`is_return = 1`, `return_against`) — và từ MT2-N nó đã trừ thẳng vào hóa đơn
+# gốc qua `_returns_join`. Nếu dòng `C26TAP` cũng nối được vào hóa đơn đó thì
+# `clawed_back` trừ THÊM một lần nữa: MỘT lần trả hàng bị trừ HAI lần khỏi công
+# nợ. Hiện `clawed_back` luôn bằng 0 vì mọi đường nối đều bị chặn — ai định nới
+# cái chặn đó phải đọc dòng này trước.
 #
 # ── KHÔNG CÓ SỐ KIỂM TRA TRONG FILE ───────────────────────────────────────
 #
@@ -2765,7 +2779,8 @@ def parse_mega(sheets):
 
         rows.append(_line(
             row_kind="thanh_toan" if ours else "ghi_giam",
-            row_subtype="Hóa đơn bán ra" if ours else "Chứng từ ký hiệu %s" % (series or "?"),
+            row_subtype=("Hóa đơn bán ra" if ours
+                         else "Hóa đơn siêu thị xuất cho mình (%s)" % (series or "?")),
             # Dòng ghi giảm VẪN giữ ký hiệu/số để kế toán đối chiếu với chứng từ
             # Mega gửi. An toàn vì mọi đường nối Sales Invoice đều chặn dòng không
             # phải 'Thanh toán' (MT2-G).
@@ -2808,11 +2823,11 @@ def parse_mega(sheets):
     n_ded = len(rows) - n_pay
     if n_ded:
         warnings.append(
-            "%d dòng ghi giảm của Mega KHÔNG có cột phân loại nào trong file — không "
-            "tách được đâu là chiết khấu, đâu là phí, đâu là hàng trả lại. Tất cả vào "
-            "một nhóm 'Ghi giảm' và sẽ hạch toán vào MỘT tài khoản theo `MT Account "
-            "Map`. Cần tách thì sửa loại dòng trên chứng từ trước khi sinh bút toán."
-            % n_ded)
+            "%d dòng là HÓA ĐƠN SIÊU THỊ XUẤT CHO MÌNH (ký hiệu không phải %s). File "
+            "không có cột phân loại nên không tách được đâu là hàng trả lại, đâu là "
+            "chiết khấu, đâu là phí — tất cả vào một nhóm 'Ghi giảm' và hạch toán vào "
+            "MỘT tài khoản theo `MT Account Map`. Cần tách thì sửa loại dòng trên chứng "
+            "từ trước khi sinh bút toán." % (n_ded, OUR_ISSUER_CODE))
 
     warnings.append(
         "File Mega Market KHÔNG in dòng tổng cộng, số bảng kê hay số tiền thanh toán "

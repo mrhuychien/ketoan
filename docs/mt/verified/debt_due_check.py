@@ -144,6 +144,30 @@ def main():
           f"về cột `returned` để kế toán nhìn thấy phần đã trả")
     bad += not ok
 
+    # Phiếu trả hàng KHÔNG khai `return_against` không trừ được vào đâu, và cách
+    # nó hỏng là IM LẶNG. Quy trình nói luôn khai — nhưng đó là cam kết quy
+    # trình, không phải ràng buộc hệ thống.
+    body = re.split(r"\n(?=\S)", src.split("def _orphan_returns")[1])[0]
+    ok = ("IFNULL(r.return_against, '') = ''" in body
+          and "r.is_return = 1" in body and "r.docstatus = 1" in body)
+    print(f"  {'✅' if ok else '❌'} có đếm phiếu trả hàng KHÔNG khai hóa đơn gốc — nó "
+          f"không trừ vào đâu và hỏng IM LẶNG")
+    bad += not ok
+
+    ok = "orphan_return_count" in open(
+        os.path.join(rc.REPO, "ketoan/public/ketoan/views/mt.js"), encoding="utf-8").read()
+    print(f"  {'✅' if ok else '❌'} con số đó có hiện lên màn hình, không chỉ nằm trong "
+          f"payload")
+    bad += not ok
+
+    # Không được TỰ ĐOÁN phiếu rời thuộc hóa đơn nào.
+    mtb = open(os.path.join(rc.REPO, "ketoan/api/mt.py"), encoding="utf-8").read()
+    rj = re.split(r"\n(?=\S)", mtb.split("def _returns_join")[1])[0]
+    ok = "IFNULL(r.return_against, '') != ''" in rj
+    print(f"  {'✅' if ok else '❌'} và KHÔNG đoán phiếu rời thuộc hóa đơn nào — đoán là "
+          f"ghi giảm nhầm hóa đơn")
+    bad += not ok
+
     # ── 2. Hóa đơn đã trả đủ KHÔNG được vào rổ nợ ────────────────────────
     print("-" * 78)
     rows = md._enrich([
