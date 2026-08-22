@@ -23,6 +23,7 @@ Chạy KHÔNG cần bench — stub frappe của `regression_check`, có bổ sun
 """
 
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -88,9 +89,59 @@ def main():
           f"(kênh MT không tạo Payment Entry nên nó luôn = grand_total)")
     bad += not ok
 
-    ok = "_paid_subquery" in src
-    print(f"  {'✅' if ok else '❌'} dùng chung `_paid_subquery()` với màn hình Tổng quan "
+    ok = "_debt_joins" in src
+    print(f"  {'✅' if ok else '❌'} dùng chung `_debt_joins()` với màn hình Tổng quan "
           f"-> hai màn hình không thể nói hai số khác nhau")
+    bad += not ok
+
+    # ── 1b. HÀNG TRẢ LẠI phải trừ vào chính hóa đơn gốc ──────────────────
+    #
+    # Quy trình thật: giao hàng -> hàng móp/lỗi -> điều chỉnh hóa đơn MISA ->
+    # trả lại trên ERPNext. Một lần bán thành HAI chứng từ ERPNext. Trước khi có
+    # `rt`, `return_against` không được dùng ở đâu trong kênh MT: hóa đơn 100tr
+    # bị trả 20tr vẫn đòi đủ 100tr mãi mãi.
+    print("-" * 78)
+    mtsrc = open(os.path.join(rc.REPO, "ketoan/api/mt.py"), encoding="utf-8").read()
+
+    ok = mtsrc.count("def _returns_join") == 1 and mtsrc.count("return_against") >= 1
+    print(f"  {'✅' if ok else '❌'} có bảng tạm `rt` cộng phiếu trả hàng theo "
+          f"`return_against`")
+    bad += not ok
+
+    # Cắt tới `def` cấp 0 kế tiếp — docstring của hàm này dài, cắt theo số ký tự
+    # là phép kiểm nhìn hụt thân hàm rồi báo hỏng vì lý do sai.
+    body = re.split(r"\n(?=\S)", mtsrc.split("def _returns_join")[1])[0]
+    ok = "r.docstatus = 1" in body and "IFNULL(r.return_against, '') != ''" in body \
+        and "r.is_return = 1" in body
+    print(f"  {'✅' if ok else '❌'} chỉ đếm phiếu trả hàng ĐÃ GHI SỔ và CÓ khai trả cho "
+          f"hóa đơn nào — phiếu đứng rời không tự trừ vào đâu")
+    bad += not ok
+
+    # Mọi công thức nợ phải đi qua `_NET_DUE`, không ai được dùng grand_total trần.
+    # Bắt đúng ca HỎNG: `grand_total` đứng trong một phép tính NỢ mà KHÔNG có
+    # `rt.returned` ngay sau. Bắt trần `grand_total` là báo nhầm cả công thức đã
+    # đúng — phép kiểm sai kiểu đó còn tệ hơn không có, vì lần sau ai cũng bỏ qua.
+    leaks = []
+    # Không dùng lookahead: `\s*` lùi được về rỗng nên phép phủ định trượt qua
+    # đúng công thức đã đúng. Soi thẳng 60 ký tự kế tiếp cho chắc.
+    for f in ("ketoan/api/mt.py", "ketoan/api/mt_debt.py",
+              "ketoan/api/mt_opening_store.py"):
+        t = open(os.path.join(rc.REPO, f), encoding="utf-8").read()
+        for m in re.finditer(r"GREATEST\(ABS\(si\.grand_total\) -", t):
+            if "rt.returned" not in t[m.end():m.end() + 60]:
+                leaks.append("%s: cột còn nợ" % f)
+        for pat, label in ((r"< ABS\(si\.grand_total\) - %\(tol\)s", "điều kiện rổ nợ"),
+                           (r"LEAST\(\{?_NET_PAID\}?, ABS\(si\.grand_total\)\)", "cột đã thu")):
+            if re.search(pat, t):
+                leaks.append("%s: %s" % (f, label))
+    ok = not leaks
+    print(f"  {'✅' if ok else '❌'} không công thức nợ nào còn dùng `grand_total` trần"
+          + ("" if ok else " — " + "; ".join(leaks)))
+    bad += not ok
+
+    ok = "_NET_DUE" in src and "rt.returned" in src
+    print(f"  {'✅' if ok else '❌'} màn hình Công nợ đến hạn cũng trừ hàng trả lại và trả "
+          f"về cột `returned` để kế toán nhìn thấy phần đã trả")
     bad += not ok
 
     # ── 2. Hóa đơn đã trả đủ KHÔNG được vào rổ nợ ────────────────────────

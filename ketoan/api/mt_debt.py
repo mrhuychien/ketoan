@@ -14,7 +14,7 @@ BA ĐIỀU QUYẾT ĐỊNH ĐỘ ĐÚNG CỦA CON SỐ
    trả xong từ lâu. Dùng nó thì màn hình này sẽ đòi tiền những hóa đơn đã thu
    đủ — gọi điện đòi nhầm khách là hỏng quan hệ, không phải lỗi làm tròn.
 
-   Dùng ĐÚNG công thức của `mt.get_overview` (`_paid_subquery` + `_NET_PAID`)
+   Dùng ĐÚNG công thức của `mt.get_overview` (`_debt_joins` + `_NET_PAID` + `_NET_DUE`)
    để hai màn hình không bao giờ nói hai số khác nhau về cùng một hóa đơn.
 
 2. ĐẾN HẠN NGÀY NÀO — theo THỨ TỰ ƯU TIÊN, và LUÔN nói rõ lấy từ đâu.
@@ -60,7 +60,7 @@ from ketoan.api.mt import (
     _company,
     _mt_clause,
     opening_open_clause,
-    _paid_subquery,
+    _debt_joins,
     _require_tables,
 )
 
@@ -144,7 +144,7 @@ def _fetch(company, as_of, chain=None, customer=None, search=None):
     p = {"company": company, "as_of": getdate(as_of), "tol": PAID_TOLERANCE,
          "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}
     mt = _mt_clause(p)
-    join = _paid_subquery()
+    join = _debt_joins()
 
     extra = ""
     if chain:
@@ -181,7 +181,8 @@ def _fetch(company, as_of, chain=None, customer=None, search=None):
                IFNULL(p.clawed_back, 0) AS clawed_back,
                IFNULL(p.paid_review, 0) AS paid_review,
                p.last_payment_date,
-               GREATEST(ABS(si.grand_total)
+               IFNULL(rt.returned, 0) AS returned,
+               GREATEST(ABS(si.grand_total) - IFNULL(rt.returned, 0)
                         - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) AS remaining
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
@@ -189,7 +190,7 @@ def _fetch(company, as_of, chain=None, customer=None, search=None):
         WHERE si.docstatus = 1 AND si.company = %(company)s
           AND si.is_return = 0
           AND si.posting_date <= %(as_of)s
-          AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < ABS(si.grand_total) - %(tol)s
+          AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < (ABS(si.grand_total) - IFNULL(rt.returned, 0)) - %(tol)s
           AND {opening}
           AND {mt} {extra}
         ORDER BY si.posting_date ASC, si.name ASC

@@ -3814,7 +3814,11 @@ async function loadDueDebt(container, state) {
                   : (r.days_overdue > 0
                       ? html`<b style="color:var(--kt-danger)">${r.days_overdue}</b>`
                       : html`<span class="kt-sub">${r.days_overdue}</span>`)}</td>
-                <td class="num">${formatVND(r.grand_total)}</td>
+                <td class="num">${formatVND(r.grand_total)}
+                  ${r.returned
+                    ? html`<div class="kt-sub" title="đã làm phiếu trả hàng trên ERPNext — đã trừ khỏi số còn nợ">
+                        − trả lại ${formatVNDShort(r.returned)}</div>`
+                    : ""}</td>
                 <td class="num"><b>${formatVND(r.remaining)}</b>
                   ${r.paid_review
                     ? html`<div class="kt-sub" title="dòng bảng kê máy đoán, chưa ai chốt — chưa trừ vào nợ">

@@ -272,8 +272,15 @@ def _mt_clause(params):
     return channel_group_clause("mt", params, alias="c")
 
 
-def _paid_subquery():
-    """Bảng tạm: mỗi Sales Invoice đã được bảng kê MT trả bao nhiêu tiền.
+def _debt_joins():
+    """MỌI join mà một truy vấn CÔNG NỢ cần. Trả về chuỗi SQL ghép sẵn.
+
+    Gộp `p` (đã trả) và `rt` (đã trả lại) vào MỘT hàm là có chủ đích: hai bảng
+    tạm này luôn phải đi cùng nhau. Tách ra thì sẽ có ngày một truy vấn lấy `p`
+    mà quên `rt`, và hóa đơn bị trả lại lại hiện nợ đủ — đúng lỗi mà `rt` sinh
+    ra để sửa. Quên `p` thì nổ SQL ngay, còn quên `rt` thì SAI TIỀN IM LẶNG.
+
+    ── p: mỗi Sales Invoice đã được bảng kê MT trả bao nhiêu tiền.
 
     CỘNG DỒN mọi dòng 'Thanh toán' trỏ về hóa đơn đó, bất kể thuộc bảng kê nào —
     một hóa đơn có thể được chuỗi trả làm nhiều lần (Co.op tách 8 kỳ trong một
@@ -325,6 +332,10 @@ def _paid_subquery():
     `clawed_back` và triệt tiêu nhau — hóa đơn không nhúc nhích, tiền bị đòi lại
     biến mất im lặng. Lọc ở đây là để hai cột không bao giờ đếm chung một dòng.
     """
+    return _paid_join() + _returns_join()
+
+
+def _paid_join():
     return """
         LEFT JOIN (
             SELECT l.sales_invoice AS si_name,
@@ -349,6 +360,51 @@ def _paid_subquery():
     """
 
 
+def _returns_join():
+    """Bảng tạm: mỗi hóa đơn đã bị TRẢ LẠI bao nhiêu tiền.
+
+    ════════════════════════════════════════════════════════════════════════
+    VÌ SAO PHẢI CÓ — quy trình thật của kênh MT
+    ════════════════════════════════════════════════════════════════════════
+
+        đơn hàng -> hóa đơn ERPNext -> hóa đơn MISA -> ký -> giao hàng
+        -> hàng móp/lỗi -> ĐIỀU CHỈNH hóa đơn MISA -> TRẢ LẠI trên ERPNext
+
+    Tức là MỘT lần bán, sau khi điều chỉnh, thành **HAI chứng từ ERPNext**: hóa
+    đơn gốc và phiếu trả hàng (`is_return = 1`, `return_against` trỏ về gốc).
+
+    Trước hàm này, `return_against` KHÔNG được dùng ở bất kỳ đâu trong kênh MT.
+    Hệ quả: hóa đơn gốc 100tr bị trả 20tr vẫn hiện **nợ đủ 100tr** mãi mãi, còn
+    20tr phiếu trả hàng trôi vào một ô tổng riêng chẳng dính vào hóa đơn nào.
+    Chuỗi trả 80tr là đúng, nhưng màn hình vẫn đòi thêm 20tr không tồn tại.
+
+    CHỈ đếm phiếu trả hàng ĐÃ GHI SỔ và CÓ nối `return_against`. Phiếu trả hàng
+    đứng rời (không khai trả cho hóa đơn nào) KHÔNG được tự trừ vào đâu cả —
+    đoán xem nó thuộc hóa đơn nào là ghi giảm nhầm hóa đơn.
+
+    Lọc company ngay trong JOIN, cùng lý do với `_paid_join`.
+    """
+    return """
+        LEFT JOIN (
+            SELECT r.return_against AS si_name,
+                   SUM(ABS(r.grand_total)) AS returned,
+                   COUNT(*) AS n_returns
+            FROM `tabSales Invoice` r
+            WHERE r.docstatus = 1 AND r.is_return = 1
+              AND r.company = %(company)s
+              AND IFNULL(r.return_against, '') != ''
+            GROUP BY r.return_against
+        ) rt ON rt.si_name = si.name
+    """
+
+
+# GIÁ TRỊ CÒN PHẢI THU của một hóa đơn, sau khi trừ phần đã trả lại.
+#
+# Đây là "mẫu số" của mọi phép so nợ. Dùng `ABS(si.grand_total)` trần là bỏ quên
+# hàng trả lại — xem `_returns_join`.
+_NET_DUE = "(ABS(si.grand_total) - IFNULL(rt.returned, 0))"
+
+
 # Điều kiện của từng rổ hóa đơn.
 #
 # `is_return = 0` ở rổ "chưa thanh toán": hóa đơn trả hàng là khoản GHI GIẢM
@@ -361,8 +417,10 @@ def _paid_subquery():
 _NET_PAID = "(IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0))"
 
 _BUCKET_WHERE = {
-    "chua_thanh_toan": f"si.is_return = 0 AND {_NET_PAID} < ABS(si.grand_total) - %(tol)s",
-    "da_thanh_toan": f"{_NET_PAID} > 0 AND {_NET_PAID} >= ABS(si.grand_total) - %(tol)s",
+    # Hóa đơn bị trả lại một phần thì phần còn phải thu là `_NET_DUE`, không
+    # phải cả `grand_total` — xem `_returns_join`.
+    "chua_thanh_toan": f"si.is_return = 0 AND {_NET_PAID} < {_NET_DUE} - %(tol)s",
+    "da_thanh_toan": f"{_NET_PAID} > 0 AND {_NET_PAID} >= {_NET_DUE} - %(tol)s",
     "tat_ca": "1 = 1",
 }
 
@@ -452,14 +510,14 @@ def get_overview(company=None, from_date=None, to_date=None):
     p = {"company": company, "fd": from_date, "td": to_date,
          "tol": PAID_TOLERANCE, "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}
     mt = _mt_clause(p)
-    join = _paid_subquery()
+    join = _debt_joins()
 
     def bucket(where):
         return frappe.db.sql(f"""
             SELECT COUNT(*) AS cnt,
                    IFNULL(SUM(ABS(si.grand_total)), 0) AS amount,
-                   IFNULL(SUM(GREATEST(ABS(si.grand_total) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0)), 0) AS remaining,
-                   IFNULL(SUM(LEAST((IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), ABS(si.grand_total))), 0) AS collected,
+                   IFNULL(SUM(GREATEST((ABS(si.grand_total) - IFNULL(rt.returned, 0)) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0)), 0) AS remaining,
+                   IFNULL(SUM(LEAST((IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), (ABS(si.grand_total) - IFNULL(rt.returned, 0)))), 0) AS collected,
                    IFNULL(SUM(IFNULL(p.paid_review, 0)), 0) AS pending_review
             FROM `tabSales Invoice` si
             INNER JOIN `tabCustomer` c ON c.name = si.customer
@@ -511,10 +569,10 @@ def get_overview(company=None, from_date=None, to_date=None):
     debt = frappe.db.sql(f"""
         SELECT
             IFNULL(SUM(CASE WHEN si.is_return = 0
-                            THEN GREATEST(ABS(si.grand_total) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) ELSE 0 END), 0) AS unpaid,
+                            THEN GREATEST((ABS(si.grand_total) - IFNULL(rt.returned, 0)) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) ELSE 0 END), 0) AS unpaid,
             IFNULL(SUM(CASE WHEN si.is_return = 1 THEN ABS(si.grand_total) ELSE 0 END), 0) AS credit_notes,
             SUM(CASE WHEN si.is_return = 0
-                     AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < ABS(si.grand_total) - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
+                     AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < (ABS(si.grand_total) - IFNULL(rt.returned, 0)) - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
         {join}
@@ -653,7 +711,7 @@ def _invoice_page(company, from_date, to_date, bucket, search, page_size, offset
     if customer:
         p["cus"] = customer
         where += " AND si.customer = %(cus)s"
-    join = _paid_subquery()
+    join = _debt_joins()
     if search:
         p["kw"] = f"%{search}%"
         where += (" AND (si.name LIKE %(kw)s OR si.customer_name LIKE %(kw)s"
@@ -683,7 +741,7 @@ def _invoice_page(company, from_date, to_date, bucket, search, page_size, offset
                IFNULL(p.paid_review, 0) AS paid_review,
                IFNULL(p.pay_lines, 0) AS pay_lines,
                p.last_payment_date,
-               GREATEST(ABS(si.grand_total) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) AS remaining
+               GREATEST((ABS(si.grand_total) - IFNULL(rt.returned, 0)) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) AS remaining
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
         {join}
@@ -1014,7 +1072,7 @@ def get_chain_summary(company=None, from_date=None, to_date=None):
     p = {"company": company, "fd": from_date, "td": to_date,
          "tol": PAID_TOLERANCE, "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}
     mt = _mt_clause(p)
-    join = _paid_subquery()
+    join = _debt_joins()
 
     # Gom theo KHÁCH HÀNG rồi mới quy về chuỗi trong Python: SQL không biết ánh
     # xạ khách -> chuỗi (nó nằm trong bảng kê do kế toán chốt).
@@ -1023,11 +1081,11 @@ def get_chain_summary(company=None, from_date=None, to_date=None):
                COUNT(*) AS cnt,
                IFNULL(SUM(CASE WHEN si.is_return = 0 THEN ABS(si.grand_total) ELSE 0 END), 0) AS invoiced,
                IFNULL(SUM(CASE WHEN si.is_return = 1 THEN ABS(si.grand_total) ELSE 0 END), 0) AS returns_amt,
-               IFNULL(SUM(LEAST((IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), ABS(si.grand_total))), 0) AS collected,
+               IFNULL(SUM(LEAST((IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), (ABS(si.grand_total) - IFNULL(rt.returned, 0)))), 0) AS collected,
                IFNULL(SUM(CASE WHEN si.is_return = 0
-                          THEN GREATEST(ABS(si.grand_total) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) ELSE 0 END), 0) AS outstanding,
+                          THEN GREATEST((ABS(si.grand_total) - IFNULL(rt.returned, 0)) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) ELSE 0 END), 0) AS outstanding,
                SUM(CASE WHEN si.is_return = 0
-                        AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < ABS(si.grand_total) - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
+                        AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < (ABS(si.grand_total) - IFNULL(rt.returned, 0)) - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
         {join}
@@ -1281,6 +1339,7 @@ def _si_index(company, dates):
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
         {snap_join}
+        {_returns_join()}
         WHERE si.docstatus = 1 AND si.company = %(company)s
           AND si.is_return = 0
           AND si.posting_date BETWEEN %(fd)s AND %(td)s
@@ -1293,6 +1352,9 @@ def _si_index(company, dates):
     rows = frappe.db.sql(f"""
         SELECT si.name, si.posting_date, si.grand_total, si.customer, si.customer_name,
                si.is_return, c.customer_group, {snap_cols},
+               -- Hóa đơn đã bị trả lại một phần: bên kia có thể đang nói về số
+               -- TRƯỚC hoặc SAU điều chỉnh. Mang theo để tầng khớp thử cả hai.
+               IFNULL(rt.returned, 0) AS returned,
                si.{SI_SERIES_FIELD} AS inv_series, si.{SI_NO_FIELD} AS inv_no
         {base}
         ORDER BY si.posting_date DESC, si.name DESC
@@ -1330,6 +1392,16 @@ def _si_index(company, dates):
             "count": total, "truncated": total > MAX_SI_INDEX_ROWS}
 
 
+# Hai lý do phủ quyết của `_invoice_objection`. CỐ Ý đặt tên: hai lý do này KHÁC
+# nhau về bản chất và có ngữ cảnh xử khác nhau.
+#   · `OBJ_OTHER_CHAIN`  — sai CHỦ THỂ. Phủ quyết ở MỌI ngữ cảnh.
+#   · `OBJ_DEAD_INVOICE` — hóa đơn hết hiệu lực. Phủ quyết khi khớp TIỀN VỀ,
+#     nhưng KHÔNG phủ quyết khi nhập SỐ DƯ ĐẦU KỲ: hóa đơn đã điều chỉnh vẫn có
+#     thể đang còn nợ, và loại nó là để khoản nợ đó biến mất khi chốt.
+OBJ_OTHER_CHAIN = "khac_chuoi"
+OBJ_DEAD_INVOICE = "hoa_don_da_huy_thay_the"
+
+
 def _invoice_objection(si, chain, cus_chain):
     """Lý do KHÔNG được để một liên kết ở mức 'Chắc chắn'. Trả method ASCII hoặc None.
 
@@ -1343,9 +1415,9 @@ def _invoice_objection(si, chain, cus_chain):
     if cus_chain and chain:
         other = cus_chain.get(si.get("customer"))
         if other and other != chain:
-            return "khac_chuoi"
+            return OBJ_OTHER_CHAIN
     if cint(si.get("snap_dead")) or cint(si.get("snap_deleted")):
-        return "hoa_don_da_huy_thay_the"
+        return OBJ_DEAD_INVOICE
     return None
 
 
@@ -1873,7 +1945,7 @@ def _summarize(a):
         "overpaid_invoices": overpaid,
         # Dòng bị hạ độ tin cậy vì hóa đơn thuộc chuỗi khác / đã hủy / đã thay thế.
         "cross_chain": [_ref(ln) for ln in matched
-                        if ln.get("match_method") in ("khac_chuoi", "hoa_don_da_huy_thay_the")],
+                        if ln.get("match_method") in (OBJ_OTHER_CHAIN, OBJ_DEAD_INVOICE)],
         "index_truncated": a.get("index_truncated"),
         "totals": a["totals"],
         "declared_total_payment": declared,
@@ -2354,7 +2426,7 @@ def get_customer_summary(company=None, from_date=None, to_date=None, chain=None,
     p = {"company": company, "fd": from_date, "td": to_date,
          "tol": PAID_TOLERANCE, "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}
     mt = _mt_clause(p)
-    join = _paid_subquery()
+    join = _debt_joins()
     # Hóa đơn đã tất toán trước ngày chuyển giao KHÔNG còn nợ — nhưng vẫn phải
     # nằm trong `invoiced` của kỳ đó, vì nó có xuất thật. Nên luật chỉ bọc hai
     # cột NỢ, không bọc cả câu WHERE.
@@ -2370,11 +2442,11 @@ def get_customer_summary(company=None, from_date=None, to_date=None, chain=None,
                COUNT(*) AS cnt,
                IFNULL(SUM(CASE WHEN si.is_return = 0 THEN ABS(si.grand_total) ELSE 0 END), 0) AS invoiced,
                IFNULL(SUM(CASE WHEN si.is_return = 1 THEN ABS(si.grand_total) ELSE 0 END), 0) AS returns_amt,
-               IFNULL(SUM(LEAST({_NET_PAID}, ABS(si.grand_total))), 0) AS collected,
+               IFNULL(SUM(LEAST({_NET_PAID}, {_NET_DUE})), 0) AS collected,
                IFNULL(SUM(CASE WHEN si.is_return = 0 AND NOT {settled}
-                          THEN GREATEST(ABS(si.grand_total) - {_NET_PAID}, 0) ELSE 0 END), 0) AS outstanding,
+                          THEN GREATEST({_NET_DUE} - {_NET_PAID}, 0) ELSE 0 END), 0) AS outstanding,
                SUM(CASE WHEN si.is_return = 0 AND NOT {settled}
-                        AND {_NET_PAID} < ABS(si.grand_total) - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
+                        AND {_NET_PAID} < {_NET_DUE} - %(tol)s THEN 1 ELSE 0 END) AS unpaid_count
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
         {join}

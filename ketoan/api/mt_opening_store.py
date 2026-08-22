@@ -60,8 +60,9 @@ from ketoan.api.mt import (
     _company,
     _customer_in_clause,
     _invoice_objection,
+    OBJ_OTHER_CHAIN,
     _mt_clause,
-    _paid_subquery,
+    _debt_joins,
     _require_tables,
     _si_index,
     chain_customers,
@@ -98,6 +99,19 @@ def _tables():
 # Nối dòng sang hóa đơn
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _amount_hits(si, amount):
+    """Số tiền trong file có khớp hóa đơn này không — thử cả trước và sau trả lại."""
+    gt = abs(flt(si.get("grand_total")))
+    ret = abs(flt(si.get("returned")))
+    return (abs(gt - amount) <= PAID_TOLERANCE
+            or (ret > 0 and abs(gt - ret - amount) <= PAID_TOLERANCE))
+
+
+def _suffix(tail):
+    """Đánh dấu liên kết lấy từ hóa đơn ĐÃ điều chỉnh, để người soi biết."""
+    return "_da_dieu_chinh" if tail.endswith("_da_dieu_chinh") else ""
+
+
 CONF_SURE = "Chắc chắn"
 CONF_REVIEW = "Cần review"
 CONF_NONE = "Không khớp"
@@ -120,6 +134,30 @@ def _resolve_row(row, idx, chain, cus_chain, allowed):
     (file Co.op có cả `00007709` lẫn `00000001`), nên "trùng số" là chuyện bình
     thường — nhận bừa là giữ nhầm hóa đơn này và tất toán oan hóa đơn kia.
 
+    ════════════════════════════════════════════════════════════════════════
+    HÓA ĐƠN ĐÃ ĐIỀU CHỈNH VẪN LÀ ỨNG VIÊN — khác hẳn bảng kê thanh toán
+    ════════════════════════════════════════════════════════════════════════
+
+    Quy trình thật: giao hàng -> hàng móp/lỗi -> ĐIỀU CHỈNH hóa đơn MISA -> trả
+    lại trên ERPNext. Lúc đó `misa_sync._mark_superseded` đặt hóa đơn GỐC thành
+    `Đã thay thế`, và `_invoice_objection` coi đó là phủ quyết.
+
+    Ở BẢNG KÊ THANH TOÁN, loại hẳn là đúng: không ai trả tiền cho một hóa đơn
+    đã hết hiệu lực.
+
+    Ở SỐ DƯ ĐẦU KỲ thì NGƯỢC LẠI. Dòng trong file công nợ đang nói "hóa đơn này
+    CÒN NỢ" — nó nói về khoản phải thu, không nói về hiệu lực pháp lý của tờ hóa
+    đơn. Loại hẳn thì dòng đó không giữ được hóa đơn nào lại, và khi chốt, đúng
+    hóa đơn đang còn nợ ấy rơi vào vế "không có trong danh sách" -> bị coi là đã
+    trả. Nợ thật biến mất.
+
+    Nên ở đây: hóa đơn đã điều chỉnh **vẫn là ứng viên**, chỉ bị ĐẨY XUỐNG SAU —
+    ưu tiên hóa đơn còn nguyên hiệu lực, và chỉ lấy hóa đơn đã điều chỉnh khi
+    không còn ứng viên nào khác. Vẫn để 'Cần review' như mọi liên kết máy đoán.
+
+    KHÁC CHUỖI thì vẫn LOẠI HẲN — đó là phủ quyết về chủ thể, không phải về
+    hiệu lực, và nối chéo chuỗi là sai ở mọi ngữ cảnh.
+
     Mọi liên kết ở đây đều để 'Cần review': máy đề xuất, người chốt.
     """
     no = norm_inv_no(row.get("inv_no") or "")
@@ -132,31 +170,45 @@ def _resolve_row(row, idx, chain, cus_chain, allowed):
     if not cands:
         return None, "khong_tim_thay_so", CONF_NONE
 
-    # Phủ quyết dùng chung với bảng kê: khác chuỗi, hoặc hóa đơn đã hủy/thay thế
-    # bên MISA. Ở nhánh đoán này thì LOẠI hẳn chứ không chỉ hạ độ tin cậy.
+    # KHÁC CHUỖI -> loại hẳn. `_invoice_objection` gộp hai chuyện khác nhau vào
+    # một hàm, nên phải tách lại ở đây: chỉ vế "khác chuỗi" mới là phủ quyết.
     step = [n for n in cands
-            if not _invoice_objection(idx["info"][n], chain, cus_chain)
+            if _invoice_objection(idx["info"][n], chain, cus_chain) != OBJ_OTHER_CHAIN
             and (not allowed or idx["info"][n].get("customer") in allowed)]
     if not step:
         return None, "so_co_nhung_khac_chuoi", CONF_NONE
+
+    # Hóa đơn đã điều chỉnh/thay thế: giữ làm ứng viên nhưng ĐẨY XUỐNG SAU.
+    live = [n for n in step if not _invoice_objection(idx["info"][n], chain, cus_chain)]
+    dead = [n for n in step if n not in live]
+    if live:
+        step, tail = live, "so_trong_chuoi"
+    else:
+        step, tail = dead, "so_trong_chuoi_da_dieu_chinh"
+
     if len(step) == 1:
-        return step[0], "so_trong_chuoi", CONF_REVIEW
+        return step[0], tail, CONF_REVIEW
 
     inv_date = row.get("inv_date")
     if inv_date:
         by_date = [n for n in step
                    if cstr(idx["info"][n].get("posting_date")) == cstr(inv_date)]
         if len(by_date) == 1:
-            return by_date[0], "so_ngay", CONF_REVIEW
+            return by_date[0], "so_ngay" + _suffix(tail), CONF_REVIEW
         if by_date:
             step = by_date
 
+    # So TIỀN theo HAI mốc, vì hai bên có thể đang nói về hai thời điểm khác nhau:
+    #   · `grand_total`        — hóa đơn GỐC, trước khi điều chỉnh;
+    #   · `grand_total − trả lại` — sau khi đã làm phiếu trả hàng trên ERPNext.
+    # File công nợ của chuỗi ghi con số nào là tùy chuỗi và tùy thời điểm họ
+    # chốt. Chỉ so một mốc là trượt đúng những hóa đơn đã điều chỉnh — mà đó lại
+    # là nhóm dễ sai tiền nhất.
     amount = abs(flt(row.get("gross") or 0))
     if amount:
-        by_amt = [n for n in step
-                  if abs(abs(flt(idx["info"][n].get("grand_total"))) - amount) <= PAID_TOLERANCE]
+        by_amt = [n for n in step if _amount_hits(idx["info"][n], amount)]
         if len(by_amt) == 1:
-            return by_amt[0], "so_ngay_tien", CONF_REVIEW
+            return by_amt[0], "so_ngay_tien" + _suffix(tail), CONF_REVIEW
 
     return None, "con_%d_ung_vien" % len(step), CONF_REVIEW
 
@@ -599,7 +651,7 @@ def _settled_query(company, chain, cutover, parent, params):
                    "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT})
     in_cus = _customer_in_clause(chain_customers(chain), params, prefix="scc")
     mt = _mt_clause(params)
-    join = _paid_subquery()
+    join = _debt_joins()
     return """
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
@@ -608,7 +660,7 @@ def _settled_query(company, chain, cutover, parent, params):
           AND si.is_return = 0
           AND si.posting_date <= %(cut)s
           AND {in_cus} AND {mt}
-          AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < ABS(si.grand_total) - %(tol)s
+          AND (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)) < (ABS(si.grand_total) - IFNULL(rt.returned, 0)) - %(tol)s
           AND NOT EXISTS (SELECT 1 FROM `tabMT Opening Invoice` oi
                           WHERE oi.parent = %(parent)s
                             AND oi.parenttype = 'MT Opening Balance'

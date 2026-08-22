@@ -118,10 +118,51 @@ def main():
           f"({method})")
     bad += not ok
 
+    # ── 2b. Hóa đơn ĐÃ ĐIỀU CHỈNH vẫn phải nối được ─────────────────────
+    #
+    # Quy trình thật: giao hàng -> hàng móp/lỗi -> điều chỉnh hóa đơn MISA ->
+    # trả lại trên ERPNext. `misa_sync._mark_superseded` đặt hóa đơn GỐC thành
+    # 'Đã thay thế'. Ở BẢNG KÊ THANH TOÁN, loại nó là đúng. Ở SỐ DƯ ĐẦU KỲ thì
+    # loại nó là để chính khoản nợ đó biến mất lúc chốt.
     dead = dict(SI_A, name="SI-D", snap_dead=1)
-    si, _m, _c = st._resolve_row(row, idx_of([dead]), "AEON", cus_chain, allowed)
-    ok = si is None
-    print(f"  {'✅' if ok else '❌'} hóa đơn đã hủy/thay thế bên MISA -> loại khỏi ứng viên")
+    si, method, conf = st._resolve_row(row, idx_of([dead]), "AEON", cus_chain, allowed)
+    ok = si == "SI-D" and method.endswith("_da_dieu_chinh")
+    print(f"  {'✅' if ok else '❌'} hóa đơn đã điều chỉnh VẪN nối được ({method}) — loại "
+          f"nó là để khoản nợ đó biến mất khi chốt")
+    bad += not ok
+
+    live = dict(SI_A, name="SI-L")
+    si, method, _c = st._resolve_row(row, idx_of([dead, live]), "AEON", cus_chain, allowed)
+    ok = si == "SI-L" and not method.endswith("_da_dieu_chinh")
+    print(f"  {'✅' if ok else '❌'} có cả hóa đơn còn hiệu lực -> ưu tiên nó (`{si}`), hóa "
+          f"đơn đã điều chỉnh chỉ là phương án cuối")
+    bad += not ok
+
+    si, method, _c = st._resolve_row(
+        row, idx_of([dict(SI_X, snap_dead=1)]), "AEON", cus_chain, allowed)
+    ok = si is None and method == "so_co_nhung_khac_chuoi"
+    print(f"  {'✅' if ok else '❌'} KHÁC CHUỖI thì vẫn loại hẳn — nới cho 'đã điều chỉnh' "
+          f"không được nới luôn cho nối chéo chuỗi")
+    bad += not ok
+
+    # ── 2c. So tiền: thử cả TRƯỚC và SAU khi trả lại ────────────────────
+    # File công nợ của chuỗi có thể ghi số sau điều chỉnh, còn ERPNext giữ số
+    # gốc. Chỉ so một mốc là trượt đúng nhóm hóa đơn dễ sai tiền nhất.
+    part = dict(SI_A, name="SI-P", grand_total=1000.0, returned=200.0)
+    other = dict(SI_A, name="SI-O", grand_total=5000.0, posting_date="2026-06-01")
+    r_after = {"inv_no": "00003333", "inv_date": "2026-06-01", "gross": 800.0}
+    si, method, _c = st._resolve_row(r_after, idx_of([part, other]), "AEON",
+                                     cus_chain, allowed)
+    ok = si == "SI-P" and method.startswith("so_ngay_tien")
+    print(f"  {'✅' if ok else '❌'} file ghi 800 (sau trả lại 200) mà hóa đơn ghi 1.000 "
+          f"-> vẫn nối đúng `{si}`")
+    bad += not ok
+
+    r_before = {"inv_no": "00003333", "inv_date": "2026-06-01", "gross": 1000.0}
+    si, _m, _c = st._resolve_row(r_before, idx_of([part, other]), "AEON",
+                                 cus_chain, allowed)
+    ok = si == "SI-P"
+    print(f"  {'✅' if ok else '❌'} file ghi 1.000 (số gốc) -> cũng nối đúng `{si}`")
     bad += not ok
 
     # ── 3. Một hóa đơn chỉ giữ lại MỘT lần ──────────────────────────────

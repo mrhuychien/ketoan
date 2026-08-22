@@ -172,7 +172,7 @@ def main():
 
     # ── 3. `paid` và `clawed_back` không đếm chung một dòng ──────────────
     print("-" * 78)
-    sql = mt._paid_subquery()
+    sql = mt._paid_join()
     flat = " ".join(sql.split())
     # Cả hai vế của `paid` phải kèm điều kiện row_kind = thanh toán.
     paid_part = flat.split("AS paid,")[0]

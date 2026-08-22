@@ -566,7 +566,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-L1** danh sách đợt giao Winmart chưa xuất hóa đơn | `8dee7d8` | — |
 | **MT2-L2** đọc phiếu nhập kho Winmart (PDF) + đối soát PO/mã hàng | `8db013e` | `win_grn_check` |
 | **MT2-K4** cất số dư đầu kỳ + luật tất toán trước ngày chuyển giao | `fbb77d5` | `opening_store_check` |
-| **MT2-M** parser thanh toán Mega Market — chuỗi cuối cùng | *(commit này)* | `mega_check` · `regression_check` · `crosscheck_mt2` |
+| **MT2-M** parser thanh toán Mega Market — chuỗi cuối cùng | `3742487` | `mega_check` · `regression_check` · `crosscheck_mt2` |
+| **MT2-N** hàng trả lại trừ vào chính hóa đơn gốc (1 lần bán = 2 chứng từ) | *(commit này)* | `debt_due_check` · `opening_store_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -580,6 +581,67 @@ for t in regression_check crosscheck_mt2 mutation_check \
   python3 docs/mt/verified/$t.py
 done
 ```
+
+### Một lần bán, HAI chứng từ ERPNext — hàng trả lại
+
+Quy trình thật của kênh MT:
+
+```
+đơn hàng → hóa đơn ERPNext → hóa đơn MISA → ký → giao hàng
+         → hàng móp/lỗi → ĐIỀU CHỈNH hóa đơn MISA → TRẢ LẠI trên ERPNext
+```
+
+Sau khi điều chỉnh, **một lần bán tương ứng HAI chứng từ ERPNext**: hóa đơn gốc
+và phiếu trả hàng (`is_return = 1`, `return_against` trỏ về gốc). Ba chỗ hỏng
+theo ba kiểu khác nhau:
+
+#### 1. Nợ không trừ hàng trả lại — SAI TIỀN, có sẵn từ trước
+
+`return_against` **chưa từng được dùng** ở bất kỳ đâu trong kênh MT. Hóa đơn
+100tr bị trả 20tr vẫn đòi **đủ 100tr mãi mãi**, còn 20tr phiếu trả hàng trôi vào
+một ô tổng riêng không dính vào hóa đơn nào. Chuỗi trả 80tr là đúng, màn hình
+vẫn đòi thêm 20tr không tồn tại.
+
+Sửa: bảng tạm `rt` cộng phiếu trả hàng theo `return_against`, và **mọi** phép so
+nợ đổi mẫu số từ `ABS(grand_total)` sang
+
+```
+_NET_DUE = ABS(si.grand_total) − IFNULL(rt.returned, 0)
+```
+
+`_paid_subquery` đổi tên thành **`_debt_joins`** và trả về **cả hai** join. Gộp
+là có chủ đích: quên `p` thì nổ SQL ngay, còn **quên `rt` thì sai tiền im lặng**.
+
+Chỉ đếm phiếu trả hàng **đã ghi sổ** và **có khai `return_against`**. Phiếu đứng
+rời không tự trừ vào đâu — đoán xem nó thuộc hóa đơn nào là ghi giảm nhầm.
+
+Cột `doanh số` (`invoiced`, `returns_amt`, `credit_notes`, `amount`) **giữ
+nguyên** `grand_total`: chúng nói về giá trị đã xuất, không nói về nợ.
+
+#### 2. Số dư đầu kỳ không nối được hóa đơn đã điều chỉnh
+
+`misa_sync._mark_superseded` đặt hóa đơn GỐC thành `Đã thay thế`, và
+`_invoice_objection` coi đó là phủ quyết.
+
+| Ngữ cảnh | Hóa đơn `Đã thay thế` | Vì sao |
+|---|---|---|
+| Bảng kê thanh toán | **loại hẳn** | không ai trả tiền cho hóa đơn hết hiệu lực |
+| Số dư đầu kỳ | **vẫn là ứng viên** | dòng file nói "CÒN NỢ" — nói về khoản phải thu, không nói về hiệu lực tờ hóa đơn |
+
+Loại hẳn ở số dư đầu kỳ thì dòng đó không giữ được hóa đơn nào lại, và khi chốt,
+đúng hóa đơn đang còn nợ ấy rơi vào vế "không có trong danh sách" → **nợ thật
+biến mất**.
+
+Nên: hóa đơn đã điều chỉnh **bị đẩy xuống sau**, chỉ lấy khi không còn ứng viên
+nào khác, và mang hậu tố `_da_dieu_chinh` để người soi biết. **Khác chuỗi thì
+vẫn loại hẳn** — đó là phủ quyết về chủ thể, sai ở mọi ngữ cảnh. Hai lý do tách
+thành hai hằng số `OBJ_OTHER_CHAIN` / `OBJ_DEAD_INVOICE`.
+
+#### 3. So tiền trượt vì hai bên nói về hai thời điểm
+
+File công nợ chuỗi có thể ghi số **sau** điều chỉnh, ERPNext giữ số **gốc**. So
+một mốc là trượt đúng nhóm hóa đơn dễ sai tiền nhất. Nên thử **cả hai**:
+`grand_total` và `grand_total − returned`. `_si_index` mang thêm cột `returned`.
 
 ### Số dư đầu kỳ — một luật ĐỌC, không phải bút toán
 
