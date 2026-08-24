@@ -137,8 +137,8 @@ export async function render({ container }) {
               <thead><tr>
                 <th><input type="checkbox" id="bi-all"></th>
                 <th>Ngày</th><th>Nội dung (→ user_remark)</th><th class="num">Số tiền</th>
-                <th style="min-width:190px">TK đối ứng</th><th style="min-width:160px">Đối tượng</th>
-                <th style="min-width:160px">Ghi chú (→ remark)</th><th></th>
+                <th class="kt-col-wide">TK đối ứng</th><th class="kt-col-mid">Đối tượng</th>
+                <th class="kt-col-mid">Ghi chú (→ remark)</th><th></th>
               </tr></thead>
               <tbody>${txns.map((t) => txnRow(t))}</tbody>
             </table></div>
@@ -433,7 +433,7 @@ export async function render({ container }) {
     return html`<tr>
       <td><input type="checkbox" class="bi-cb" value="${t.key}" ${disabled ? "disabled" : ""} ${!disabled && t.checked ? "checked" : ""}></td>
       <td style="white-space:nowrap">${t.date}</td>
-      <td title="${t.content}" style="min-width:170px;max-width:250px;white-space:normal;font-size:12px;line-height:1.45">
+      <td title="${t.content}" style="max-width:250px;font-size:12px;line-height:1.45">
         ${(t.content || "").slice(0, 110)}${t.content && t.content.length > 110 ? "…" : ""}
         ${badges.length ? html`<div style="margin-top:3px">${badges}</div>` : ""}
       </td>

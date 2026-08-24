@@ -39,7 +39,7 @@ export async function render({ container }) {
             <div class="kt-table-wrap"><table class="kt-table">
               <thead><tr>
                 <th>Tài khoản</th>
-                ${roles.map((r) => html`<th style="text-align:center;white-space:normal;min-width:86px">${r.label}</th>`)}
+                ${roles.map((r) => html`<th class="kt-col-role">${r.label}</th>`)}
                 <th></th>
               </tr></thead>
               <tbody>

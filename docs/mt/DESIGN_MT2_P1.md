@@ -573,7 +573,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-Q** hóa đơn cũ thiếu RefID — cấp lại được từ portal | `59222f0` | `refid_check` |
 | **MT2-R** số dư đầu kỳ khớp theo HÓA ĐƠN THAY THẾ | `56f3591` | `opening_store_check` · `replaced_inv_survey` |
 | **MT2-S** gán SỐ HÓA ĐƠN THAY THẾ lên chứng từ đã ghi sổ (patch v0_0_17) | `1414f9b` | `replace_check` |
-| **MT2-T** đối chiếu số dư đầu kỳ Excel ↔ sổ cái ERPNext, từng siêu thị | *(commit này)* | `opening_gl_check` |
+| **MT2-T** đối chiếu số dư đầu kỳ Excel ↔ sổ cái ERPNext, từng siêu thị | `90bab9e` | `opening_gl_check` |
+| **MT2-U** bảng không cuộn ngang — đo bằng Chromium, không đoán | *(commit này)* | `table_width_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -583,7 +584,8 @@ for t in regression_check crosscheck_mt2 mutation_check \
          discount_basis_check discount_sheet_check win_dossier_check \
          debt_due_check rebate_pdf_check clawback_check ui_board_check \
          chain_filter_check opening_check win_grn_check opening_store_check \
-         mega_check refid_check replace_check opening_gl_check; do
+         mega_check refid_check replace_check opening_gl_check \
+         table_width_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -872,6 +874,49 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-U — bảng không cuộn ngang
+
+`ketoan/public/ketoan/shell.css` · bộ đo `docs/mt/verified/table_width_check.py`.
+
+Lỗi gốc nằm ở MỘT dòng: `.kt-table th, .kt-table td { white-space: nowrap }`.
+Mọi ô cấm xuống dòng ⇒ bề rộng tự nhiên của bảng = tổng bề rộng không-xuống-dòng
+của tất cả các ô ⇒ `.kt-table-wrap { overflow-x: auto }` biến thành thanh cuộn.
+
+**Đo trước khi sửa** (Chromium, 71 bảng rút thẳng từ `views/*.js`, đổ nội dung
+dài đúng cỡ thật):
+
+| Bề rộng | Bảng tràn | Tràn nhiều nhất |
+|---|---|---|
+| 1440px | **33/71** | phân quyền 1541px · công nợ MT 847px |
+| 1280px | 37/71 | 1677px |
+| 1024px | **67/71** | 1933px |
+
+Bốn thứ phải sửa, và ba trong số đó chỉ lộ ra khi đo/nhìn:
+
+1. **`overflow-wrap: anywhere`, không phải `break-word`.** Chỉ `anywhere` mới hạ
+   `min-content` của ô — con số mà thuật toán dàn bảng dùng để quyết định co
+   được tới đâu. Với `break-word`, một mã `ACC-SINV-2026-04793` vẫn đủ sức đẩy
+   bảng tràn (đo được: 1 bảng vẫn tràn 185px ở 1440px).
+2. **`.num { nowrap }` đang áp cả cho `<th>`.** Nhãn "TIỀN HÀNG TRONG KỲ" chiếm
+   169px trong khi con số bên dưới chỉ cần 119px — nhãn cột tự đẩy bảng tràn.
+   Đổi thành `td.num`.
+3. **Sàn cho cột chữ.** Đây là thứ ĐO KHÔNG THẤY, phải chụp ảnh: `anywhere` cho
+   phép trình duyệt bóp cột chữ còn ~1 ký tự để nuôi cột tiền, kết quả là số đo
+   xanh nhưng tên khách vỡ thành 12 dòng và mã chứng từ thành `AC C- SIN V- 202
+   6- 047 93`. Sàn 48px mọi cột chữ + 96px cột đầu là điểm cân bằng dò được.
+4. **Bỏ `min-width` inline trong `<th>`** (bankimport 190/160/160px, roles 86px ×
+   18 cột = 1548px ép cứng) → chuyển thành class nới được theo màn hình.
+
+Kết quả: **71/71 bảng nằm gọn ở 1440 · 1366 · 1280px**, trang không cuộn ngang.
+
+**Giới hạn còn lại, nói thẳng:** hai bảng tổng hợp công nợ MT có CHÍN cột tiền
+tỷ. Một số `1.234.567.890` cần ~90px dù font nhỏ tới đâu ⇒ riêng phần số đã
+~810px, không lọt 940px còn lại của màn 1024. Ba lối ra — cho số tiền xuống dòng
+(rủi ro đọc nhầm tiền), rút gọn `1,23 tỷ` (đổi độ chính xác trên màn kế toán),
+bớt cột (bỏ thông tin) — đều là quyết định nghiệp vụ, không phải quyết định CSS.
+Nên hai bảng đó giữ lưới an toàn `overflow-x: auto` dưới 1280px, và bộ kiểm gọi
+tên chúng thay vì giấu đi.
 
 ### MT2-T — đối chiếu Excel ↔ SỔ CÁI, từng siêu thị
 

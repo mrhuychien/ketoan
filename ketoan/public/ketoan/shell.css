@@ -94,18 +94,77 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-aging-fill { height: 100%; border-radius: 6px; }
 .kt-aging-amt { font-weight: 700; white-space: nowrap; }
 
-/* ===== Table ===== */
-.kt-table-wrap { overflow-x: auto; border: 1px solid var(--kt-border); border-radius: var(--kt-r-md); }
-.kt-table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--kt-bg-card); }
-.kt-table th, .kt-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--kt-border); white-space: nowrap; }
-/* Ô nội dung dài (TK đối ứng, diễn giải, việc cần làm...) — cho xuống dòng trong ô, không tràn đè cột số. */
+/* ===== Table =====
+ *
+ * KHÔNG CUỘN NGANG. Bảng phải nằm gọn trong khung.
+ *
+ * Trước đây MỌI ô đều `white-space: nowrap`, nên bề rộng tự nhiên của bảng bằng
+ * tổng bề rộng-không-xuống-dòng của tất cả các ô. Đo bằng Chromium trên chính
+ * file này: 33/71 bảng tràn ngay ở màn 1440px, bảng công nợ MT tràn 847px, bảng
+ * phân quyền tràn 1541px; xuống 1024px thì 67/71 bảng tràn.
+ *
+ * Cuộn ngang trong một trang vốn đã cuộn dọc là kiểu điều hướng tệ nhất: cột
+ * khóa (tên khách, số hóa đơn) trôi khỏi màn hình đúng lúc người ta đang đọc con
+ * số ở cột cuối, phải cuộn đi cuộn lại để đọc MỘT dòng.
+ *
+ * `overflow-wrap: anywhere` là CỐ Ý, không phải `break-word`. Chỉ `anywhere` mới
+ * hạ bề rộng TỐI THIỂU (min-content) của ô — mà thuật toán dàn bảng dùng đúng
+ * con số đó để quyết định co được tới đâu. `break-word` giữ min-content bằng từ
+ * dài nhất, nên một mã chứng từ `ACC-SINV-2026-04793` vẫn đủ sức đẩy bảng tràn.
+ * Khác biệt này không đọc CSS mà thấy được — phải đo, xem `table_width_check.py`.
+ *
+ * Số tiền là NGOẠI LỆ: `td.num` giữ nowrap ở mọi cỡ màn hình. Một con số bị bẻ
+ * đôi giữa hai dòng là rủi ro đọc nhầm tiền, tệ hơn hẳn cuộn ngang. Chính ngoại
+ * lệ này là lý do hai bảng tổng hợp công nợ MT (9 cột tiền tỷ) vẫn giữ thanh
+ * cuộn dưới 1280px — xem `WIDTHS_REPORT` trong `table_width_check.py`.
+ *
+ * `.kt-table-wrap { overflow-x: auto }` giữ lại làm LƯỚI AN TOÀN, không phải
+ * cách dùng bình thường: bảng quá rộng thật thì cuộn trong khung vẫn hơn là
+ * đẩy toàn trang lệch đi.
+ */
+.kt-table-wrap { overflow-x: auto; min-width: 0; max-width: 100%; border: 1px solid var(--kt-border); border-radius: var(--kt-r-md); }
+.kt-table { width: 100%; max-width: 100%; border-collapse: collapse; font-size: 13px; background: var(--kt-bg-card); }
+.kt-table th, .kt-table td { padding: 10px 9px; text-align: left; border-bottom: 1px solid var(--kt-border);
+  white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+/* SÀN cho cột chữ — thứ mà đo bề rộng KHÔNG phát hiện được, phải chụp ảnh mới thấy.
+ *
+ * `overflow-wrap: anywhere` bảo đảm bảng co lọt khung, nhưng nó cũng cho phép
+ * trình duyệt bóp cột chữ xuống còn ~1 ký tự để nuôi các cột tiền `nowrap`. Kết
+ * quả đo thì xanh, còn nhìn thì tên khách vỡ thành 12 dòng và mã chứng từ thành
+ * `AC C- SIN V- 202 6- 047 93`. Vừa lọt khung vừa không đọc được thì cũng hỏng.
+ *
+ * Hai mức sàn, cả hai đều dò bằng đo chứ không chọn cho tròn số:
+ *   48px  mọi cột chữ  — đủ để nhãn cột không vỡ dọc từng chữ cái;
+ *   96px  CỘT ĐẦU      — cột định danh, nơi vỡ chữ làm cả dòng không đọc nổi.
+ *
+ * Sàn cao hơn thì chính bảng cần nó lại tràn: 92px cho MỌI cột làm bảng phân
+ * quyền 18 cột tràn 340px; 96px cho HAI cột đầu làm bảng công nợ MT tràn 27px.
+ * Đây là điểm cân bằng đo được, đừng nới lên mà không chạy lại `table_width_check`. */
+.kt-table th:not(.num), .kt-table td:not(.num) { min-width: 48px; }
+.kt-table tr > :first-child:not(.num) { min-width: 96px; }
+/* Giữ lại cho mã cũ đang dùng — nay trùng với mặc định, chỉ còn là chỉ dấu "ô này chắc chắn dài". */
 .kt-table td.kt-cell-wrap { white-space: normal; word-break: break-word; overflow-wrap: anywhere; vertical-align: top; }
-.kt-table th { background: var(--kt-bg-input); color: var(--kt-text-2); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; position: sticky; top: 0; }
+/* Tiêu đề LUÔN xuống dòng được, kể cả cột số. Đo được: `.num { nowrap }` áp cả
+ * cho `<th>` làm nhãn "TIỀN HÀNG TRONG KỲ" chiếm 169px trong khi con số bên dưới
+ * chỉ cần 119px — nhãn cột tự đẩy bảng tràn. Nhãn xuống dòng thì cao thêm một
+ * dòng; con số xuống dòng thì đọc nhầm tiền. Ưu tiên rõ ràng. */
+.kt-table th { background: var(--kt-bg-input); color: var(--kt-text-2); font-size: 11px; text-transform: uppercase; letter-spacing: .2px; position: sticky; top: 0; white-space: normal; }
 .kt-table tbody tr:last-child td { border-bottom: none; }
 .kt-table tbody tr:hover { background: #f8fafc; }
-.kt-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* `td.num` chứ không phải `.num`: nowrap chỉ dành cho Ô SỐ, không cho tiêu đề. */
+.kt-table th.num { text-align: right; }
+.kt-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .kt-table .danger { color: var(--kt-danger); font-weight: 700; }
 .kt-table .pos { color: var(--kt-success); }
+/* Cột có Ô NHẬP/CHỌN bên trong: cần bề rộng tối thiểu để còn bấm được, nhưng
+ * phải nhả ra khi màn hẹp — nếu không thì đúng ba cột này kéo cả bảng tràn. */
+.kt-table .kt-col-wide { min-width: 170px; }
+.kt-table .kt-col-mid { min-width: 120px; }
+/* Cột đánh dấu vai trò ở màn phân quyền: 18 cột × 86px inline = 1548px ép cứng,
+ * một mình nó làm bảng tràn 1541px ở màn 1440. Nới theo màn hình. */
+.kt-table .kt-col-role { text-align: center; min-width: 56px; }
+/* Ô hành động (nút) không được xuống dòng giữa các nút. */
+.kt-table .kt-cell-act { white-space: nowrap; }
 .kt-row-link { cursor: pointer; }
 
 /* ===== Badge / chip / light ===== */
@@ -270,12 +329,32 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .kt-mb { margin-bottom: 16px; }
 
+/* Bảng nhiều cột tiền (công nợ MT: 9 cột tiền tỷ) chỉ vừa khung ở màn rộng.
+ * Co ô lại theo từng nấc thay vì để tràn — đo từng nấc trong `table_width_check`. */
+@media (max-width: 1300px) {
+  .kt-table th, .kt-table td { padding: 8px 8px; }
+  .kt-table { font-size: 12px; }
+  .kt-table th { letter-spacing: 0; }
+}
+
 @media (max-width: 900px) {
   .kt-grid-2, .kt-row2 { grid-template-columns: 1fr; }
   .kt-header-title h1 { font-size: 16px; }
+  /* Ô hẹp lại thay vì đẩy bảng ra ngoài khung. 13 cột × 8px tiết kiệm hai bên
+   * là hơn 200px — đủ để cả bảng công nợ MT lọt màn hình máy tính bảng. */
+  .kt-table th, .kt-table td { padding: 7px 6px; }
+  .kt-table { font-size: 12px; }
+  .kt-table th { letter-spacing: 0; }
+  .kt-table .kt-col-wide { min-width: 120px; }
+  .kt-table .kt-col-mid { min-width: 0; }
+  .kt-table .kt-col-role { min-width: 44px; }
 }
 @media (max-width: 640px) {
   .kt-main { padding: 14px 12px 90px; }
+  .kt-table th, .kt-table td { padding: 6px 6px; }
+  .kt-table { font-size: 11.5px; }
+  .kt-table .kt-col-wide { min-width: 0; }
+  .kt-table .kt-col-role { min-width: 34px; }
   .kt-header, .kt-nav { padding-left: 12px; padding-right: 12px; }
   .kt-nav { position: sticky; top: auto; bottom: 0; z-index: 60; border-top: 1px solid var(--kt-border); border-bottom: none; justify-content: space-around; box-shadow: 0 -2px 8px rgb(15 23 42 / 0.06); }
   .kt-nav-item span { display: none; }
