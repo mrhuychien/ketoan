@@ -189,7 +189,15 @@ def build_payload(si, settings):
     """Dựng object hóa đơn gửi MISA từ một Sales Invoice đã ghi sổ."""
     ref_id = (si.get("custom_misa_ref_id") or "").strip()
     if not ref_id:
-        frappe.throw(_("Hóa đơn {0} chưa có RefID MISA — ghi sổ lại hoặc chạy backfill_ref_id").format(si.name))
+        # Câu báo lỗi phải chỉ được chỗ BẤM, không chỉ tên hàm: bảo kế toán "chạy
+        # backfill_ref_id" là bảo họ làm một việc không có nút nào trên portal.
+        frappe.throw(_(
+            "Hóa đơn {0} chưa có RefID MISA nên chưa đẩy được.\n\n"
+            "Hóa đơn ghi sổ TRƯỚC khi cài app không đi qua bước cấp RefID. Vào màn "
+            "hình 'Hóa đơn VAT' và bấm nút 'Cấp RefID cho hóa đơn cũ' (kế toán trưởng), "
+            "rồi xuất lại. Việc đó KHÔNG phát hành lại hóa đơn nào — hóa đơn đã có số "
+            "sẽ dừng với 'Hóa đơn đã được xuất trước đó'."
+        ).format(si.name))
 
     by_box = bool(si.get("custom_xuất_theo_hộp_"))
     fallback = _fallback_rate(si)

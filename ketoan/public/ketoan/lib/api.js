@@ -135,6 +135,7 @@ export const api = {
   vatImportCommit: (content) => callMethod(NS + "misa_import.commit", { content }),
   vatLegacyPreview: (a) => callMethod(NS + "misa_legacy.preview", withCompany(a)),
   vatLegacyCommit: (a) => callMethod(NS + "misa_legacy.commit", withCompany(a)),
+  vatBackfillRefId: (limit) => callMethod(NS + "misa_sync.backfill_ref_id", { limit }),
   // `expected_hash` đi kèm trong `a` — backend từ chối nạp nếu thiếu.
 
   // Công nợ MT (siêu thị hiện đại) + bảng kê thanh toán của chuỗi

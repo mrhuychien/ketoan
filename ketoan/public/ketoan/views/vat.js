@@ -63,6 +63,12 @@ function shell(state, ov) {
         ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-legacy"><i class="fas fa-right-left"></i> Chuyển số HĐ cũ</button>` : ""}
         ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-import"><i class="fas fa-file-import"></i> Nhập file MISA</button>` : ""}
         ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-sync"><i class="fas fa-rotate"></i> Đồng bộ MISA</button>` : ""}
+        ${ov.can_sync && ov.missing_ref_id
+          ? html`<button class="kt-btn kt-btn--danger kt-btn--sm" id="vat-refid"
+                   title="Hóa đơn ghi sổ TRƯỚC khi cài app không đi qua hook cấp RefID, nên bị chặn ngay khi bấm xuất hóa đơn.">
+              <i class="fas fa-key"></i> Cấp RefID cho ${ov.missing_ref_id} hóa đơn cũ
+            </button>`
+          : ""}
       </div>
     </div>
 
@@ -152,6 +158,23 @@ function bind(container, state, ov) {
 
   const leg = container.querySelector("#vat-legacy");
   if (leg) leg.addEventListener("click", () => openLegacyModal());
+
+  const rid = container.querySelector("#vat-refid");
+  if (rid) rid.addEventListener("click", async () => {
+    if (!confirm(
+        "Cấp RefID cho hóa đơn cũ (mỗi lượt tối đa 500)?\n\n" +
+        "RefID chỉ là khóa nối để không bị chặn khi xuất hóa đơn. Việc này KHÔNG " +
+        "phát hành lại hóa đơn nào: hóa đơn đã có số sẽ dừng ở 'Hóa đơn đã được " +
+        "xuất trước đó'.")) return;
+    rid.disabled = true;
+    try {
+      const r = await api.vatBackfillRefId(500);
+      toast(`Đã cấp RefID cho ${r.updated} hóa đơn. Còn thiếu ${r.remaining}.`,
+            "success");
+      if (r.remaining) toast(`Còn ${r.remaining} hóa đơn — bấm lại để chạy tiếp.`, "error");
+      location.reload();
+    } catch (e) { toast(e.message, "error"); rid.disabled = false; }
+  });
 
   const sync = container.querySelector("#vat-sync");
   if (sync) sync.addEventListener("click", async () => {

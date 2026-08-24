@@ -569,7 +569,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-M** parser thanh toán Mega Market — chuỗi cuối cùng | `3742487` | `mega_check` · `regression_check` · `crosscheck_mt2` |
 | **MT2-N** hàng trả lại trừ vào chính hóa đơn gốc (1 lần bán = 2 chứng từ) | `672665e` `57f83c2` | `debt_due_check` · `opening_store_check` |
 | **MT2-N2** ô tìm ứng viên tìm SAI CHỖ — đường nối tay chết từ đầu | `10508c9` | `opening_store_check` |
-| **MT2-P** một hóa đơn MISA nối được NHIỀU chứng từ ERPNext | *(commit này)* | `opening_store_check` |
+| **MT2-P** một hóa đơn MISA nối được NHIỀU chứng từ ERPNext | `02c09c0` | `opening_store_check` |
+| **MT2-Q** hóa đơn cũ thiếu RefID — cấp lại được từ portal | *(commit này)* | `refid_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -579,7 +580,7 @@ for t in regression_check crosscheck_mt2 mutation_check \
          discount_basis_check discount_sheet_check win_dossier_check \
          debt_due_check rebate_pdf_check clawback_check ui_board_check \
          chain_filter_check opening_check win_grn_check opening_store_check \
-         mega_check; do
+         mega_check refid_check; do
   python3 docs/mt/verified/$t.py
 done
 ```

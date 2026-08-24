@@ -15,7 +15,7 @@ bên xuất hóa đơn mà không có trong sổ.
 
 import frappe
 from frappe import _
-from frappe.utils import add_months, flt, nowdate
+from frappe.utils import add_months, cint, flt, nowdate
 
 from ketoan.api._guard import guard_sales_any, is_chief
 
@@ -35,6 +35,16 @@ def _company(company=None):
 # ═══════════════════════════════════════════════════════════════════════════
 # Tổng quan
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _missing_ref_id():
+    try:
+        from ketoan.api.misa_sync import count_missing_ref_id
+
+        return {"missing_ref_id": cint(count_missing_ref_id().get("missing"))}
+    except Exception:                                              # noqa: BLE001
+        # Đếm phụ trợ KHÔNG được làm hỏng cả màn hình VAT.
+        return {"missing_ref_id": 0}
+
 
 @frappe.whitelist()
 def get_overview(company=None, from_date=None, to_date=None):
@@ -106,6 +116,11 @@ def get_overview(company=None, from_date=None, to_date=None):
         "last_sync": last[0] if last else None,
         "has_snapshot": has_snapshot,
         "can_sync": is_chief(),
+        # Hóa đơn ghi sổ TRƯỚC khi cài app không đi qua hook `before_submit` nên
+        # không có RefID, và bị chặn ngay khi bấm xuất hóa đơn. Đếm sẵn ở đây để
+        # màn hình bày ra con số + nút xử, thay vì để kế toán gặp lỗi rồi được
+        # bảo "chạy backfill_ref_id" — một câu họ không bấm được ở đâu cả.
+        **(_missing_ref_id() if is_chief() else {"missing_ref_id": 0}),
     }
 
 

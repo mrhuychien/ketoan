@@ -107,12 +107,41 @@ def ensure_ref_id(doc, method=None):
 
 
 @frappe.whitelist()
+def count_missing_ref_id():
+    """Bao nhiêu hóa đơn ĐÃ ghi sổ còn thiếu `custom_misa_ref_id`.
+
+    Hóa đơn ghi sổ TRƯỚC khi cài app không đi qua hook `before_submit` nên không
+    bao giờ được cấp ref_id. Đó là toàn bộ hóa đơn cũ, và chúng chặn ở
+    `build_payload` khi bấm xuất hóa đơn.
+    """
+    from ketoan.api._guard import guard_manager
+
+    guard_manager()
+    if not frappe.db.has_column("Sales Invoice", "custom_misa_ref_id"):
+        return {"missing": 0, "ready": False}
+    return {
+        "missing": frappe.db.count(
+            "Sales Invoice", {"docstatus": 1, "custom_misa_ref_id": ("is", "not set")}),
+        "ready": True,
+    }
+
+
+@frappe.whitelist()
 def backfill_ref_id(limit=500):
     """Cấp `custom_misa_ref_id` cho hóa đơn ĐÃ ghi sổ mà còn thiếu.
 
-    Lưu ý: ref_id sinh bây giờ KHÔNG khớp ngược được với MISA — MISA giữ ref_id
-    khác do luồng cũ sinh rồi vứt (§L.4.1). Hóa đơn cũ phải đối soát bằng tầng
-    MST + ngày + tiền. Cấp ref_id ở đây chỉ để mọi hóa đơn đều có khóa.
+    VÌ SAO THIẾU: hook `before_submit` chỉ chạy khi ghi sổ. Hóa đơn ghi sổ TRƯỚC
+    khi cài app không đi qua nó, nên không có ref_id — và `build_payload` chặn.
+
+    ⚠ ref_id sinh ở đây KHÔNG khớp ngược được với MISA: hóa đơn cũ đã phát hành
+    thì MISA đang giữ một ref_id khác do luồng cũ sinh rồi vứt (§L.4.1). Nên
+    KHÔNG dùng cái này để đối soát hóa đơn cũ — đối soát bằng tầng MST + ngày +
+    tiền. Cấp ref_id ở đây chỉ để mọi hóa đơn đều có khóa và không bị chặn.
+
+    ⚠ CHẠY CÁI NÀY KHÔNG LÀM HÓA ĐƠN CŨ BỊ PHÁT HÀNH LẠI. `push_invoice` chặn
+    trùng bằng BA cờ đọc dưới khóa hàng: `custom_misa_pushed_at`,
+    `vn_einvoice_lookup_code`, `custom_misa_inv_no`. Hóa đơn cũ đã có số thì
+    dừng ở đó với "Hóa đơn đã được xuất trước đó".
     """
     from ketoan.api._guard import guard_manager
 
