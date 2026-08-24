@@ -457,8 +457,17 @@ def read_opening(content, chain=None, golive=None):
             "party": norm_text(_g(grid, r, cols["party"])) if "party" in cols else "",
             "inv_no": inv_no or None,
             "inv_no_norm": norm_inv_no(inv_no) or None,
+            # Cột "HĐ thay thế". CÓ giá trị nghĩa là số ở cột số hóa đơn đã bị
+            # XÓA BỎ — số còn hiệu lực là số ở đây. Đã đo trên 4 file có cột này:
+            # 605/605 giá trị là số thuần và KHÔNG đệm 0, trong khi cột số hóa
+            # đơn thì CÓ đệm 0 ('00004756' vs '4962'). Bất đối xứng đó làm mọi
+            # phép so THÔ trượt 100%, nên chuẩn hóa NGAY ở đây — để tầng dưới
+            # không ai phải tự nhớ mà gọi lại.
             "inv_replaced_by": (norm_text(_g(grid, r, cols["inv_replaced_by"]))
                                 if "inv_replaced_by" in cols else None) or None,
+            "inv_replaced_by_norm": (
+                norm_inv_no(norm_text(_g(grid, r, cols["inv_replaced_by"])))
+                if "inv_replaced_by" in cols else None) or None,
             "inv_date": to_date(_g(grid, r, cols["inv_date"])) if "inv_date" in cols else None,
             "pay_date": to_date(_g(grid, r, cols["pay_date"])) if "pay_date" in cols else None,
             "note": (norm_text(_g(grid, r, cols["note"])) if "note" in cols else "") or None,

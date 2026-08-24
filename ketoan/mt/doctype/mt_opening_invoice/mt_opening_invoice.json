@@ -8,6 +8,7 @@
   "kind",
   "party",
   "inv_no",
+  "inv_replaced_by",
   "inv_date",
   "col_a",
   "net",
@@ -55,6 +56,14 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Số hóa đơn",
+   "read_only": 1
+  },
+  {
+   "description": "Cột 'HĐ thay thế' trong file. CÓ giá trị nghĩa là số ở cột 'Số hóa đơn' đã bị XÓA BỎ — số còn hiệu lực là số ở đây. LƯU Ý: ERPNext KHÔNG tự có số này. Bản 'bị thay thế' bên MISA không mang OrgInvNo, nên hóa đơn gốc trên ERPNext vẫn giữ SỐ CŨ.",
+   "fieldname": "inv_replaced_by",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Hóa đơn thay thế",
    "read_only": 1
   },
   {

@@ -30,7 +30,30 @@
 ## 1. Vòng đời tháng — 5 bước chung mọi chuỗi
 
 1. **Xuất hóa đơn bán** — theo PO/đơn giao (hệ PO tự động đã có). Riêng Winmart: chỉ xuất sau khi phiếu nhập kho khớp (xem 2.2).
-2. **Móp lỗi / trả lại** — làm chứng từ trả hàng trên ERPNext (Central Retail: giữ cùng số PO) → xuất **hóa đơn điều chỉnh** trên MISA → snapshot tự cập nhật; kiểm tra hóa đơn gốc đã gắn hóa đơn điều chỉnh.
+2. **Móp lỗi / trả lại** — tách theo **hàng có quay về kho hay không**, vì hai vế đi hai đường khác nhau:
+
+   | | Chứng từ ERPNext | Hóa đơn MISA |
+   |---|---|---|
+   | Hàng **quay về kho** (siêu thị trả hàng) | chứng từ **trả hàng** (`is_return`, khai `Return Against`, Central Retail giữ cùng số PO) — có tác động kho | hóa đơn **điều chỉnh** hoặc **thay thế**, tùy chuỗi |
+   | Hàng **ở lại siêu thị**, chỉ giảm tiền | **không** chứng từ kho nào | hóa đơn **thay thế** |
+
+   **Đo trên file công nợ thật của chính công ty: các chuỗi đang dùng HÓA ĐƠN
+   THAY THẾ, không phải điều chỉnh.** Bốn file có cột `HĐ thay thế` (AEON ·
+   Central Retail · LOTTE · WinCommerce), 605 dòng có giá trị; và cột số hóa
+   đơn của Central Retail tên đúng là `HĐ xóa bỏ`, WinCommerce là `HĐ SD/xóa bỏ`.
+
+   Hai loại KHÁC HẲN nhau, đừng gọi lẫn:
+
+   | | Hóa đơn **ĐIỀU CHỈNH** | Hóa đơn **THAY THẾ** |
+   |---|---|---|
+   | Tờ gốc | **CÒN** hiệu lực | **HẾT** hiệu lực (bị xóa bỏ) |
+   | Số tiền tờ mới | phần **CHÊNH** | **TOÀN BỘ** số đúng |
+   | Kho | không đụng | không đụng |
+
+   NĐ 123/2020 Điều 19.2.b cho người bán chọn một trong hai với ca "hàng hóa
+   không đúng quy cách, chất lượng". Tờ mới **bắt buộc** ghi dòng chữ
+   *"Thay thế cho hóa đơn Mẫu số… ký hiệu… số… ngày…"* — chính dòng đó sinh ra
+   `OrgRefID` bên MISA.
 3. **Chiết khấu** — nhận file doanh số/TBCK → đối chiếu → lập **bảng kê BKCK** → xuất **hóa đơn CK** trên MISA → JE (chi tiết mục 3).
 4. **Đối soát thanh toán** — nhận file chi tiết thanh toán → nạp vào portal `/ketoan` (màn MT) → hệ tự khớp từng dòng → xử lý ngoại lệ → duyệt JE (thanh toán + các khoản trừ) → hóa đơn được đánh dấu đã thanh toán.
 5. **Công nợ đến hạn** — theo dõi report công nợ MT; nhắc các hóa đơn sắp/quá hạn theo term của từng Customer.
@@ -42,7 +65,7 @@
 ### 2.1 Central Retail (BigC/GO! — pháp nhân EB, tối thiểu 2 mã: 3003172, 3006634)
 
 - **Xuất HĐ**: theo PO.
-- **Móp lỗi**: trả hàng ERPNext **cùng số PO** → HĐ điều chỉnh MISA → cập nhật sổ.
+- **Móp lỗi**: hàng về kho thì trả hàng ERPNext **cùng số PO**; hàng ở lại thì không chứng từ kho. Hóa đơn MISA: **thay thế** (thực tế đang dùng) hoặc điều chỉnh → cập nhật sổ.
 - **Chiết khấu**: nhận file doanh số qua mail (cột `RB_GROUP / RB_RATE / IM_VALUE / RB_VALUE`, ~1.800 dòng/tháng, có dòng âm cho hàng trả — trừ thẳng vào cơ sở tính CK).
   - **Mình chỉ xuất nhóm `Discount for store`** (chiết khấu doanh số).
   - Các nhóm phí (`Fee for EBS`, `Fee for store`, `Support for store`) do **EB xuất hóa đơn** — sẽ xuất hiện thành dòng `D1` trong file thanh toán → hạch toán JE phí (mục 4).
@@ -120,7 +143,7 @@ Theo đúng pattern chung 5 bước; hạn mặc định 45 ngày; cơ chế CK 
 | Khoản trừ chưa rõ chứng từ (nếu phát sinh) | *treo, không ghi JE* — hỏi chuỗi lấy hóa đơn/biên bản trước | | |
 | Nhận thanh toán | 112 | 131 | **Từng dòng Có 131 reference đúng Sales Invoice** để trừ outstanding |
 | Dòng NET OFF (Lotte) | Theo bản chất từng kỳ — đối chiếu trước khi ghi | | Đợt thanh toán |
-| Hàng trả / móp lỗi | *(không JE tay)* — chứng từ trả hàng ERPNext + HĐ điều chỉnh MISA | | Cùng số PO (Central Retail) |
+| Hàng trả / móp lỗi | *(không JE tay)* — chứng từ trả hàng ERPNext (chỉ khi hàng VỀ KHO) + HĐ **thay thế** / điều chỉnh MISA | | Cùng số PO (Central Retail). Có tờ thay thế thì tờ gốc **hết hiệu lực** |
 
 ---
 

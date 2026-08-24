@@ -4538,6 +4538,13 @@ function renderOpeningPreview(container, state, modal, args, res) {
       <div><div class="kt-sub">Dòng còn nợ</div><b>${res.n}</b></div>
       <div><div class="kt-sub">Nối được hóa đơn</div><b>${res.n_matched}</b>
         ${res.n_unmatched ? html`<div class="kt-sub" style="color:var(--kt-warning)">${res.n_unmatched} dòng chưa nối</div>` : ""}</div>
+      ${res.n_replaced
+        ? html`<div><div class="kt-sub">Có hóa đơn thay thế</div>
+            <b>${res.n_replaced}</b> · ${formatVND(res.amount_replaced)}
+            ${res.n_replaced_missing
+              ? html`<div class="kt-sub" style="color:var(--kt-danger)">${res.n_replaced_missing} dòng ERPNext chưa có số mới</div>`
+              : ""}</div>`
+        : ""}
     </div></div>
 
     <div class="kt-card kt-mb"><div class="kt-card-body">
@@ -4769,11 +4776,17 @@ async function openOpeningPick(container, state, doc, row) {
     }
     setHTML(modal.body, html`
       <div class="kt-sub" style="margin-bottom:10px">
-        File ghi: số <b>${row.inv_no || "—"}</b>${row.inv_date ? html` · ngày <b>${formatDate(row.inv_date)}</b>` : ""}
+        File ghi: số <b>${row.inv_no || "—"}</b>${row.inv_replaced_by
+          ? html` <span class="kt-badge kt-badge--red">đã xóa bỏ</span> → thay thế <b>${row.inv_replaced_by}</b>`
+          : ""}${row.inv_date ? html` · ngày <b>${formatDate(row.inv_date)}</b>` : ""}
         · tổng <b>${formatVND(row.gross)}</b> · còn nợ <b>${formatVND(row.remaining)}</b>.
         Máy dừng ở <code>${row.match_method}</code>.
       </div>
       ${res.message ? html`<div class="kt-sub" style="color:var(--kt-warning);margin-bottom:10px">${res.message}</div>` : ""}
+      ${res.note_replaced
+        ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-${res.has_live_no ? "warning" : "danger"})">
+            <div class="kt-card-body kt-sub" style="white-space:pre-line">${res.note_replaced}</div></div>`
+        : ""}
       ${res.note ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-primary)">
           <div class="kt-card-body kt-sub">${res.note}</div></div>` : ""}
 
@@ -4834,7 +4847,11 @@ async function openOpeningPick(container, state, doc, row) {
                 <td class="num">${r.is_return
                   ? html`<span class="kt-sub">—</span>`
                   : html`<b>${formatVND(r.net_due)}</b>`}</td>
-                <td>${(r.why || []).map((w) => html`<span class="kt-badge kt-badge--green">${w}</span> `)}</td>
+                <td>${(r.why || []).map((w) => html`<span class="kt-badge kt-badge--${
+                  w.indexOf("XÓA BỎ") >= 0 ? (res.has_live_no ? "gray" : "yellow") : "green"}">${w}</span> `)}
+                  ${r.is_dead_no && !res.has_live_no
+                    ? html`<div class="kt-sub"><b>chọn tờ này để giữ nợ lại</b></div>`
+                    : ""}</td>
                 <td>${r.linked
                   ? html`<span class="kt-badge kt-badge--gray">đã nối dòng này</span>`
                   : (r.taken
@@ -4852,8 +4869,9 @@ async function openOpeningPick(container, state, doc, row) {
       <div class="kt-sub" style="margin-top:8px">
         Nối được NHIỀU chứng từ cho một dòng — bấm "Chọn" lần lượt từng cái, phép cộng ở
         trên phải ra đúng số trong file thì mới chốt được.
-        "Bỏ qua" = đã xem và xác nhận dòng này không có chứng từ ERPNext tương ứng: nó cho
-        phép chốt, và KHÔNG giữ hóa đơn nào lại.
+        <b>"Bỏ qua"</b> = đã xem và xác nhận dòng này không có chứng từ ERPNext tương ứng.
+        Nó cho phép chốt và KHÔNG giữ hóa đơn nào lại — nghĩa là hóa đơn tương ứng (nếu
+        có tồn tại) sẽ bị coi là <b>đã thanh toán</b> khi chốt. Chỉ bỏ qua khi chắc.
       </div>
     `);
 
@@ -4926,6 +4944,29 @@ async function openOpeningFinalize(container, state, doc) {
           <div class="kt-card-body kt-sub">
             Còn <b>${res.n_unresolved} dòng</b> chưa nối được hóa đơn — chưa chốt được.
             Xử lý hết ở bộ lọc "Còn treo" rồi quay lại.
+          </div></div>`
+      : ""}
+
+    ${res.n_stale
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)">
+          <div class="kt-card-body kt-sub">
+            <b>${res.n_stale} chứng từ đã nối nay KHÔNG còn hiệu lực</b> (bị hủy hoặc đã
+            sửa đổi). Chúng không giữ được hóa đơn nào lại nữa — mọi truy vấn nợ đòi
+            chứng từ đã ghi sổ. Nối lại sang chứng từ mới TRƯỚC khi chốt, nếu không
+            khoản nợ đó bị coi là đã thanh toán.
+            ${(res.stale_matches || []).slice(0, 6).map((x) => html`<div class="kt-sub">
+              · <code>${x.sales_invoice}</code> — ${x.reason}</div>`)}
+          </div></div>`
+      : ""}
+
+    ${Math.abs(res.amount_kept_diff || 0) > 1
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+          <div class="kt-card-body kt-sub">
+            Số giữ lại theo <b>file</b> là ${formatVND(res.amount_kept)}, nhưng theo
+            <b>ERPNext</b> (đúng công thức nợ) là ${formatVND(res.amount_kept_erp)} —
+            lệch <b>${formatVND(res.amount_kept_diff)}</b>.
+            <div style="margin-top:6px">Nợ mang sang thật lấy theo số ERPNext. Lệch lớn
+            thường là giữ nhầm tờ: tờ đã xóa bỏ thay vì tờ thay thế.</div>
           </div></div>`
       : ""}
 

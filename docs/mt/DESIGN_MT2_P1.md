@@ -570,7 +570,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-N** hàng trả lại trừ vào chính hóa đơn gốc (1 lần bán = 2 chứng từ) | `672665e` `57f83c2` | `debt_due_check` · `opening_store_check` |
 | **MT2-N2** ô tìm ứng viên tìm SAI CHỖ — đường nối tay chết từ đầu | `10508c9` | `opening_store_check` |
 | **MT2-P** một hóa đơn MISA nối được NHIỀU chứng từ ERPNext | `02c09c0` | `opening_store_check` |
-| **MT2-Q** hóa đơn cũ thiếu RefID — cấp lại được từ portal | *(commit này)* | `refid_check` |
+| **MT2-Q** hóa đơn cũ thiếu RefID — cấp lại được từ portal | `59222f0` | `refid_check` |
+| **MT2-R** số dư đầu kỳ khớp theo HÓA ĐƠN THAY THẾ | *(commit này)* | `opening_store_check` · `replaced_inv_survey` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -741,6 +742,77 @@ lách. Nên `finalize_preview` **đếm và bày ra** (`amount_off`) để ngư�
 Ngược lại, hai chuyện vẫn **chặn cứng** vì chúng đổi số thật:
 - dòng nhóm `co_hoa_don` **chưa nối gì** và chưa ai bảo bỏ qua;
 - **một chứng từ nối cho hai dòng** — giữ nó lại hai lần.
+
+### Hóa đơn THAY THẾ — cả dòng nói về tờ thay thế
+
+4/7 file công nợ có cột `HĐ thay thế` (AEON · Central Retail · LOTTE ·
+WinCommerce). Và **chính tiêu đề cột số hóa đơn** đã nói ra ngữ nghĩa: Central
+Retail đặt tên nó là `HĐ xóa bỏ`, WinCommerce là `HĐ SD/xóa bỏ`.
+
+```
+dòng 1432 · Central Retail
+  cột "HĐ xóa bỏ"   00005449   <- tờ đã CHẾT
+  cột "HĐ thay thế" 6537       <- tờ CÒN HIỆU LỰC
+  ngày 31/07/2026 · 4.893.696đ  <- của tờ 6537
+```
+
+**59 dòng CÒN NỢ mang số thay thế, 464.169.744đ** (Central Retail 49 · LOTTE 6 ·
+WinCommerce 4), chưa thu đồng nào.
+
+#### Điều đo được, và điều CHƯA đo được
+
+**Đã đo — ngày trên dòng là ngày của TỜ THAY THẾ.** Dựng bản đồ số→ngày từ các
+dòng không có thay thế rồi nội suy: Central Retail **224/228** dòng khớp tờ thay
+thế, **0** dòng khớp tờ gốc; trung vị trễ 11 ngày, tối đa 64. Bằng chứng khỏi
+cần thống kê: 4 hóa đơn gốc `78/82/95/96` xuất rải rác trong tháng đều ghi cùng
+ngày 15/01/2026, còn 4 số thay thế `561/562/564/565` thì liên tiếp — đó là ngày
+của một **lô thay thế**.
+
+**Chưa đo — tiền thuộc tờ nào** thì cần dữ liệu trên site. Suy luận mạnh
+(546/546 dòng đã tất toán có `paid == gross`) nhưng vẫn là suy luận, nên code
+thử tiền theo **cả hai** mốc thay vì cược vào một mốc.
+
+#### Khóa khớp là số THAY THẾ, và KHÔNG lùi về số đã xóa bỏ
+
+Lùi về số gốc nghe hợp lý nhưng là **no-op đội lốt phép kiểm**: app không xuất
+được hóa đơn thay thế (`push_invoice` không gửi `OrgRefID`), nên hôm nay nhánh
+lùi sẽ bắn 59/59 lần và giữ lại đúng tờ mà chính file khai là vô hiệu, với số
+tiền của tờ khác. Không tra ra thì trả **`None`** — và phải là `None`, vì
+`unresolved()` xét *có liên kết hay không*, **không** xét độ tin cậy: trả một SI
+kèm tên method đáng sợ thì `_check_ready_to_finalize` **vẫn cho chốt**.
+
+Nhánh thay thế còn **cấm lối tắt "còn đúng một ứng viên thì nhận"**. Số thay thế
+ngắn, không mang ký hiệu, mà số hóa đơn đánh lại từ 1 theo từng mẫu số. Ca thật:
+WinCommerce `4316→4461` còn nợ 5.348.160đ, trong khi một dòng khác có hóa đơn
+`00004461` của 2025 **đã trả đủ**. Nhận bừa = ghi nợ ma lên hóa đơn đã tất toán.
+Phải có **ngày hoặc tiền** đồng ý mới nhận.
+
+#### Màn nối tay: hai lỗi khiến nó vô dụng
+
+**1. Danh sách ứng viên không chứa tờ cần chọn.** SQL cắt `LIMIT` *trước* khi
+xếp hạng, `ORDER BY` theo độ gần ngày — mà ngày trên dòng là của tờ thay thế,
+còn tờ ERPNext đang giữ mang ngày tờ gốc. Đo được: **49/49 dòng Central Retail
+(337.497.624đ)** có tờ đó rơi ngoài 20 dòng đầu; dòng 1398 có **432 hóa đơn cùng
+chuỗi gần ngày hơn**. Sửa: ghim đúng hai số của dòng lên đầu, bất kể ngày.
+
+**2. Giao diện đẩy người dùng về phía nút xóa tiền.** Bỏ nhánh lùi làm 58 dòng
+treo; trong modal chỉ có hai lối ra. Bản đầu xếp tờ mang số đã xóa bỏ **xuống
+cuối** và dán nhãn **đỏ** — trong khi nối nó chính là **cách duy nhất giữ khoản
+nợ lại**, còn "Bỏ qua" thì xóa tới 433.985.904đ. Đã đảo lại: khi ERPNext chưa có
+tờ thay thế, tờ đã xóa bỏ lên đầu, kèm chỉ dẫn có số tiền và câu *"đừng bấm Bỏ
+qua"*.
+
+#### Cách cập nhật ERPNext — KHÔNG dùng cancel + amend
+
+| | Vì sao bác |
+|---|---|
+| **Amend phá chính phép khớp** | `ensure_ref_id` xóa cả `custom_misa_inv_no` lẫn `vn_einvoice_number` ở `before_submit`. Tờ amend rơi khỏi `_si_index` (đòi số hóa đơn khác rỗng) **và** khỏi `misa_legacy` (đòi `vn_einvoice_number`). Tờ gốc thành `docstatus=2`, cũng rơi ra. |
+| **Amend sau khi CHỐT = xóa nợ im lặng** | Amend giữ `posting_date`, đổi **tên** chứng từ. Liên kết trỏ tên cũ; tờ mới `docstatus=1`, ngày ≤ cutover, **không có trong bảng liên kết** → luật tất toán tuyên "đã trả". Không hook nào chạy lại. Phơi nhiễm **không giới hạn ở 59 dòng**. |
+| **Hủy hóa đơn gốc có thể gỡ khoản đã thu** | JE mang `reference_name` = SI. Tùy cấu hình, hủy sẽ `LinkExistsError` hoặc âm thầm gỡ reference làm hóa đơn đã thu quay lại rổ nợ. |
+
+Nên: **giữ nguyên Sales Invoice gốc.** Việc còn thiếu là một đường ghi số hóa đơn
+thay thế lên chính nó — **chưa code**, vì chưa đo được `vn_einvoice_number` có
+`allow_on_submit` hay không trên site. Xem "Còn treo" bên dưới.
 
 ### Số dư đầu kỳ — một luật ĐỌC, không phải bút toán
 

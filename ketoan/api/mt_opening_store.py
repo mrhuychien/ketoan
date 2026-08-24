@@ -166,9 +166,43 @@ def _resolve_row(row, idx, chain, cus_chain, allowed):
     KHÁC CHUỖI thì vẫn LOẠI HẲN — đó là phủ quyết về chủ thể, không phải về
     hiệu lực, và nối chéo chuỗi là sai ở mọi ngữ cảnh.
 
+    ════════════════════════════════════════════════════════════════════════
+    HÓA ĐƠN THAY THẾ — CẢ DÒNG NÓI VỀ TỜ THAY THẾ, KHÔNG PHẢI TỜ GỐC
+    ════════════════════════════════════════════════════════════════════════
+
+    4/7 file công nợ có cột "HĐ thay thế" (AEON · Central Retail · LOTTE ·
+    WinCommerce). Chính TIÊU ĐỀ cột số hóa đơn của Central Retail là
+    `'HĐ xóa bỏ'`, của WinCommerce là `'HĐ SD/xóa bỏ'`: khi cột thay thế có
+    giá trị, số ở cột kia là số ĐÃ CHẾT.
+
+    ĐÃ ĐO — **NGÀY trên dòng là ngày của TỜ THAY THẾ**: dựng bản đồ số→ngày từ
+    các dòng không có thay thế rồi nội suy, Central Retail ra 224/228 dòng khớp
+    tờ thay thế, 0 dòng khớp tờ gốc (trung vị trễ 11 ngày, tối đa 64). Bằng
+    chứng khỏi cần thống kê — 4 hóa đơn gốc 78/82/95/96 xuất rải rác trong
+    tháng đều ghi cùng một ngày 15/01/2026, còn 4 số thay thế 561/562/564/565
+    thì liên tiếp: đó là ngày của một LÔ THAY THẾ.
+
+    CHƯA ĐO — **TIỀN thuộc tờ nào thì cần dữ liệu trên site mới biết chắc.**
+    Suy luận mạnh (546/546 dòng đã tất toán có `paid == gross`, mà siêu thị trả
+    theo tờ CÒN HIỆU LỰC) nhưng vẫn là suy luận. Đừng để nó đi chung câu với vế
+    NGÀY như thể cùng độ chắc — code dưới đây thử tiền theo CẢ HAI mốc chứ
+    không cược vào một mốc.
+
+    Hệ quả: khóa khớp là SỐ THAY THẾ, và hai phép thu hẹp ngày/tiền chỉ có
+    nghĩa với tờ thay thế. Đem ngày+tiền của tờ B so với tờ A là so hai chứng
+    từ khác nhau — mà nghiệp vụ "hàng bẹp méo" tồn tại chính vì hai tờ đó KHÁC
+    số tiền.
+
+    Trên bộ file mẫu: 59 dòng CÒN NỢ mang số thay thế, tổng 464.169.744đ
+    (Central Retail 49 · LOTTE 6 · WinCommerce 4), cả 59 chưa thu đồng nào.
+
     Mọi liên kết ở đây đều để 'Cần review': máy đề xuất, người chốt.
     """
-    no = norm_inv_no(row.get("inv_no") or "")
+    # SỐ ĐEM ĐI KHỚP LÀ SỐ CÒN HIỆU LỰC, KHÔNG PHẢI SỐ Ở CỘT "SỐ HÓA ĐƠN".
+    # Xem khối chú thích "HÓA ĐƠN THAY THẾ" ở cuối docstring.
+    replaced = norm_inv_no(row.get("inv_replaced_by_norm")
+                           or row.get("inv_replaced_by") or "")
+    no = replaced or norm_inv_no(row.get("inv_no") or "")
     if not no:
         return None, "khong_co_so_hoa_don", CONF_NONE
     if idx is None:
@@ -176,7 +210,12 @@ def _resolve_row(row, idx, chain, cus_chain, allowed):
 
     cands = idx["by_no"].get(no) or []
     if not cands:
-        return None, "khong_tim_thay_so", CONF_NONE
+        # KHÔNG lùi về số đã xóa bỏ. Lùi là giữ lại tờ mà CHÍNH FILE khai là vô
+        # hiệu, với số tiền của tờ khác — sai tiền, im lặng. Để dòng treo cho
+        # người xử; màn nối tay vẫn bày tờ cũ ra như một lựa chọn CÓ CẢNH BÁO.
+        return (None,
+                "so_thay_the_khong_co_trong_erpnext" if replaced else "khong_tim_thay_so",
+                CONF_NONE)
 
     # KHÁC CHUỖI -> loại hẳn. `_invoice_objection` gộp hai chuyện khác nhau vào
     # một hàm, nên phải tách lại ở đây: chỉ vế "khác chuỗi" mới là phủ quyết.
@@ -194,7 +233,14 @@ def _resolve_row(row, idx, chain, cus_chain, allowed):
     else:
         step, tail = dead, "so_trong_chuoi_da_dieu_chinh"
 
-    if len(step) == 1:
+    # Lối tắt "còn đúng một ứng viên thì nhận" CHỈ dùng khi khớp bằng số gốc.
+    #
+    # Với số thay thế thì cấm: số hóa đơn đánh lại từ 1 theo từng mẫu số nên một
+    # số ngắn như '4461' đụng hóa đơn năm khác là chuyện có thật (đã đo:
+    # WinCommerce r1920 4316->4461 còn nợ 5.348.160, trong khi r1249 có hóa đơn
+    # 00004461 của 2025 đã trả đủ). Nhận bừa ở đó là ghi một khoản nợ MA lên hóa
+    # đơn đã tất toán, còn tiền thật thì không tờ nào giữ.
+    if len(step) == 1 and not replaced:
         return step[0], tail, CONF_REVIEW
 
     inv_date = row.get("inv_date")
@@ -218,6 +264,8 @@ def _resolve_row(row, idx, chain, cus_chain, allowed):
         if len(by_amt) == 1:
             return by_amt[0], "so_ngay_tien" + _suffix(tail), CONF_REVIEW
 
+    if replaced and len(step) == 1:
+        return None, "so_thay_the_1_ung_vien_chua_doi_chieu_duoc", CONF_REVIEW
     return None, "con_%d_ung_vien" % len(step), CONF_REVIEW
 
 
@@ -262,8 +310,12 @@ def _resolve(rows, chain, company):
 def _plan_hash(chain, cutover, golive, rows):
     blob = json.dumps(
         [cstr(chain), cstr(cutover), cstr(golive),
-         [[cstr(r.get("source_row")), cstr(r.get("inv_no")), round(flt(r.get("remaining")), 2),
-           cstr(r.get("sales_invoice") or "")] for r in rows]],
+         [[cstr(r.get("source_row")), cstr(r.get("inv_no")),
+          # Số thay thế là ĐẦU VÀO QUYẾT ĐỊNH của phép khớp — không băm nó thì
+          # sửa cột đó trong file xong vân tay vẫn y nguyên.
+          cstr(r.get("inv_replaced_by") or ""),
+          round(flt(r.get("remaining")), 2),
+          cstr(r.get("sales_invoice") or "")] for r in rows]],
         ensure_ascii=False, sort_keys=True)
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
@@ -306,6 +358,26 @@ def preview_import(content, chain=None, golive=None, cutover=None, company=None)
     res, rows, file_hash = _read(content, chain, golive, company)
     prev = _existing(company, res["chain"])
 
+    # Dòng có HÓA ĐƠN THAY THẾ — nói ra ngay ở bước xem trước, kèm tiền.
+    rep_rows = [r for r in rows if r.get("inv_replaced_by")]
+    rep_open = [r for r in rep_rows if abs(flt(r.get("remaining"))) > 0.5]
+    rep_miss = [r for r in rep_rows
+                if r.get("match_method", "").startswith("so_thay_the")]
+    if rep_open:
+        res["warnings"].append(
+            "%d dòng còn nợ (%s đ) có HÓA ĐƠN THAY THẾ: số ở cột số hóa đơn đã bị XÓA "
+            "BỎ, số còn hiệu lực nằm ở cột 'HĐ thay thế' — và NGÀY, SỐ TIỀN trên dòng "
+            "cũng là của tờ thay thế. Hệ thống khớp theo số thay thế; tờ mang số đã xóa "
+            "bỏ KHÔNG được tự nối."
+            % (len(rep_open), "{:,.0f}".format(sum(flt(r["remaining"]) for r in rep_open))))
+    if rep_miss:
+        res["warnings"].append(
+            "Trong đó %d dòng KHÔNG tìm được chứng từ ERPNext mang số thay thế. Thường "
+            "là ERPNext vẫn đang giữ số hóa đơn CŨ. Cập nhật số hóa đơn bên ERPNext rồi "
+            "nhập lại, hoặc nối tay từng dòng — hệ thống KHÔNG tự lùi về số đã xóa bỏ, "
+            "vì làm thế là giữ một tờ vô hiệu với số tiền của tờ khác."
+            % len(rep_miss))
+
     n_match = sum(1 for r in rows if r.get("sales_invoice"))
     left = [r for r in rows
             if r.get("kind") == KIND_IN_ERP and not r.get("sales_invoice")]
@@ -327,6 +399,9 @@ def preview_import(content, chain=None, golive=None, cutover=None, company=None)
         "n": len(rows),
         "n_matched": n_match,
         "n_unmatched": len(left),
+        "n_replaced": len(rep_open),
+        "amount_replaced": round(sum(flt(r["remaining"]) for r in rep_open), 2),
+        "n_replaced_missing": len(rep_miss),
         "by_confidence": by_conf,
         "sample": rows[:mt_opening.MAX_PREVIEW],
         "unmatched_sample": left[:mt_opening.MAX_PREVIEW],
@@ -384,6 +459,7 @@ def commit_import(content, expected_hash, chain=None, golive=None, cutover=None,
             "kind": r.get("kind"),
             "party": r.get("party"),
             "inv_no": r.get("inv_no"),
+            "inv_replaced_by": r.get("inv_replaced_by"),
             "inv_date": r.get("inv_date") or None,
             "net": flt(r.get("net")), "vat": flt(r.get("vat")),
             "gross": flt(r.get("gross")), "paid": flt(r.get("paid")),
@@ -544,7 +620,9 @@ def get_opening(name, company=None, only=None, page=1, page_size=50):
 def _line_out(l):
     return {
         "row": cint(l.idx), "source_row": cint(l.source_row), "kind": l.kind,
-        "party": l.party, "inv_no": l.inv_no, "inv_date": cstr(l.inv_date or ""),
+        "party": l.party, "inv_no": l.inv_no,
+        "inv_replaced_by": l.inv_replaced_by,
+        "inv_date": cstr(l.inv_date or ""),
         "net": flt(l.net), "vat": flt(l.vat), "gross": flt(l.gross),
         "paid": flt(l.paid), "returns": flt(l.returns), "remaining": flt(l.remaining),
         "sales_invoice": l.sales_invoice, "match_method": l.match_method,
@@ -733,6 +811,26 @@ def set_line(name, row, resolution=None, note=None, company=None):
                 row, cint(doc.n_unmatched))}
 
 
+def _replaced_note(l, has_live):
+    """Câu dẫn cho dòng có hóa đơn thay thế — phải là CHỈ DẪN, không phải cảnh báo.
+
+    Khi ERPNext chưa có tờ mang số thay thế, việc ĐÚNG là nối tờ mang số đã xóa
+    bỏ để GIỮ khoản nợ lại. Bấm "Bỏ qua" ở đó là xóa khoản nợ. Câu này phải nói
+    thẳng cả hai vế kèm SỐ TIỀN, chứ không chỉ cảnh báo chung chung.
+    """
+    if has_live:
+        return _(
+            "Dòng này có HÓA ĐƠN THAY THẾ: số {0} đã bị xóa bỏ, số còn hiệu lực là {1} — "
+            "ngày và số tiền trên dòng cũng là của tờ {1}. Chọn chứng từ mang số {1}."
+        ).format(l.inv_no, l.inv_replaced_by)
+    return _(
+        "Dòng này có HÓA ĐƠN THAY THẾ ({0} đã xóa bỏ → {1}), nhưng ERPNext CHƯA có chứng "
+        "từ nào mang số {1} — ERPNext vẫn đang giữ số cũ.\n\n"
+        "Việc cần làm: nối tờ mang số {0} để GIỮ {2} đ ở lại công nợ, rồi ghi chú lý do. "
+        "ĐỪNG bấm 'Bỏ qua' — bỏ qua là xóa {2} đ khỏi công nợ khi chốt."
+    ).format(l.inv_no, l.inv_replaced_by, "{:,.0f}".format(flt(l.remaining)))
+
+
 def _matches_out(doc, row):
     return [{"sales_invoice": m.sales_invoice, "role": m.role,
              "si_amount": flt(m.si_amount), "si_is_return": cint(m.si_is_return),
@@ -778,6 +876,15 @@ def search_invoices(name, row, q=None, company=None, limit=20):
     doc = _load(name, company)
     l = _row(doc, row)
 
+    # Xếp hạng theo SỐ CÒN HIỆU LỰC. Bản trước lấy `l.inv_no` nên gắn badge
+    # "trùng số hóa đơn" cho tờ ĐÃ XÓA BỎ và đẩy nó lên đầu, trong khi thứ tự
+    # phụ (gần `l.inv_date` nhất — ngày của tờ THAY THẾ) lại đẩy tờ đó xuống.
+    # Hai tín hiệu đánh nhau, kế toán nhận một gợi ý tự mâu thuẫn.
+    want_rep = norm_inv_no(l.inv_replaced_by or "")
+    want_no = want_rep or norm_inv_no(l.inv_no or "")
+    dead_no = norm_inv_no(l.inv_no or "") if want_rep else ""
+    want_amt = abs(flt(l.gross or 0))
+
     names = chain_customers(doc.chain)
     p = {"company": company, "limit": min(200, max(20, cint(limit) or 50))}
     where = [_customer_in_clause(names, p)]
@@ -817,9 +924,42 @@ def search_invoices(name, row, q=None, company=None, limit=20):
     """.format(no_col=no_col, ser_col=ser_col, join=_returns_join(),
                where=" AND ".join(where), order=order), p, as_dict=True)
 
+    # HAI SỐ CỦA DÒNG PHẢI CÓ MẶT, BẤT KỂ NGÀY.
+    #
+    # Truy vấn trên cắt bằng `LIMIT` sau khi xếp theo ĐỘ GẦN NGÀY, mà ngày trên
+    # dòng là ngày của TỜ THAY THẾ. Nên tờ ERPNext đang giữ (mang số đã xóa bỏ,
+    # ngày của tờ gốc) bị xếp theo một ngày không phải của nó: đã đo trên
+    # Central Retail, trung vị 140 hóa đơn cùng chuỗi gần ngày hơn nó, cá biệt
+    # 432. Với LIMIT 20 thì 49/49 dòng còn nợ (337.497.624đ) mở modal ra là
+    # MÀN HÌNH KHÔNG CÓ TỜ CẦN CHỌN — tệ hơn màn hình trắng, vì nó có nội dung.
+    #
+    # Nên lấy riêng đúng hai số đó và ghép lên đầu.
+    if not kw:
+        pins = [x for x in (want_no, dead_no) if x]
+        if pins and has_no:
+            pp = dict(p)
+            for i, v in enumerate(pins):
+                pp["pin%d" % i] = v
+            pin_rows = frappe.db.sql("""
+                SELECT si.name, si.posting_date, si.customer, si.customer_name,
+                       ABS(si.grand_total) AS grand_total,
+                       si.is_return, si.return_against,
+                       IFNULL(rt.returned, 0) AS returned,
+                       {no_col} AS inv_no, {ser_col} AS inv_series
+                FROM `tabSales Invoice` si
+                {join}
+                WHERE si.docstatus = 1 AND si.company = %(company)s
+                  AND {in_cus}
+                  AND TRIM(LEADING '0' FROM IFNULL({no_col}, '')) IN ({ph})
+                LIMIT 40
+            """.format(no_col=no_col, ser_col=ser_col, join=_returns_join(),
+                       in_cus=_customer_in_clause(names, pp, prefix="pc"),
+                       ph=", ".join("%%(pin%d)s" % i for i in range(len(pins)))),
+                pp, as_dict=True)
+            have = {r.name for r in rows}
+            rows = [r for r in pin_rows if r.name not in have] + rows
+
     # Xếp lại theo mức GẦN, và nói rõ vì sao — người đang phải quyết bằng mắt.
-    want_no = norm_inv_no(l.inv_no or "")
-    want_amt = abs(flt(l.gross or 0))
     linked = {cstr(m.sales_invoice) for m in doc.matches_of(row)}
     # Phần CÒN THIẾU của dòng — sau khi đã nối được vài chứng từ, ứng viên đáng
     # gợi ý là cái bù đúng chỗ hụt, không phải cái bằng tổng ban đầu.
@@ -827,8 +967,14 @@ def search_invoices(name, row, q=None, company=None, limit=20):
 
     for r in rows:
         why = []
-        if want_no and norm_inv_no(r.inv_no) == want_no:
-            why.append("trùng số hóa đơn")
+        rno = norm_inv_no(r.inv_no)
+        if want_no and rno == want_no:
+            why.append("trùng số hóa đơn thay thế" if want_rep else "trùng số hóa đơn")
+        # Tờ mang số ĐÃ XÓA BỎ vẫn được bày ra — có site chưa kịp cập nhật số
+        # mới nên đó là tờ duy nhất tồn tại. Nhưng phải gắn nhãn, không được để
+        # nó trông như một gợi ý bình thường.
+        if dead_no and rno == dead_no:
+            why.append("số ĐÃ XÓA BỎ (tờ ERPNext đang giữ)")
         if want_amt and _amount_hits(r, want_amt):
             why.append("trùng số tiền")
         if gap and abs(abs(flt(r.grand_total)) - abs(gap)) <= PAID_TOLERANCE:
@@ -841,10 +987,30 @@ def search_invoices(name, row, q=None, company=None, limit=20):
         # TRỪ vào phép cộng chứ không cộng thêm.
         r["signed"] = -abs(flt(r.grand_total)) if cint(r.is_return) else abs(flt(r.grand_total))
         r["linked"] = 1 if cstr(r.name) in linked else 0
+        r["is_dead_no"] = 1 if (dead_no and rno == dead_no) else 0
+        r["is_live_no"] = 1 if (want_rep and rno == want_no) else 0
         r["rank"] = -len(why)
     rows.sort(key=lambda r: r["rank"])
 
-    used = {cstr(x.sales_invoice) for x in doc.lines if cstr(x.sales_invoice)}
+    # Có tờ mang SỐ THAY THẾ thì nó lên đầu. KHÔNG có thì tờ mang số ĐÃ XÓA BỎ
+    # lên đầu — và đó là hành động ĐÚNG, không phải phương án cuối:
+    #
+    #   nối tờ đó  -> khoản nợ được GIỮ LẠI (tiền lấy từ ERPNext, không lấy từ file)
+    #   không nối  -> khi chốt, chính hóa đơn đó rơi vào vế "không có trong danh
+    #                 sách" và bị coi là ĐÃ THANH TOÁN. Mất trắng.
+    #
+    # Bản đầu xếp nó xuống cuối và dán nhãn đỏ — tức là giao diện đẩy người dùng
+    # về phía nút "Bỏ qua", cái nút xóa tiền. Đã sửa.
+    has_live = any(r["is_live_no"] for r in rows)
+    if want_rep and not has_live:
+        rows.sort(key=lambda r: (-r["is_dead_no"], r["rank"]))
+
+    # Đọc BẢNG LIÊN KẾT, không đọc `lines[].sales_invoice` — cái đó chỉ là BẢN
+    # SAO của liên kết CHÍNH. Một chứng từ đang là vế THỨ HAI của dòng khác
+    # (hóa đơn trả về chẳng hạn) sẽ hiện "chưa dùng", người bấm Chọn, rồi
+    # `_check_matches` mới ném lỗi lúc lưu — bắt họ thao tác thừa để nhận một
+    # câu từ chối lẽ ra phải thấy từ đầu.
+    used = {cstr(m.sales_invoice) for m in (doc.matches or []) if cstr(m.sales_invoice)}
     for r in rows:
         r["taken"] = 1 if r.name in used else 0
     msg = ""
@@ -860,12 +1026,16 @@ def search_invoices(name, row, q=None, company=None, limit=20):
         "line": _line_out(l),
         "matches": _matches_out(doc, row),
         "chain": doc.chain,
+        "want_no": want_no,
+        "dead_no": dead_no,
         "message": msg,
         "note": _(
             "Một hóa đơn MISA có thể ứng với NHIỀU chứng từ ERPNext — ví dụ hóa đơn đi "
             "cộng hóa đơn trả về khi siêu thị không nhận hàng bẹp méo. Bấm 'Chọn' lần "
             "lượt từng cái; hóa đơn trả về vào với dấu TRỪ. Cộng lại phải ra đúng số "
             "trong file thì mới chốt được."),
+        "note_replaced": (_replaced_note(l, has_live) if want_rep else ""),
+        "has_live_no": 1 if has_live else 0,
     }
 
 
@@ -923,6 +1093,7 @@ def finalize_preview(name, company=None, limit=50):
     left = doc.unresolved()
     off = doc.amount_off()
     kept = [l for l in (doc.lines or []) if cstr(l.sales_invoice)]
+    erp = _kept_by_erp(company, doc)
     return {
         "name": doc.name, "chain": doc.chain, "status": doc.status,
         "cutover_date": cstr(doc.cutover_date),
@@ -932,6 +1103,21 @@ def finalize_preview(name, company=None, limit=50):
         "amount_kept": round(sum(flt(l.remaining) for l in kept), 2),
         "n_unresolved": len(left),
         "unresolved": [_line_out(l) for l in left[:50]],
+        # HAI VẾ CỦA CÙNG MỘT SỐ, đặt cạnh nhau.
+        #
+        # `amount_kept` là số của FILE; `amount_kept_erp` là số của ERPNext tính
+        # bằng ĐÚNG công thức nợ (`_NET_DUE`). Trước đây màn hình chỉ có vế đầu,
+        # nên giữ nhầm tờ — tờ đã xóa bỏ thay vì tờ thay thế — làm nợ mang sang
+        # đổi thật mà KHÔNG con số nào trên màn hình nhúc nhích.
+        "amount_kept_erp": flt(erp["amount"]),
+        "amount_kept_diff": round(flt(erp["amount"])
+                                  - round(sum(flt(l.remaining) for l in kept), 2), 2),
+        "n_kept_erp": cint(erp["n"]),
+        # Chứng từ đã nối mà nay KHÔNG còn hiệu lực (bị hủy / bị amend). Chúng
+        # không giữ được gì nữa: mọi truy vấn nợ đòi `docstatus = 1`, nên hóa
+        # đơn tương ứng rơi vào vế "không có trong danh sách" và bị tất toán.
+        "stale_matches": erp["stale"],
+        "n_stale": len(erp["stale"]),
         "n_amount_off": len(off),
         "amount_off": [_line_out(l) for l in off[:50]],
         "amount_off_total": round(sum(flt(l.match_diff) for l in off), 2),
@@ -948,6 +1134,42 @@ def finalize_preview(name, company=None, limit=50):
         ).format(cint(agg.n), doc.chain, cstr(doc.cutover_date), len(kept),
                  cint(doc.n_pre_golive), cint(doc.n_no_invoice)),
     }
+
+
+def _kept_by_erp(company, doc):
+    """Số tiền ERPNext nói về chính các chứng từ đã nối, và những tờ đã CHẾT.
+
+    Dùng lại `_NET_DUE` của `mt.py` — cùng một công thức nợ với mọi màn hình
+    khác, không dựng phép tính thứ hai.
+    """
+    names = sorted({cstr(m.sales_invoice) for m in (doc.matches or [])
+                    if cstr(m.sales_invoice)})
+    if not names:
+        return {"n": 0, "amount": 0.0, "stale": []}
+    p = {"company": company, "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}
+    keys = {"k%d" % i: n for i, n in enumerate(names)}
+    p.update(keys)
+    ph = ", ".join("%%(k%d)s" % i for i in range(len(names)))
+    rows = frappe.db.sql("""
+        SELECT si.name, si.docstatus, si.is_return,
+               (ABS(si.grand_total) - IFNULL(rt.returned, 0)) AS net_due
+        FROM `tabSales Invoice` si
+        {join}
+        WHERE si.name IN ({ph})
+    """.format(join=_debt_joins(), ph=ph), p, as_dict=True)
+
+    found = {r.name: r for r in rows}
+    amount = sum(flt(r.net_due) for r in rows
+                 if cint(r.docstatus) == 1 and not cint(r.is_return))
+    stale = []
+    for n in names:
+        r = found.get(n)
+        if r is None:
+            stale.append({"sales_invoice": n, "reason": "không còn tồn tại"})
+        elif cint(r.docstatus) != 1:
+            stale.append({"sales_invoice": n,
+                          "reason": "đã hủy hoặc đã sửa đổi (docstatus=%d)" % cint(r.docstatus)})
+    return {"n": len(names), "amount": round(amount, 2), "stale": stale}
 
 
 def _finalize_hash(doc, n_settled):

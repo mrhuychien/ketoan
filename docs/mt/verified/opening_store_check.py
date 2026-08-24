@@ -165,6 +165,154 @@ def main():
     print(f"  {'✅' if ok else '❌'} file ghi 1.000 (số gốc) -> cũng nối đúng `{si}`")
     bad += not ok
 
+    # ── 2f. HÓA ĐƠN THAY THẾ — cả dòng nói về TỜ THAY THẾ ───────────────
+    #
+    # 4/7 file có cột "HĐ thay thế"; tiêu đề cột số hóa đơn của Central Retail
+    # là 'HĐ xóa bỏ'. Đo được: NGÀY trên dòng khớp tờ THAY THẾ 43 lần / tờ gốc
+    # 2 lần. 59 dòng CÒN NỢ mang số thay thế, tổng 464.169.744đ.
+    print("-" * 82)
+    REP = {"kind": ob.KIND_IN_ERP, "inv_no": "00005449", "inv_replaced_by": "6537",
+           "inv_replaced_by_norm": "6537", "inv_date": "2026-07-31", "gross": 4_893_696.0}
+    SI_OLD = {"name": "SI-CU", "no": "5449", "customer": "KH-1",
+              "posting_date": "2026-06-20", "grand_total": 5_893_696.0,
+              "snap_dead": 0, "snap_deleted": 0}
+    SI_NEW = {"name": "SI-MOI", "no": "6537", "customer": "KH-1",
+              "posting_date": "2026-07-31", "grand_total": 4_893_696.0,
+              "snap_dead": 0, "snap_deleted": 0}
+
+    si, method, conf = st._resolve_row(REP, idx_of([SI_OLD, SI_NEW]), "AEON",
+                                       cus_chain, allowed)
+    ok = si == "SI-MOI"
+    print(f"  {'✅' if ok else '❌'} có cả tờ cũ lẫn tờ thay thế -> khớp TỜ THAY THẾ "
+          f"(`{si}`, {method}) chứ không phải tờ đã xóa bỏ")
+    bad += not ok
+
+    si, method, conf = st._resolve_row(REP, idx_of([SI_OLD]), "AEON", cus_chain, allowed)
+    ok = si is None and method == "so_thay_the_khong_co_trong_erpnext" \
+        and conf == st.CONF_NONE
+    print(f"  {'✅' if ok else '❌'} ERPNext CHỈ có tờ đã xóa bỏ -> KHÔNG tự nối "
+          f"({method}) — lùi về số đã xóa bỏ là giữ tờ vô hiệu với tiền của tờ khác")
+    bad += not ok
+
+    # Phải là None chứ không phải "tên method đáng sợ": `unresolved()` xét
+    # `matches_of`, KHÔNG xét `match_confidence`. Trả SI kèm tên xấu thì vẫn
+    # chốt được.
+    src_ob = open(os.path.join(rc.REPO, "ketoan/mt/doctype/mt_opening_balance",
+                               "mt_opening_balance.py"), encoding="utf-8").read()
+    ub = re.split(r"\n(?=    def )", src_ob.split("def unresolved")[1])[0]
+    ok = "matches_of" in ub and "match_confidence" not in ub
+    print(f"  {'✅' if ok else '❌'} `unresolved()` xét LIÊN KẾT chứ không xét độ tin cậy "
+          f"-> chỉ `None` mới chặn được chốt, tên method xấu thì không")
+    bad += not ok
+
+    # Số thay thế ngắn, đụng hóa đơn năm khác: CẤM lối tắt một-ứng-viên.
+    # Ca thật: WinCommerce r1920 4316->4461 còn nợ 5.348.160, trong khi r1249
+    # có hóa đơn 00004461 của 2025 đã trả đủ.
+    OLD_YEAR = {"name": "SI-2025", "no": "4461", "customer": "KH-1",
+                "posting_date": "2025-08-29", "grand_total": 1_036_800.0,
+                "snap_dead": 0, "snap_deleted": 0}
+    WIN = {"kind": ob.KIND_IN_ERP, "inv_no": "4316", "inv_replaced_by": "4461",
+           "inv_replaced_by_norm": "4461", "inv_date": "2026-06-05",
+           "gross": 5_348_160.0}
+    si, method, conf = st._resolve_row(WIN, idx_of([OLD_YEAR]), "AEON", cus_chain, allowed)
+    ok = si is None and "chua_doi_chieu" in method
+    print(f"  {'✅' if ok else '❌'} số thay thế đụng hóa đơn năm khác, ngày+tiền đều "
+          f"lệch -> KHÔNG nhận ({method}) — nhận là ghi nợ MA lên hóa đơn đã tất toán")
+    bad += not ok
+
+    # Nhưng CÓ đối chiếu được thì vẫn nhận.
+    si, method, conf = st._resolve_row(REP, idx_of([SI_NEW]), "AEON", cus_chain, allowed)
+    ok = si == "SI-MOI" and ("ngay" in method or "tien" in method)
+    print(f"  {'✅' if ok else '❌'} một ứng viên NHƯNG trùng ngày/tiền -> vẫn nhận "
+          f"({method})")
+    bad += not ok
+
+    # Khớp bằng số gốc (dòng KHÔNG có thay thế) giữ nguyên lối tắt cũ.
+    si, method, _c = st._resolve_row(row, idx_of([SI_A]), "AEON", cus_chain, allowed)
+    ok = si == "SI-A" and method == "so_trong_chuoi"
+    print(f"  {'✅' if ok else '❌'} dòng KHÔNG có thay thế -> hành vi cũ giữ nguyên "
+          f"({method})")
+    bad += not ok
+
+    # Chuẩn hóa phải làm ở TẦNG ĐỌC: cột thay thế KHÔNG đệm 0, cột số hóa đơn
+    # thì CÓ ('00004756' vs '4962') — so thô là trượt 100%.
+    mo_src = open(os.path.join(rc.REPO, "ketoan/api/mt_opening.py"), encoding="utf-8").read()
+    ok = "inv_replaced_by_norm" in mo_src
+    print(f"  {'✅' if ok else '❌'} tầng đọc trả sẵn `inv_replaced_by_norm` — không bắt "
+          f"tầng dưới tự nhớ gọi chuẩn hóa")
+    bad += not ok
+
+    st_src2 = open(os.path.join(rc.REPO, "ketoan/api/mt_opening_store.py"),
+                   encoding="utf-8").read()
+    ok = 'cstr(r.get("inv_replaced_by") or "")' in st_src2
+    print(f"  {'✅' if ok else '❌'} vân tay kế hoạch băm CẢ số thay thế — nó là đầu vào "
+          f"quyết định của phép khớp")
+    bad += not ok
+
+    ok = '"inv_replaced_by": r.get("inv_replaced_by")' in st_src2
+    print(f"  {'✅' if ok else '❌'} `commit_import` LƯU số thay thế — đọc rồi vứt là mất "
+          f"dấu vĩnh viễn")
+    bad += not ok
+
+    # ── 2g. Màn nối tay của dòng có thay thế phải DÙNG ĐƯỢC ─────────────
+    #
+    # Truy vấn ứng viên cắt bằng LIMIT sau khi xếp theo ĐỘ GẦN NGÀY, mà ngày
+    # trên dòng là ngày của TỜ THAY THẾ. Đã đo trên Central Retail: tờ ERPNext
+    # đang giữ (số đã xóa bỏ) có TRUNG VỊ 140 hóa đơn cùng chuỗi gần ngày hơn
+    # nó, cá biệt 432. Không ghim theo SỐ thì 49/49 dòng (337.497.624đ) mở
+    # modal ra KHÔNG có tờ cần chọn.
+    print("-" * 82)
+    src_st = open(os.path.join(rc.REPO, "ketoan/api/mt_opening_store.py"),
+                  encoding="utf-8").read()
+    body2 = re.split(r"\n(?=\S)", src_st.split("def search_invoices")[1])[0]
+    ok = "TRIM(LEADING" in body2 and "pin" in body2
+    print(f"  {'✅' if ok else '❌'} ghim đúng hai số của dòng lên đầu danh sách, BẤT KỂ "
+          f"ngày — LIMIT theo ngày là đủ để giấu mất tờ duy nhất chọn được")
+    bad += not ok
+
+    ok = "has_live" in body2 and "-r[\"is_dead_no\"]" in body2
+    print(f"  {'✅' if ok else '❌'} KHÔNG có tờ mang số thay thế -> tờ mang số ĐÃ XÓA BỎ "
+          f"lên ĐẦU, vì nối nó là cách DUY NHẤT giữ khoản nợ lại")
+    bad += not ok
+
+    note = re.split(r"\n(?=\S)", src_st.split("def _replaced_note")[1])[0]
+    ok = "ĐỪNG bấm 'Bỏ qua'" in note and "khỏi công nợ khi chốt" in note
+    print(f"  {'✅' if ok else '❌'} câu dẫn là CHỈ DẪN kèm số tiền, không phải cảnh báo "
+          f"chung chung — và nói thẳng 'Bỏ qua' ở đây là xóa tiền")
+    bad += not ok
+
+    ok = "cập nhật số hóa đơn bên" not in note
+    print(f"  {'✅' if ok else '❌'} KHÔNG bảo kế toán đi 'cập nhật số hóa đơn bên ERPNext' "
+          f"— không có đường nào ghi được số mới lên hóa đơn đã có số")
+    bad += not ok
+
+    ok = "for m in (doc.matches or [])" in body2
+    print(f"  {'✅' if ok else '❌'} danh sách 'đã nối dòng khác' đọc BẢNG LIÊN KẾT chứ "
+          f"không đọc bản sao — vế thứ hai của dòng khác không được hiện 'chưa dùng'")
+    bad += not ok
+
+    rs = re.split(r"\n(?=def )", src_st.split("def _resolve_row")[1])[0]
+    ok = "CHƯA ĐO" in rs and "NGÀY trên dòng là ngày của TỜ THAY THẾ" in rs
+    print(f"  {'✅' if ok else '❌'} tài liệu TÁCH vế đã đo (ngày) với vế suy luận (tiền) "
+          f"— không để hai thứ khác độ chắc đi chung một câu")
+    bad += not ok
+
+    import json as _json
+    _d = _json.load(open(os.path.join(
+        rc.REPO, "ketoan/mt/doctype/mt_opening_invoice/mt_opening_invoice.json"),
+        encoding="utf-8"))
+    _f = next(x for x in _d["fields"] if x["fieldname"] == "inv_replaced_by")
+    ok = "ERPNext KHÔNG tự có số này" in _f.get("description", "")
+    print(f"  {'✅' if ok else '❌'} mô tả field nói ĐÚNG: ERPNext không tự có số thay thế "
+          f"(bản 'bị thay thế' bên MISA không mang OrgInvNo)")
+    bad += not ok
+
+    js2 = open(os.path.join(rc.REPO, "ketoan/public/ketoan/views/mt.js"),
+               encoding="utf-8").read()
+    ok = "chọn tờ này để giữ nợ lại" in js2
+    print(f"  {'✅' if ok else '❌'} màn hình chỉ rõ tờ nào cần chọn, không để người tự suy")
+    bad += not ok
+
     # ── 2d. Ô TÌM ỨNG VIÊN phải tìm đúng chỗ ────────────────────────────
     #
     # Lỗi đã gặp trên site thật: ô tìm lấy số hóa đơn của dòng (`00005449`) rồi
@@ -173,9 +321,7 @@ def main():
     # "Không có hóa đơn nào khớp" với MỌI dòng treo. Cả đường nối tay chết, mà
     # nhìn thì tưởng đúng là không có hóa đơn nào.
     print("-" * 82)
-    src_st = open(os.path.join(rc.REPO, "ketoan/api/mt_opening_store.py"),
-                  encoding="utf-8").read()
-    body = re.split(r"\n(?=\S)", src_st.split("def search_invoices")[1])[0]
+    body = body2
 
     ok = "SI_NO_FIELD" in body
     print(f"  {'✅' if ok else '❌'} ô tìm ứng viên tìm theo SỐ HÓA ĐƠN "
