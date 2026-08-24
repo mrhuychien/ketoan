@@ -572,7 +572,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-P** một hóa đơn MISA nối được NHIỀU chứng từ ERPNext | `02c09c0` | `opening_store_check` |
 | **MT2-Q** hóa đơn cũ thiếu RefID — cấp lại được từ portal | `59222f0` | `refid_check` |
 | **MT2-R** số dư đầu kỳ khớp theo HÓA ĐƠN THAY THẾ | `56f3591` | `opening_store_check` · `replaced_inv_survey` |
-| **MT2-S** gán SỐ HÓA ĐƠN THAY THẾ lên chứng từ đã ghi sổ (patch v0_0_17) | *(commit này)* | `replace_check` |
+| **MT2-S** gán SỐ HÓA ĐƠN THAY THẾ lên chứng từ đã ghi sổ (patch v0_0_17) | `1414f9b` | `replace_check` |
+| **MT2-T** đối chiếu số dư đầu kỳ Excel ↔ sổ cái ERPNext, từng siêu thị | *(commit này)* | `opening_gl_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -582,7 +583,7 @@ for t in regression_check crosscheck_mt2 mutation_check \
          discount_basis_check discount_sheet_check win_dossier_check \
          debt_due_check rebate_pdf_check clawback_check ui_board_check \
          chain_filter_check opening_check win_grn_check opening_store_check \
-         mega_check refid_check replace_check; do
+         mega_check refid_check replace_check opening_gl_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -871,6 +872,50 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-T — đối chiếu Excel ↔ SỔ CÁI, từng siêu thị
+
+`ketoan/api/mt_opening_gl.py` · nút **Đối chiếu** trên bảng số dư đầu kỳ.
+
+File công nợ của siêu thị và sổ cái ERPNext là hai cuốn sổ do hai bên ghi, theo
+hai quy ước. Bày hai số rồi in *"lệch 412 triệu"* là **không dùng được**: kế
+toán không biết 412 triệu nằm ở đâu, nên hoặc bỏ qua, hoặc sửa bừa một bên cho
+khớp — cả hai đều tệ hơn không có màn hình.
+
+Nên màn hình dựng **CẦU NỐI**, bốn khoản mục cộng lại đúng bằng chỗ lệch:
+
+```
+Sổ cái ERPNext (B)  −  Excel mang sang (A)
+  = (1) sổ cái ngoài rổ hóa đơn                 B − B_hóa_đơn
+  + (2) hóa đơn còn nợ KHÔNG có trong file      ← số tiền việc CHỐT lấy đi
+  + (3) chênh trên chính các dòng đã nối
+  − (4) dòng file chưa nối được hóa đơn nào
+```
+
+Đẳng thức đúng **về đại số**, không nhờ làm tròn — bốn khoản triệt tiêu nhau về
+`B − A`. Nên còn số dư là **lỗi code**, và màn hình nói thẳng ra thế chứ không
+hiện một bảng "gần đúng". `opening_gl_check` chạy cầu nối trên bảy hình dạng dữ
+liệu (sổ cái âm, ERPNext trống, Excel bằng 0, bản đã chốt…) và đòi số dư = 0 ở
+cả bảy.
+
+Ba chỗ dễ so nhầm vế, cả ba đều đã thành phép kiểm:
+
+| | |
+|---|---|
+| **So `opening_debt` là so nhầm** | File cộng cả đơn ĐÃ GIAO chưa xuất hóa đơn (46.665.180đ trên file WinCommerce). Chưa có hóa đơn thì không có bút toán. Vế đem so là `debt_carried`. |
+| **Không áp luật tất toán vào vế ERPNext** | Bản đã chốt làm mọi hóa đơn ngoài danh sách rơi khỏi rổ nợ; áp luật rồi mới so thì khoản (2) luôn bằng 0 và cầu nối tự khớp một cách vô nghĩa — mất đúng con số quý nhất. |
+| **Sổ cái tại NGÀY CHỐT** | `posting_date <= cutover`. Tiền trả sau ngày chốt là chuyện kỳ sau; gộp vào là số dư đầu kỳ tự nhỏ đi đúng bằng số đã thu. Hàm KHÔNG nhận tham số ngày từ ngoài. |
+
+Bóc thêm theo **từng pháp nhân** của chuỗi: Central Retail tối thiểu 2 mã EB, và
+chỗ lệch gần như luôn nằm gọn ở một mã — cộng gộp cả chuỗi là giấu đúng manh mối.
+
+#### Lỗi có sẵn phải sửa để hai màn hình nói một con số
+
+`finalize_preview` quảng cáo *"chốt xong X đồng rời khỏi công nợ"* nhưng cộng
+`ABS(grand_total)` gộp, trong khi bộ lọc của chính nó là "còn nợ". Hóa đơn 100tr
+đã thu 40tr và trả lại hàng 10tr thì chốt chỉ lấy đi 50tr. Đã đổi cả nó lẫn
+`_kept_by_erp` sang đúng biểu thức nợ của `mt_debt` — cùng biểu thức khoản (2)
+của cầu nối, nên hai màn hình không còn ra hai số về cùng một tập hóa đơn.
 
 ### Số dư đầu kỳ — một luật ĐỌC, không phải bút toán
 

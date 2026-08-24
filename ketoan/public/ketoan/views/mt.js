@@ -4399,6 +4399,18 @@ async function loadOpeningBoard(container, state) {
   }
   const rows = res.rows || [];
 
+  // Vế sổ cái nạp RIÊNG và được phép hỏng: nó đọc GL Entry, nặng hơn hẳn phần
+  // còn lại. Gộp vào một lời gọi thì một truy vấn sổ cái chậm/lỗi làm trắng cả
+  // bảng số dư đầu kỳ — màn hình chính mất vì một cột phụ.
+  let glRes = null;
+  try {
+    glRes = await api.mtOpeningGlCompare();
+  } catch (e) {
+    glRes = { error: e.message };
+  }
+  const glOf = {};
+  (glRes && glRes.rows ? glRes.rows : []).forEach((g) => { glOf[g.chain] = g; });
+
   setHTML(body, html`
     <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-primary)">
       <div class="kt-card-body kt-sub">${res.note}</div>
@@ -4408,15 +4420,31 @@ async function loadOpeningBoard(container, state) {
          style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
       <span class="kt-sub">Đã chốt <b>${res.n_done}/${rows.length}</b> chuỗi</span>
       <span class="kt-sub">Công nợ mang sang: <b>${formatVND(res.total_carried)}</b></span>
+      ${glRes && !glRes.error
+        ? html`<span class="kt-sub">Sổ cái tại ngày chốt: <b>${formatVND(glRes.total_gl)}</b></span>
+               <span class="kt-sub">Lệch: <b style="${Math.abs(glRes.total_diff) > 1 ? "color:var(--kt-danger)" : ""}"
+                 >${formatVND(glRes.total_diff)}</b>${glRes.n_off ? ` · ${glRes.n_off} chuỗi lệch` : ""}</span>`
+        : ""}
       ${!res.can_manage ? html`<span class="kt-sub">Chỉ kế toán trưởng mới nhập/chốt được.</span>` : ""}
     </div></div>
+
+    ${glRes && glRes.error
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+          <div class="kt-card-body kt-sub"><b>Chưa lấy được số dư sổ cái.</b> ${glRes.error}
+          — hai cột bên phải để trống, phần còn lại vẫn dùng bình thường.</div></div>`
+      : ""}
+    ${glRes && !glRes.error
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body kt-sub">${glRes.note}</div></div>`
+      : ""}
 
     <div class="kt-card"><div class="kt-card-body">
       <div class="kt-table-wrap"><table class="kt-table">
         <thead><tr>
           <th>Chuỗi</th><th>Trạng thái</th><th>Ngày chốt</th>
           <th class="num">Nợ ròng</th><th class="num">Đơn chưa xuất HĐ</th>
-          <th class="num">Mang sang</th><th class="num">Dòng treo</th><th></th>
+          <th class="num">Mang sang</th>
+          <th class="num">Sổ cái ERPNext</th><th class="num">Lệch</th>
+          <th class="num">Dòng treo</th><th></th>
         </tr></thead>
         <tbody>
           ${rows.map((r) => html`<tr>
@@ -4428,12 +4456,21 @@ async function loadOpeningBoard(container, state) {
             <td class="num">${r.doc && r.doc.no_invoice_amount
               ? html`<span class="kt-sub">${formatVND(r.doc.no_invoice_amount)}</span>` : html`<span class="kt-sub">—</span>`}</td>
             <td class="num">${r.doc ? html`<b>${formatVND(r.doc.debt_carried)}</b>` : html`<span class="kt-sub">—</span>`}</td>
+            <td class="num">${glOf[r.chain] && glOf[r.chain].has_doc
+              ? formatVND(glOf[r.chain].gl) : html`<span class="kt-sub">—</span>`}</td>
+            <td class="num">${glOf[r.chain] && glOf[r.chain].has_doc
+              ? html`<b class="${Math.abs(glOf[r.chain].diff) > 1 ? "danger" : ""}"
+                  >${formatVND(glOf[r.chain].diff)}</b>`
+              : html`<span class="kt-sub">—</span>`}</td>
             <td class="num">${r.doc && r.doc.n_unmatched
               ? html`<span class="kt-badge kt-badge--red">${r.doc.n_unmatched}</span>`
               : html`<span class="kt-sub">${r.doc ? "0" : "—"}</span>`}</td>
             <td>${r.doc
               ? html`<button class="kt-btn kt-btn--outline kt-btn--sm ob-open" data-name="${r.doc.name}">
-                  <i class="fas fa-folder-open"></i> Mở</button>`
+                  <i class="fas fa-folder-open"></i> Mở</button>
+                <button class="kt-btn kt-btn--outline kt-btn--sm ob-gl" data-name="${r.doc.name}"
+                        title="Chỗ lệch giữa file Excel và sổ cái nằm ở đâu">
+                  <i class="fas fa-scale-balanced"></i> Đối chiếu</button>`
               : (res.can_manage
                 ? html`<button class="kt-btn kt-btn--primary kt-btn--sm ob-import" data-chain="${r.chain}">
                     <i class="fas fa-file-import"></i> Nhập file</button>`
@@ -4450,9 +4487,146 @@ async function loadOpeningBoard(container, state) {
       loadTab(container, state);
     });
   });
+  container.querySelectorAll(".ob-gl").forEach((b) => {
+    b.addEventListener("click", () => openGlBridge(b.dataset.name));
+  });
   container.querySelectorAll(".ob-import").forEach((b) => {
     b.addEventListener("click", () => pickOpeningFile(container, state, b.dataset.chain));
   });
+}
+
+// ── Đối chiếu Excel ↔ sổ cái ERPNext cho MỘT chuỗi ────────────────────────
+// Không bày hai con số rồi in "lệch X" — kế toán không làm gì được với một con
+// số như thế. Bày CẦU NỐI: bốn khoản mục cộng lại phải ra đúng chỗ lệch.
+async function openGlBridge(name) {
+  const modal = openModal({
+    title: "Đối chiếu số dư đầu kỳ ↔ sổ cái ERPNext",
+    icon: "fa-scale-balanced",
+    maxWidth: 1000,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  let d;
+  try {
+    d = await api.mtOpeningGlDetail({ name });
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+  setHTML(modal.body, glBridgeBody(d));
+  modal.body.querySelector("#gl-close").addEventListener("click", () => modal.close());
+}
+
+function glBridgeBody(d) {
+  const x = d.excel;
+  const e = d.erp;
+  const off = Math.abs(d.diff) > 1;
+
+  return html`
+    <div class="kt-sub" style="margin-bottom:10px">
+      <b>${d.chain}</b> · ngày chốt ${formatDate(d.cutover_date)} ·
+      trạng thái ${d.status}${d.finalized ? " (luật tất toán ĐANG bật)" : ""}
+    </div>
+
+    <div class="kt-stats kt-mb">
+      <div class="kt-stat"><div class="kt-stat-label">Excel: công nợ mang sang</div>
+        <div class="kt-stat-value">${formatVNDShort(x.debt_carried)}</div>
+        <div class="kt-stat-sub">${formatVND(x.debt_carried)}</div></div>
+      <div class="kt-stat"><div class="kt-stat-label">Sổ cái ERPNext tại ngày chốt</div>
+        <div class="kt-stat-value">${formatVNDShort(e.gl)}</div>
+        <div class="kt-stat-sub">TK phải thu · chưa áp luật tất toán</div></div>
+      <div class="kt-stat"><div class="kt-stat-label">Lệch (sổ cái − Excel)</div>
+        <div class="kt-stat-value ${off ? "neg" : "pos"}">${formatVNDShort(d.diff)}</div>
+        <div class="kt-stat-sub">${formatVND(d.diff)}</div></div>
+    </div>
+
+    ${!d.balanced
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)"><i class="fas fa-bug"></i> Cầu nối không cộng đủ — còn dư ${formatVND(d.residual)}</b>
+          <div class="kt-sub" style="margin-top:4px">Bốn khoản mục dưới đây phải cộng lại ĐÚNG bằng chỗ lệch.
+          Còn dư là LỖI CODE, không phải sai số cho phép — đừng dùng bảng này để kết luận cho tới khi sửa xong.</div>
+        </div></div>`
+      : ""}
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <b>Chỗ lệch nằm ở đâu</b>
+      <div class="kt-table-wrap" style="margin-top:6px"><table class="kt-table">
+        <tbody>
+          ${(d.items || []).map((it) => html`<tr>
+            <td>${it.label}<div class="kt-sub">${it.hint}</div></td>
+            <td class="num" style="white-space:nowrap"><b>${formatVND(it.amount)}</b></td>
+          </tr>`)}
+          <tr style="border-top:2px solid var(--kt-border)">
+            <td><b>Cộng lại</b></td>
+            <td class="num"><b class="${off ? "danger" : ""}">${formatVND(d.diff)}</b></td>
+          </tr>
+        </tbody>
+      </table></div>
+    </div></div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <b>Vế Excel — từ số in trong file xuống số đem so</b>
+      <div class="kt-table-wrap" style="margin-top:6px"><table class="kt-table"><tbody>
+        <tr><td>Nợ gộp (sheet chính, đã đối chiếu dòng TỔNG CỘNG của file)</td>
+            <td class="num">${formatVND(x.opening_debt_gross)}</td></tr>
+        <tr><td class="kt-sub">− ghi giảm chưa cấn trừ</td>
+            <td class="num kt-sub">${formatVND(x.deduction_open)}</td></tr>
+        <tr><td>= nợ ròng đầu kỳ</td><td class="num">${formatVND(x.opening_debt)}</td></tr>
+        <tr><td class="kt-sub">− đơn đã giao CHƯA xuất hóa đơn (chưa có bút toán nên sổ cái không thể có)</td>
+            <td class="num kt-sub">${formatVND(x.no_invoice_amount)}</td></tr>
+        <tr style="border-top:2px solid var(--kt-border)">
+            <td><b>= công nợ mang sang — SỐ ĐEM SO</b></td>
+            <td class="num"><b>${formatVND(x.debt_carried)}</b></td></tr>
+        <tr><td class="kt-sub">trong đó đã nối được hóa đơn (${x.n_matched} dòng)</td>
+            <td class="num kt-sub">${formatVND(x.matched)}</td></tr>
+        <tr><td class="kt-sub">trước go-live (${x.n_pre_golive} dòng) · bỏ qua (${x.n_skipped} dòng)</td>
+            <td class="num kt-sub">${formatVND(x.pre_golive + x.skipped)}</td></tr>
+        ${!x.file_consistent
+          ? html`<tr><td><b class="danger">Số của chính file không tự khớp — lệch ${formatVND(x.file_gap)}</b>
+                <div class="kt-sub">Tổng các dòng còn nợ không ra dòng TỔNG CỘNG in trong file. Lúc nhập đã
+                đối chiếu khớp, nên khác 0 bây giờ nghĩa là dữ liệu đã bị sửa sau khi nhập — cầu nối phía
+                trên chỉ đúng tới mức con số gốc còn đúng.</div></td>
+              <td class="num"><b class="danger">${formatVND(x.file_gap)}</b></td></tr>`
+          : ""}
+        <tr><td class="${x.unmatched ? "" : "kt-sub"}">
+              ${x.unmatched ? html`<b style="color:var(--kt-danger)">CHƯA nối được hóa đơn nào (${x.n_unmatched} dòng)</b>
+                <div class="kt-sub">Tiền thật đang không có chứng từ nào giữ lại. Chốt bây giờ là mất khỏi công nợ.</div>`
+                : html`chưa nối được hóa đơn nào (0 dòng)`}</td>
+            <td class="num"><b class="${x.unmatched ? "danger" : ""}">${formatVND(x.unmatched)}</b></td></tr>
+      </tbody></table></div>
+    </div></div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <b>Vế ERPNext — sổ cái so với rổ hóa đơn</b>
+      <div class="kt-table-wrap" style="margin-top:6px"><table class="kt-table"><tbody>
+        <tr><td>Số dư TK phải thu trên sổ cái</td><td class="num">${formatVND(e.gl)}</td></tr>
+        <tr><td>Rổ hóa đơn còn nợ tại ngày chốt (${e.n_listed + e.n_not_listed} hóa đơn)</td>
+            <td class="num">${formatVND(e.invoice_basket)}</td></tr>
+        <tr><td class="kt-sub">· có tên trong file (${e.n_listed} hóa đơn)</td>
+            <td class="num kt-sub">${formatVND(e.listed)}</td></tr>
+        <tr><td class="kt-sub">· KHÔNG có trong file (${e.n_not_listed} hóa đơn) — chốt là mất khỏi công nợ</td>
+            <td class="num kt-sub">${formatVND(e.not_listed)}</td></tr>
+      </tbody></table></div>
+    </div></div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <b>Từng pháp nhân của chuỗi</b>
+      <div class="kt-sub" style="margin:4px 0">Một chuỗi nhiều mã khách; chỗ lệch gần như luôn nằm gọn ở một pháp nhân.</div>
+      <div class="kt-table-wrap"><table class="kt-table">
+        <thead><tr><th>Khách hàng</th><th class="num">Sổ cái</th>
+          <th class="num">HĐ có trong file</th><th class="num">HĐ ngoài file</th></tr></thead>
+        <tbody>${(d.by_customer || []).map((c) => html`<tr>
+          <td>${c.customer_name}<div class="kt-sub">${c.customer}</div></td>
+          <td class="num">${formatVND(c.gl)}</td>
+          <td class="num">${formatVND(c.listed)} <span class="kt-sub">(${c.n_listed})</span></td>
+          <td class="num">${formatVND(c.not_listed)} <span class="kt-sub">(${c.n_not_listed})</span></td>
+        </tr>`)}</tbody>
+      </table></div>
+    </div></div>
+
+    <div style="display:flex;justify-content:flex-end">
+      <button class="kt-btn kt-btn--outline" id="gl-close">Đóng</button>
+    </div>
+  `;
 }
 
 function pickOpeningFile(container, state, chain) {

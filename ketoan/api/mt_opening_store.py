@@ -1083,11 +1083,22 @@ def finalize_preview(name, company=None, limit=50):
 
     p = {}
     base = _settled_query(company, doc.chain, doc.cutover_date, doc.name, p)
-    agg = frappe.db.sql("SELECT COUNT(*) AS n, IFNULL(SUM(ABS(si.grand_total)), 0) AS amount "
+    # SỐ TIỀN RỜI KHỎI RỔ NỢ, không phải giá trị gộp của hóa đơn.
+    #
+    # `ABS(si.grand_total)` trần là sai theo hai chiều cùng lúc: hóa đơn 100tr đã
+    # trả 40tr và trả lại hàng 10tr thì chốt chỉ lấy đi 50tr, không phải 100tr.
+    # Dùng ĐÚNG biểu thức nợ của `mt_debt` để câu "chốt xong X đồng rời khỏi công
+    # nợ" đúng bằng khoản (2) trên màn hình đối chiếu sổ cái (`mt_opening_gl`) —
+    # hai màn hình nói về cùng một tập hóa đơn thì phải nói cùng một con số.
+    net_due = ("ABS(si.grand_total) - IFNULL(rt.returned, 0)"
+               " - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0))")
+    agg = frappe.db.sql(f"SELECT COUNT(*) AS n, IFNULL(SUM({net_due}), 0) AS amount "
                         + base, p, as_dict=True)[0]
     p["limit"] = min(200, max(10, cint(limit) or 50))
-    sample = frappe.db.sql("""
-        SELECT si.name, si.posting_date, si.customer_name, ABS(si.grand_total) AS grand_total
+    sample = frappe.db.sql(f"""
+        SELECT si.name, si.posting_date, si.customer_name,
+               ABS(si.grand_total) AS grand_total,
+               {net_due} AS remaining
         """ + base + " ORDER BY si.posting_date DESC LIMIT %(limit)s", p, as_dict=True)
 
     left = doc.unresolved()
@@ -1150,9 +1161,14 @@ def _kept_by_erp(company, doc):
     keys = {"k%d" % i: n for i, n in enumerate(names)}
     p.update(keys)
     ph = ", ".join("%%(k%d)s" % i for i in range(len(names)))
+    # Trừ cả phần bảng kê đã ghi nhận trả — cùng biểu thức với `mt_debt` và với
+    # khoản (2)/(3) của màn hình đối chiếu sổ cái. Không trừ thì một hóa đơn đã
+    # thu một phần trước ngày chốt vẫn được tính là giữ lại nguyên giá trị, và
+    # con số "ERPNext nói" trên màn hình chốt không bao giờ khớp với sổ cái.
     rows = frappe.db.sql("""
         SELECT si.name, si.docstatus, si.is_return,
-               (ABS(si.grand_total) - IFNULL(rt.returned, 0)) AS net_due
+               GREATEST(ABS(si.grand_total) - IFNULL(rt.returned, 0)
+                        - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) AS net_due
         FROM `tabSales Invoice` si
         {join}
         WHERE si.name IN ({ph})

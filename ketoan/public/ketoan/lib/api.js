@@ -244,6 +244,8 @@ export const api = {
   mtOpeningReopen: (name) => callMethod(NS + "mt_opening_store.reopen", withCompany({ name })),
   mtOpeningDelete: (name) => callMethod(NS + "mt_opening_store.delete_opening", withCompany({ name })),
   mtOpeningSettled: (a) => callMethod(NS + "mt_opening_store.settled_invoices", withCompany(a)),
+  mtOpeningGlCompare: () => callMethod(NS + "mt_opening_gl.compare", withCompany({})),
+  mtOpeningGlDetail: (a) => callMethod(NS + "mt_opening_gl.chain_detail", withCompany(a)),
 
   // Bảng điều khiển theo CHUỖI — màn hình đầu tiên của kênh MT. Một lời gọi
   // trả về tiến độ cả năm bước cho mọi chuỗi.
