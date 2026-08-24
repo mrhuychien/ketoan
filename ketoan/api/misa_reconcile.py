@@ -96,8 +96,16 @@ def _status(snap, si_name, tolerance):
         return "Khớp"
 
     si = frappe.db.get_value(
-        "Sales Invoice", si_name, ["net_total", "total_taxes_and_charges", "grand_total"], as_dict=True
+        "Sales Invoice", si_name,
+        ["name", "net_total", "total_taxes_and_charges", "grand_total"], as_dict=True
     ) or {}
+    # Bản THAY THẾ khai lại toàn bộ hóa đơn với nội dung đã sửa; phần hàng siêu
+    # thị từ chối đi bằng hóa đơn TRẢ VỀ bên ERPNext. So vế chưa trừ trả về là
+    # gắn "Lệch tiền" cho một cặp thật ra khớp. Dùng CHUNG hàm với misa_sync để
+    # hai màn hình không bao giờ nói hai con số khác nhau về cùng một hóa đơn.
+    from ketoan.api.misa_sync import erp_totals
+
+    si = erp_totals(si, relation) | {"name": si.get("name")}
     # Endpoint danh sách của MISA KHÔNG trả tách thuế — TotalAmountWithoutVAT và
     # TotalVATAmount về 0.0 ở cả 30/30 bản ghi thật (§H.2). So 0 đó với net_total
     # thật của ERPNext thì MỌI hóa đơn khớp đều bị gắn "Lệch tiền" — rổ cảnh báo
@@ -139,9 +147,13 @@ def match_snapshots(from_date, to_date, relink=0):
 
     snaps = frappe.get_all(
         "MISA Invoice Snapshot", filters=filters,
+        # `einvoice_status` là trục QUAN HỆ (thay thế/điều chỉnh) mà `_status`
+        # đọc để quyết. Thiếu nó thì cả nhánh "Đã thay thế" lẫn nhánh miễn so
+        # tiền cho hóa đơn điều chỉnh thành CODE CHẾT — `.get()` trả None nên
+        # không báo lỗi, chỉ lặng lẽ xếp sai rổ.
         fields=["name", "ref_id", "transaction_id", "inv_series", "inv_no", "inv_date",
                 "buyer_tax_code", "total_amount", "amount_before_vat", "vat_amount",
-                "is_deleted", "sales_invoice", "match_method"],
+                "is_deleted", "einvoice_status", "sales_invoice", "match_method"],
         limit=50000,
     )
     if not snaps:
@@ -202,7 +214,10 @@ def relink_snapshot(snapshot, sales_invoice=None, note=None):
 
     snap = frappe.db.get_value(
         "MISA Invoice Snapshot", snapshot,
-        ["name", "is_deleted", "amount_before_vat", "vat_amount", "total_amount"], as_dict=True
+        # `einvoice_status`: xem chú thích ở `match_snapshots`. Thiếu nó thì mọi
+        # bản NỐI TAY — kể cả hóa đơn thay thế vừa xử lý xong — bị gắn "Lệch tiền".
+        ["name", "is_deleted", "einvoice_status", "amount_before_vat", "vat_amount",
+         "total_amount"], as_dict=True
     )
     if not snap:
         frappe.throw(frappe._("Không tìm thấy bản ghi MISA {0}").format(snapshot))

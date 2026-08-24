@@ -60,6 +60,8 @@ function shell(state, ov) {
         <input type="date" class="kt-input kt-input--sm" id="vat-from" value="${state.from}">
         <span class="kt-sub">→</span>
         <input type="date" class="kt-input kt-input--sm" id="vat-to" value="${state.to}">
+        ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-replace"
+                 title="Hàng bẹp méo, siêu thị không nhận đủ → MISA phát hành hóa đơn THAY THẾ mang số mới. Chứng từ ERPNext vẫn giữ số cũ đã chết nên không khớp được với tiền về."><i class="fas fa-arrow-right-arrow-left"></i> Đổi số HĐ thay thế</button>` : ""}
         ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-legacy"><i class="fas fa-right-left"></i> Chuyển số HĐ cũ</button>` : ""}
         ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-import"><i class="fas fa-file-import"></i> Nhập file MISA</button>` : ""}
         ${ov.can_sync ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="vat-sync"><i class="fas fa-rotate"></i> Đồng bộ MISA</button>` : ""}
@@ -158,6 +160,9 @@ function bind(container, state, ov) {
 
   const leg = container.querySelector("#vat-legacy");
   if (leg) leg.addEventListener("click", () => openLegacyModal());
+
+  const rep = container.querySelector("#vat-replace");
+  if (rep) rep.addEventListener("click", () => openReplaceModal());
 
   const rid = container.querySelector("#vat-refid");
   if (rid) rid.addEventListener("click", async () => {
@@ -723,6 +728,264 @@ async function loadLegacy(modal, st) {
         expected_hash: p.plan_hash,
       });
       toast(r.message + (r.rematch_queued ? " · đang đối soát lại ở nền" : ""), "success");
+      modal.close();
+      location.reload();
+    } catch (e) {
+      toast(e.message, "error");
+      go.disabled = false;
+      go.innerHTML = "Thử lại";
+    }
+  });
+}
+
+
+// ── Đổi số hóa đơn sang HÓA ĐƠN THAY THẾ ───────────────────────────────────
+// Hàng đi, hóa đơn đã ký, đến kho mới phát hiện bẹp méo → MISA phát hành hóa
+// đơn THAY THẾ mang số mới, số cũ chết. Chứng từ ERPNext vẫn giữ số chết nên
+// không khớp được với bảng kê thanh toán của siêu thị (vốn gọi theo số mới).
+//
+// Đây là đường GHI LÊN CHỨNG TỪ ĐÃ GHI SỔ nên xem trước là bắt buộc, và mọi
+// thứ backend định ghi đều bày ra thành bảng trước khi có nút bấm.
+const REPL_LABEL = {
+  custom_misa_inv_no: "Số hóa đơn MISA",
+  custom_misa_inv_series: "Ký hiệu",
+  custom_misa_inv_date: "Ngày phát hành",
+  custom_misa_transaction_id: "Mã tra cứu",
+  custom_misa_invoice_code: "Mã CQT",
+  custom_misa_relation: "Quan hệ",
+  custom_misa_ref_id: "RefID (khóa nối MISA)",
+  custom_misa_org_ref_id: "RefID hóa đơn gốc",
+  custom_misa_org_inv: "Hóa đơn gốc",
+  custom_misa_no_locked: "Khóa đồng bộ",
+  custom_misa_status: "Trạng thái MISA",
+  vn_einvoice_number: "Số HĐĐT (hiển thị)",
+  vn_einvoice_date: "Ngày HĐĐT (hiển thị)",
+};
+
+function openReplaceModal() {
+  const modal = openModal({
+    title: "Đổi số hóa đơn sang hóa đơn thay thế",
+    icon: "fa-arrow-right-arrow-left",
+    maxWidth: 960,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  const st = { si: null, inv_no: "", series: "", reason: "", plan: null };
+  renderReplace(modal, st);
+}
+
+function replaceShell(st) {
+  return html`
+    <p class="kt-sub">
+      Dùng khi hóa đơn đã phát hành bị <b>thay thế</b> trên MISA (hàng bẹp méo, siêu thị
+      không nhận đủ). Số cũ chết, mọi thứ đối bên ngoài — bảng kê thanh toán, công nợ
+      đầu kỳ, tra cứu thuế — đều gọi theo <b>số mới</b>.
+      Số cũ <b>không bị xóa</b>: nó chuyển sang ô "Hóa đơn gốc" kèm một dòng nhật ký.
+    </p>
+
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
+      <div style="flex:1;min-width:260px">
+        <label class="kt-label">Chứng từ ERPNext (tên hóa đơn / số cũ / tên khách)</label>
+        <input class="kt-input kt-input--sm" id="rp-si" autocomplete="off"
+               placeholder="vd HD-04793 hoặc 5449" value="${st.si || ""}">
+        <div id="rp-hits"></div>
+      </div>
+      <div style="width:150px">
+        <label class="kt-label">Số hóa đơn MỚI</label>
+        <input class="kt-input kt-input--sm" id="rp-no" placeholder="vd 6537" value="${st.inv_no}">
+      </div>
+      <div style="width:150px">
+        <label class="kt-label">Ký hiệu (nếu cần)</label>
+        <input class="kt-input kt-input--sm" id="rp-series" placeholder="vd 1C26THG" value="${st.series}">
+      </div>
+      <button class="kt-btn kt-btn--sm" id="rp-check"><i class="fas fa-magnifying-glass"></i> Xem trước</button>
+    </div>
+
+    <div id="rp-plan"></div>
+    <div id="rp-locked"></div>
+  `;
+}
+
+function renderReplace(modal, st) {
+  setHTML(modal.body, replaceShell(st));
+  showLocked(modal.body.querySelector("#rp-locked"));
+
+  const si = modal.body.querySelector("#rp-si");
+  const hits = modal.body.querySelector("#rp-hits");
+  let timer = null;
+  si.addEventListener("input", () => {
+    st.si = si.value.trim();
+    st.plan = null;
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      if (st.si.length < 2) { setHTML(hits, ""); return; }
+      let rows = [];
+      try { rows = await api.vatReplaceSearch(st.si); } catch (e) { setHTML(hits, ""); return; }
+      if (!rows.length) { setHTML(hits, html`<div class="kt-sub" style="margin-top:4px">Không tìm thấy chứng từ nào đã ghi sổ.</div>`); return; }
+      setHTML(hits, html`
+        <div class="kt-table-wrap" style="max-height:180px;overflow:auto;margin-top:4px">
+          <table class="kt-table"><tbody>${rows.map((r) => html`<tr>
+            <td><b>${r.name}</b><div class="kt-sub">${r.customer_name || ""}</div></td>
+            <td>${r.inv_no || "—"}</td>
+            <td class="num">${formatVND(r.grand_total)}</td>
+            <td class="num"><button class="kt-btn kt-btn--sm" data-pick="${escapeHtml(r.name)}">Chọn</button></td>
+          </tr>`)}</tbody></table>
+        </div>`);
+      hits.querySelectorAll("[data-pick]").forEach((b) => b.addEventListener("click", () => {
+        si.value = b.dataset.pick;
+        st.si = b.dataset.pick;
+        setHTML(hits, "");
+      }));
+    }, 300);
+  });
+
+  modal.body.querySelector("#rp-check").addEventListener("click", async () => {
+    st.si = si.value.trim();
+    st.inv_no = modal.body.querySelector("#rp-no").value.trim();
+    st.series = modal.body.querySelector("#rp-series").value.trim();
+    const box = modal.body.querySelector("#rp-plan");
+    if (!st.si || !st.inv_no) { toast("Nhập chứng từ và số hóa đơn mới", "error"); return; }
+    setHTML(box, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+    try {
+      st.plan = await api.vatReplacePreview({
+        sales_invoice: st.si, inv_no: st.inv_no, inv_series: st.series || undefined,
+      });
+    } catch (e) {
+      st.plan = null;
+      setHTML(box, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+      return;
+    }
+    renderReplacePlan(modal, st);
+  });
+}
+
+// Chứng từ đang KHÓA đồng bộ. Bày ra ngay ở đây chứ không giấu trong report:
+// khóa là đánh đổi thật (mất theo dõi hủy/thay thế tự động), và cái giá đó chỉ
+// chấp nhận được khi còn có người nhìn thấy danh sách để gỡ dần.
+async function showLocked(box) {
+  if (!box) return;
+  let d;
+  try { d = await api.vatLockedList(); } catch (e) { return; }
+  if (!d.supported || !d.total) return;
+  setHTML(box, html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body">
+      <b><i class="fas fa-lock"></i> ${d.total} chứng từ đang khóa đồng bộ MISA</b>
+      <div class="kt-sub" style="margin:4px 0 8px">
+        Số hóa đơn trên các chứng từ này do người gán, và máy <b>không</b> còn tự phát hiện
+        hủy/thay thế cho chúng. Kéo bảng kê MISA về (nút <b>Đồng bộ MISA</b>) rồi làm lại ở
+        đây một lượt là gỡ được khóa.
+      </div>
+      <div class="kt-table-wrap" style="max-height:200px;overflow:auto"><table class="kt-table">
+        <thead><tr><th>Chứng từ</th><th>Số đang mang</th><th>Số cũ</th><th class="num">Tiền</th></tr></thead>
+        <tbody>${(d.rows || []).map((r) => html`<tr>
+          <td><b>${r.name}</b><div class="kt-sub">${r.customer_name || ""} · ${formatDate(r.posting_date)}</div></td>
+          <td>${r.inv_series || ""} ${r.inv_no || ""}</td>
+          <td class="kt-sub">${r.org_inv || "—"}</td>
+          <td class="num">${formatVND(r.grand_total)}</td>
+        </tr>`)}</tbody>
+      </table></div>
+    </div></div>`);
+}
+
+function renderReplacePlan(modal, st) {
+  const p = st.plan;
+  const box = modal.body.querySelector("#rp-plan");
+  const m = p.money || {};
+
+  setHTML(box, html`
+    ${(p.blocks || []).length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)"><div class="kt-card-body">
+          <b style="color:var(--kt-danger)"><i class="fas fa-ban"></i> Không đổi được</b>
+          <ul style="margin:6px 0 0 18px">${p.blocks.map((x) => html`<li class="kt-sub">${x}</li>`)}</ul>
+        </div></div>`
+      : ""}
+
+    ${(p.warnings || []).length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body">
+          <b><i class="fas fa-triangle-exclamation"></i> Đọc kỹ trước khi bấm</b>
+          <ul style="margin:6px 0 0 18px">${p.warnings.map((x) => html`<li class="kt-sub">${x}</li>`)}</ul>
+        </div></div>`
+      : ""}
+
+    <div class="kt-stats kt-mb">
+      <div class="kt-stat"><div class="kt-stat-label">Số cũ (chết)</div>
+        <div class="kt-stat-value">${p.old.inv_no || "—"}</div>
+        <div class="kt-stat-sub">${p.old.inv_series || ""}</div></div>
+      <div class="kt-stat"><div class="kt-stat-label">Số mới</div>
+        <div class="kt-stat-value">${p.new.inv_no || "—"}</div>
+        <div class="kt-stat-sub">${p.new.inv_series || ""}</div></div>
+      <div class="kt-stat"><div class="kt-stat-label">Đồng bộ MISA</div>
+        <div class="kt-stat-value ${p.locked ? "warn" : ""}">${p.locked ? "KHÓA" : "vẫn chạy"}</div>
+        <div class="kt-stat-sub">${p.mode === "theo_bang_ke" ? "có RefID bản thay thế" : "chưa biết RefID bản mới"}</div></div>
+      <div class="kt-stat"><div class="kt-stat-label">Tiền</div>
+        <div class="kt-stat-value ${m.diff && Math.abs(m.diff) > 1 ? "danger" : ""}">${formatVNDShort(m.erp_net || 0)}</div>
+        <div class="kt-stat-sub">${formatVND(m.erp_gross || 0)} − trả về ${formatVND(m.returned || 0)}${
+          m.misa != null ? ` · MISA ${formatVND(m.misa)}` : " · chưa có bản MISA"}</div></div>
+    </div>
+
+    ${p.locked
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)"><div class="kt-card-body kt-sub">
+          <b>Khóa đồng bộ nghĩa là gì.</b> RefID trên chứng từ vẫn trỏ hóa đơn đã chết, nên nếu
+          để đồng bộ chạy thì lần quét sau nó ghi số cũ đè lên số vừa gán. Khóa lại chặn được
+          việc đó, nhưng đổi lại chứng từ này <b>không còn được tự phát hiện hủy/thay thế</b>.
+          Muốn tránh: bấm <b>Đồng bộ MISA</b> kéo bảng kê về trước rồi quay lại đây.
+        </div></div>`
+      : ""}
+
+    ${p.snapshot
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body kt-sub">
+          Bản MISA nối vào: <b>${p.snapshot.inv_series || ""} ${p.snapshot.inv_no}</b>
+          · ngày ${formatDate(p.snapshot.inv_date)} · ${formatVND(p.snapshot.total_amount)}
+          ${p.snapshot.relation ? ` · ${p.snapshot.relation}` : ""}
+        </div></div>`
+      : ""}
+
+    ${(p.changes || []).length
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <b>Sẽ ghi ${p.changes.length} ô trên ${p.sales_invoice}</b>
+          <div class="kt-table-wrap" style="margin-top:6px"><table class="kt-table">
+            <thead><tr><th>Ô</th><th>Đang là</th><th>Sẽ thành</th></tr></thead>
+            <tbody>${p.changes.map((c) => html`<tr>
+              <td>${REPL_LABEL[c.field] || c.field}</td>
+              <td class="kt-sub">${c.old || "—"}</td>
+              <td><b>${c.new || "(xóa)"}</b></td>
+            </tr>`)}</tbody>
+          </table></div>
+        </div></div>`
+      : ""}
+
+    <div style="margin-bottom:10px">
+      <label class="kt-label">Lý do / số biên bản (ghi vào nhật ký chứng từ)</label>
+      <input class="kt-input kt-input--sm" id="rp-reason" placeholder="vd BB 12/2026 hàng bẹp méo" value="${st.reason}">
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="kt-btn kt-btn--outline" id="rp-close">Đóng</button>
+      <button class="kt-btn kt-btn--danger" id="rp-go" ${p.ok ? "" : "disabled"}>
+        <i class="fas fa-pen-to-square"></i> Ghi lên chứng từ đã ghi sổ
+      </button>
+    </div>
+  `);
+
+  box.querySelector("#rp-close").addEventListener("click", () => modal.close());
+  const go = box.querySelector("#rp-go");
+  if (go) go.addEventListener("click", async () => {
+    st.reason = box.querySelector("#rp-reason").value.trim();
+    if (!confirm(
+        `Đổi số hóa đơn của ${p.sales_invoice}: ${p.old.inv_no || "(trống)"} → ${p.new.inv_no}.\n\n` +
+        "Đây là chứng từ ĐÃ GHI SỔ và không có nút hoàn tác. Xác nhận?")) return;
+    go.disabled = true;
+    go.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang ghi…';
+    try {
+      const r = await api.vatReplaceApply({
+        sales_invoice: p.sales_invoice,
+        inv_no: p.new.inv_no,
+        inv_series: p.new.inv_series || undefined,
+        reason: st.reason || undefined,
+        // Vân tay của đúng kế hoạch đang hiện trên màn hình. Đồng bộ MISA chạy
+        // xen vào giữa là backend dừng, không ghi gì.
+        expected_hash: p.plan_hash,
+      });
+      toast(r.message, "success");
       modal.close();
       location.reload();
     } catch (e) {

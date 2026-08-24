@@ -550,6 +550,31 @@ MISA_CUSTOM_FIELDS = {
             "allow_on_submit": 1,
             "insert_after": "custom_misa_last_checked",
         },
+        {
+            # Cờ nói MỘT điều, và điều đó rất hẹp:
+            #
+            #   `custom_misa_ref_id` trên chứng từ này KHÔNG còn ứng với số hóa
+            #   đơn đang ghi ở `custom_misa_inv_no`.
+            #
+            # Xảy ra khi kế toán gán SỐ HÓA ĐƠN THAY THẾ (misa_replace) mà bảng
+            # kê MISA chưa kéo về nên không biết RefID của bản thay thế. Lúc đó
+            # ref_id cũ vẫn trỏ vào hóa đơn ĐÃ CHẾT; vòng quét 2 của
+            # `poll_pending` hỏi theo ref_id đó, MISA trả số cũ, và số người vừa
+            # gán bị ghi đè NGƯỢC về số chết — lặng lẽ, mỗi lần đồng bộ.
+            #
+            # Cờ bật thì vòng 2 bỏ qua chứng từ. Đổi lại, chứng từ đó không còn
+            # được theo dõi hủy/thay thế tự động — nên đây là lựa chọn CUỐI, chỉ
+            # dùng khi không repoint được ref_id.
+            "fieldname": "custom_misa_no_locked",
+            "label": "Số hóa đơn do người gán (đồng bộ không đè)",
+            "fieldtype": "Check",
+            "default": "0",
+            "allow_on_submit": 1,
+            "read_only": 1,
+            "in_standard_filter": 1,
+            "description": "Bật khi số hóa đơn được gán tay theo hóa đơn thay thế mà chưa biết RefID của bản mới. poll_pending sẽ không đụng vào chứng từ này nữa.",
+            "insert_after": "custom_misa_note",
+        },
     ]
 }
 

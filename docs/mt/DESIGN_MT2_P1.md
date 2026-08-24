@@ -571,7 +571,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-N2** ô tìm ứng viên tìm SAI CHỖ — đường nối tay chết từ đầu | `10508c9` | `opening_store_check` |
 | **MT2-P** một hóa đơn MISA nối được NHIỀU chứng từ ERPNext | `02c09c0` | `opening_store_check` |
 | **MT2-Q** hóa đơn cũ thiếu RefID — cấp lại được từ portal | `59222f0` | `refid_check` |
-| **MT2-R** số dư đầu kỳ khớp theo HÓA ĐƠN THAY THẾ | *(commit này)* | `opening_store_check` · `replaced_inv_survey` |
+| **MT2-R** số dư đầu kỳ khớp theo HÓA ĐƠN THAY THẾ | `56f3591` | `opening_store_check` · `replaced_inv_survey` |
+| **MT2-S** gán SỐ HÓA ĐƠN THAY THẾ lên chứng từ đã ghi sổ (patch v0_0_17) | *(commit này)* | `replace_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -581,7 +582,7 @@ for t in regression_check crosscheck_mt2 mutation_check \
          discount_basis_check discount_sheet_check win_dossier_check \
          debt_due_check rebate_pdf_check clawback_check ui_board_check \
          chain_filter_check opening_check win_grn_check opening_store_check \
-         mega_check refid_check; do
+         mega_check refid_check replace_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -810,9 +811,66 @@ qua"*.
 | **Amend sau khi CHỐT = xóa nợ im lặng** | Amend giữ `posting_date`, đổi **tên** chứng từ. Liên kết trỏ tên cũ; tờ mới `docstatus=1`, ngày ≤ cutover, **không có trong bảng liên kết** → luật tất toán tuyên "đã trả". Không hook nào chạy lại. Phơi nhiễm **không giới hạn ở 59 dòng**. |
 | **Hủy hóa đơn gốc có thể gỡ khoản đã thu** | JE mang `reference_name` = SI. Tùy cấu hình, hủy sẽ `LinkExistsError` hoặc âm thầm gỡ reference làm hóa đơn đã thu quay lại rổ nợ. |
 
-Nên: **giữ nguyên Sales Invoice gốc.** Việc còn thiếu là một đường ghi số hóa đơn
-thay thế lên chính nó — **chưa code**, vì chưa đo được `vn_einvoice_number` có
-`allow_on_submit` hay không trên site. Xem "Còn treo" bên dưới.
+Nên: **giữ nguyên Sales Invoice gốc**, và ghi số thay thế lên chính nó. Đó là
+MT2-S dưới đây.
+
+### MT2-S — ghi số thay thế lên chứng từ ĐÃ GHI SỔ
+
+`ketoan/api/misa_replace.py` · màn hình *Hóa đơn VAT → Đổi số HĐ thay thế*.
+
+Đo trước khi viết, và phép đo đổi hẳn thiết kế:
+
+| Câu hỏi | Đo được |
+|---|---|
+| `custom_misa_inv_no` có `allow_on_submit`? | **CÓ**, sẵn trong `install.py` — không cần patch cho field đó |
+| Đồng bộ có ghi đè lại số vừa gán? | **CÓ.** Vòng quét 2 của `poll_pending` hỏi MISA theo `custom_misa_ref_id`; ref_id đó vẫn trỏ tờ ĐÃ CHẾT nên MISA trả số cũ và `_write` ghi đè — lặng lẽ, mỗi lượt |
+
+Cái bẫy thứ hai mới là thứ quyết định hình dạng module. Có **hai chế độ**:
+
+**A — tra được tờ thay thế trong `MISA Invoice Snapshot`.** Lấy được RefID thật
+của nó → **chuyển `custom_misa_ref_id` sang tờ mới**. Từ đó đồng bộ hỏi đúng tờ
+đang sống: số, ngày, mã CQT, kể cả việc tờ mới có bị hủy tiếp, đều tự về. Không
+khóa gì cả.
+
+**B — chưa kéo bảng kê / không tra ra.** Chỉ gán được số. Bắt buộc bật
+`custom_misa_no_locked` (**patch v0_0_17**) để vòng quét 2 bỏ qua chứng từ này.
+Cái giá: chứng từ đó **không còn được tự phát hiện hủy/thay thế**. Nên B là lối
+cuối, màn hình luôn chỉ đường về A ("bấm Đồng bộ MISA trước"), và danh sách
+chứng từ đang khóa hiện ngay trong chính modal để còn có người gỡ dần.
+
+Bốn chốt chặn, mỗi cái ứng với một kiểu mất tiền đã hình dung được:
+
+1. **Xem trước bắt buộc** — `apply` đòi `expected_hash` dựng từ `preview`. Đồng
+   bộ chạy xen vào giữa là dừng, không ghi gì.
+2. **Không hai chứng từ cùng một số** — trùng số + trùng ký hiệu thì **chặn**
+   (một lần trả tiền sẽ tất toán cả hai). Trùng số khác ký hiệu chỉ **cảnh báo**:
+   MISA đánh số lại từ đầu theo từng ký hiệu nên đó là hợp lệ.
+3. **Số cũ không bao giờ mất** — chuyển sang `custom_misa_org_inv`, ref_id cũ
+   sang `custom_misa_org_ref_id`, kèm một dòng nhật ký có người + giờ + lý do.
+   Chạy lại lần hai KHÔNG được đẩy chính số mới vào ô đó (lúc ấy `old_no` chính
+   là số mới) — đây là một lỗi thật, `replace_check` bắt được trước khi commit.
+4. **Chuyển liên kết bảng kê, gỡ trước nối sau** — `relink_snapshot` từ chối nối
+   khi chứng từ đã có bản MISA khác, nên nối trước là hỏng cả hai việc: tờ chết
+   vẫn nối, tờ thay thế vẫn nằm rổ "Chỉ có trên MISA".
+
+#### Kèm theo: hết "Lệch tiền" giả cho hóa đơn thay thế
+
+Tờ thay thế khai lại **toàn bộ** hóa đơn đã sửa (khác hóa đơn điều chỉnh — chỉ
+mang phần chênh), còn phần hàng bị từ chối bên ERPNext đi bằng **hóa đơn trả
+về**. So vế chưa trừ trả về thì mọi hóa đơn thay thế đứng `Lệch tiền` vĩnh viễn
+và đẻ ToDo mỗi lượt đồng bộ — rổ cảnh báo đầy báo động giả rồi không ai đọc nữa.
+
+`misa_sync.erp_totals(si, relation)` là **một** hàm dùng chung cho cả
+`poll_pending` lẫn `misa_reconcile._status`, nên hai màn hình không bao giờ nói
+hai con số khác nhau về cùng một hóa đơn. Nó **chỉ** trừ khi `relation ==
+"Hóa đơn thay thế"`: hóa đơn thường có trả về một phần thì bản MISA vẫn giữ tổng
+cũ, trừ vào là tạo ra lệch giả theo chiều ngược lại.
+
+```
+hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
+  MISA:    tờ thay thế 4.893.696
+  ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
+```
 
 ### Số dư đầu kỳ — một luật ĐỌC, không phải bút toán
 

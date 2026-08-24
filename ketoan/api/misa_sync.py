@@ -59,6 +59,11 @@ RELATION_SUPERSEDED = {"Bị thay thế"}
 # Mang số CHÊNH chứ không phải tổng → đem so với grand_total là luôn "Lệch tiền".
 RELATION_DELTA = {"Hóa đơn điều chỉnh"}
 
+# Bản THAY THẾ khai lại TOÀN BỘ hóa đơn với nội dung đã sửa, không phải phần
+# chênh. Bên ERPNext phần hàng bị từ chối đi bằng một hóa đơn TRẢ VỀ ghi ngược
+# lại chứng từ gốc, nên vế ERPNext để đem so là (hóa đơn − trả về).
+RELATION_REPLACEMENT = {"Hóa đơn thay thế"}
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Khóa nối
@@ -209,16 +214,68 @@ def _as_invoice(data):
 # So tiền
 # ═══════════════════════════════════════════════════════════════════════════
 
-def check_amount_drift(si, misa, tolerance):
+AMOUNT_LEGS = ("net_total", "total_taxes_and_charges", "grand_total")
+
+
+def returns_against(si_name):
+    """Tổng các hóa đơn TRẢ VỀ đã ghi sổ ngược lại chứng từ này (trị tuyệt đối).
+
+    Chỉ đếm bản có `return_against` — hóa đơn trả về không khai chứng từ gốc thì
+    không ai biết nó trừ vào đâu, và đoán hộ ở đây là trừ nhầm tiền.
+    """
+    rows = frappe.db.sql("""
+        SELECT COUNT(*)                                       AS n,
+               IFNULL(SUM(ABS(r.net_total)), 0)               AS net_total,
+               IFNULL(SUM(ABS(r.total_taxes_and_charges)), 0) AS total_taxes_and_charges,
+               IFNULL(SUM(ABS(r.grand_total)), 0)             AS grand_total
+        FROM `tabSales Invoice` r
+        WHERE r.docstatus = 1 AND r.is_return = 1
+          AND r.return_against = %(si)s
+    """, {"si": si_name}, as_dict=True)
+    return rows[0] if rows else {"n": 0, "net_total": 0, "total_taxes_and_charges": 0,
+                                 "grand_total": 0}
+
+
+def erp_totals(si, relation=None):
+    """3 vế của ERPNext đem ra so với MISA, TRỊ TUYỆT ĐỐI.
+
+    Bình thường là chính 3 cột của chứng từ. Chỉ khi bản MISA đang so là HÓA ĐƠN
+    THAY THẾ mới trừ đi hóa đơn trả về, và đó không phải nới lỏng cho dễ khớp —
+    nó là so đúng vế:
+
+        hàng đi 5.893.696 → siêu thị nhận thiếu vì bẹp méo → MISA phát hành bản
+        thay thế 4.893.696, ERPNext ghi hóa đơn trả về 1.000.000.
+
+    Không trừ thì mọi hóa đơn thay thế có trả về đều đứng "Lệch tiền" vĩnh viễn
+    và đẻ ToDo mỗi lần đồng bộ — rổ cảnh báo đầy báo động giả rồi không ai đọc.
+
+    Trừ NHẦM chỗ cũng nguy hiểm ngang: hóa đơn thường có trả về một phần thì bản
+    MISA vẫn giữ nguyên tổng cũ, trừ vào là tạo ra lệch giả. Nên điều kiện
+    `relation` ở đây là ranh giới, không phải chi tiết.
+    """
+    base = {k: abs(flt(si.get(k))) for k in AMOUNT_LEGS}
+    if relation not in RELATION_REPLACEMENT:
+        return base
+    ret = returns_against(si.get("name"))
+    if not ret.get("n"):
+        return base
+    return {k: base[k] - flt(ret.get(k)) for k in AMOUNT_LEGS}
+
+
+def check_amount_drift(si, misa, tolerance, erp=None):
     """So 3 vế: trước thuế / thuế / tổng. Trả về list mô tả chỗ lệch (rỗng = khớp).
 
     Phải tách 3 vế — lệch thuế suất mà tổng vẫn trùng là tình huống có thật.
     Hóa đơn trả về mang số âm ở ERPNext nên so theo trị tuyệt đối.
+
+    `erp` là 3 vế đã tính sẵn (xem `erp_totals`). Bỏ trống thì lấy thẳng từ `si`
+    — giữ nguyên hành vi cũ cho mọi chỗ gọi không quan tâm hóa đơn thay thế.
     """
+    e = erp or si
     pairs = (
-        ("trước thuế", _pick(misa, "TotalAmountWithoutVAT"), si.get("net_total")),
-        ("thuế GTGT", _pick(misa, "TotalVATAmount"), si.get("total_taxes_and_charges")),
-        ("tổng tiền", _pick(misa, "TotalAmount"), si.get("grand_total")),
+        ("trước thuế", _pick(misa, "TotalAmountWithoutVAT"), e.get("net_total")),
+        ("thuế GTGT", _pick(misa, "TotalVATAmount"), e.get("total_taxes_and_charges")),
+        ("tổng tiền", _pick(misa, "TotalAmount"), e.get("grand_total")),
     )
     out = []
     for label, m, e in pairs:
@@ -359,15 +416,25 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
     # số sẽ không bao giờ bị phát hiện: bộ lọc vòng 1 loại chúng ra, nên nhánh
     # "Đã hủy"/"Đã thay thế" thành code chết. Rủi ro thuế thật — sổ vẫn ghi hóa
     # đơn hợp lệ trong khi bên MISA nó đã bị hủy.
+    watch_filters = {
+        "docstatus": 1,
+        "custom_misa_ref_id": ("is", "set"),
+        "custom_misa_inv_no": ("is", "set"),
+        "custom_misa_status": ("not in", ["Đã hủy", "Đã thay thế"]),
+        "posting_date": (">=", since),
+    }
+    # Chứng từ đã được người gán SỐ HÓA ĐƠN THAY THẾ mà chưa biết RefID của bản
+    # mới: ref_id trên đó vẫn trỏ hóa đơn ĐÃ CHẾT, nên vòng này sẽ ghi số chết
+    # đè lên số người vừa gán — lặng lẽ, mỗi lần đồng bộ. Xem
+    # `ketoan.api.misa_replace` và patch v0_0_17.
+    #
+    # `has_column` chứ không phải `has_field`: site chưa chạy patch thì lọc theo
+    # cột chưa tồn tại là gãy nguyên job đồng bộ.
+    if frappe.db.has_column("Sales Invoice", "custom_misa_no_locked"):
+        watch_filters["custom_misa_no_locked"] = 0
+
     watch = frappe.get_all(
-        "Sales Invoice",
-        filters={
-            "docstatus": 1,
-            "custom_misa_ref_id": ("is", "set"),
-            "custom_misa_inv_no": ("is", "set"),
-            "custom_misa_status": ("not in", ["Đã hủy", "Đã thay thế"]),
-            "posting_date": (">=", since),
-        },
+        "Sales Invoice", filters=watch_filters,
         fields=fields, order_by="custom_misa_last_checked asc", limit=limit,
     )
     seen_names = {r.name for r in rows}
@@ -428,7 +495,11 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
         # Hóa đơn điều chỉnh mang phần CHÊNH, không phải tổng — so tiền ở đây
         # là chắc chắn ra "Lệch tiền" giả cho mọi hóa đơn điều chỉnh.
         is_delta = relation in RELATION_DELTA
-        drift = [] if is_delta else check_amount_drift(si, inv, tolerance)
+        # Bản THAY THẾ: vế ERPNext là (hóa đơn − hóa đơn trả về). Xem `erp_totals`.
+        erp = erp_totals(si, relation)
+        netted = relation in RELATION_REPLACEMENT and \
+            abs(flt(erp["grand_total"]) - abs(flt(si.get("grand_total")))) > flt(tolerance)
+        drift = [] if is_delta else check_amount_drift(si, inv, tolerance, erp)
 
         # ─ TRỤC 1: giá trị pháp lý ────────────────────────────────────────
         #
@@ -495,6 +566,12 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
             info.append(_(
                 "Hóa đơn điều chỉnh cho {0} — số tiền là phần CHÊNH nên không so với hóa đơn gốc"
             ).format(org_inv or _("hóa đơn khác")))
+        if netted:
+            # Nói rõ đã trừ bao nhiêu. Im lặng thì con số "khớp" không kiểm lại
+            # được, mà chính phép trừ này mới là chỗ dễ giấu tiền nhất.
+            info.append(_(
+                "Hóa đơn thay thế — so theo hóa đơn {0} trừ hóa đơn trả về: {1:,.0f}"
+            ).format(si.name, flt(erp["grand_total"])))
 
         if problems or info:
             values["custom_misa_note"] = " · ".join(problems + info)

@@ -54,6 +54,28 @@
    không đúng quy cách, chất lượng". Tờ mới **bắt buộc** ghi dòng chữ
    *"Thay thế cho hóa đơn Mẫu số… ký hiệu… số… ngày…"* — chính dòng đó sinh ra
    `OrgRefID` bên MISA.
+
+   **Cập nhật số hóa đơn mới lên ERPNext — làm ngay, đừng để dồn.** Xuất tờ thay
+   thế xong là chứng từ ERPNext đang mang **số đã chết**, trong khi bảng kê thanh
+   toán của siêu thị trả tiền theo **số mới**. Không cập nhật thì hóa đơn đó
+   không khớp được với đồng tiền nào về và nằm lại rổ "chưa thanh toán" mãi.
+
+   Cách làm — **KHÔNG hủy, KHÔNG amend** chứng từ cũ (amend xóa luôn số hóa đơn
+   và làm hỏng cả phép khớp lẫn luật số dư đầu kỳ):
+
+   1. Portal `/ketoan` → **Hóa đơn VAT** → bấm **Đồng bộ MISA** kéo bảng kê về
+      (bước này quyết định: có bảng kê thì máy lấy được RefID tờ mới và đồng bộ
+      vẫn chạy tiếp; không có thì phải khóa đồng bộ cho chứng từ đó).
+   2. Bấm **Đổi số HĐ thay thế** → gõ tên chứng từ (hoặc số cũ) + **số hóa đơn
+      mới** → **Xem trước**.
+   3. Đọc bảng "sẽ ghi" và các cảnh báo. Số cũ chuyển sang ô *Hóa đơn gốc*, không
+      bị xóa. Ghi lý do / số biên bản rồi bấm ghi.
+   4. Nếu hàng **quay về kho**: lập chứng từ trả hàng ERPNext **trước**, rồi mới
+      đổi số — màn hình so tiền theo `hóa đơn − trả về` và sẽ báo lệch nếu thiếu.
+
+   Chứng từ hiện **KHÓA đồng bộ** (chưa kéo được bảng kê lúc làm) thì máy không
+   còn tự phát hiện hủy/thay thế cho nó nữa. Danh sách các chứng từ đang khóa
+   nằm ngay trong modal đó — kéo bảng kê về rồi làm lại một lượt là gỡ được.
 3. **Chiết khấu** — nhận file doanh số/TBCK → đối chiếu → lập **bảng kê BKCK** → xuất **hóa đơn CK** trên MISA → JE (chi tiết mục 3).
 4. **Đối soát thanh toán** — nhận file chi tiết thanh toán → nạp vào portal `/ketoan` (màn MT) → hệ tự khớp từng dòng → xử lý ngoại lệ → duyệt JE (thanh toán + các khoản trừ) → hóa đơn được đánh dấu đã thanh toán.
 5. **Công nợ đến hạn** — theo dõi report công nợ MT; nhắc các hóa đơn sắp/quá hạn theo term của từng Customer.

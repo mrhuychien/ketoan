@@ -136,6 +136,10 @@ export const api = {
   vatLegacyPreview: (a) => callMethod(NS + "misa_legacy.preview", withCompany(a)),
   vatLegacyCommit: (a) => callMethod(NS + "misa_legacy.commit", withCompany(a)),
   vatBackfillRefId: (limit) => callMethod(NS + "misa_sync.backfill_ref_id", { limit }),
+  vatReplaceSearch: (txt) => callMethod(NS + "misa_replace.search", { txt }),
+  vatReplacePreview: (a) => callMethod(NS + "misa_replace.preview", a),
+  vatReplaceApply: (a) => callMethod(NS + "misa_replace.apply", a),
+  vatLockedList: () => callMethod(NS + "misa_replace.list_locked", {}),
   // `expected_hash` đi kèm trong `a` — backend từ chối nạp nếu thiếu.
 
   // Công nợ MT (siêu thị hiện đại) + bảng kê thanh toán của chuỗi
