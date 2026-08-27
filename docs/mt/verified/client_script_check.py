@@ -75,6 +75,10 @@ def chromium_path():
 STUB = r"""
 window.__calls = [];
 window.__buttons = [];
+window.__alerts = [];
+window.__throws = [];
+window.__fail = null;      // "item_master" | "set_value" | null
+window.__ = (t) => t;
 
 function $jq(nodes) {
   return {
@@ -106,14 +110,22 @@ window.frappe = {
   } } },
   call: (o) => { window.__calls.push(o && o.method); return Promise.resolve({ message: {} }); },
   db: {
-    get_list: () => Promise.resolve([]),
+    get_list: () => window.__fail === "item_master"
+      ? Promise.reject(new Error("Unknown column 'custom_quycach' in 'SELECT'"))
+      : Promise.resolve([]),
     get_value: () => Promise.resolve({ message: {} }),
     get_doc: () => Promise.resolve({}),
   },
   model: { set_value: () => Promise.resolve(), get_value: () => null },
   msgprint: () => {},
-  show_alert: () => {},
-  throw: (m) => { throw new Error(m); },
+  show_alert: (o) => { window.__alerts.push((o && o.message) || String(o)); },
+  // `frappe.throw` thật hiện hộp thoại RỒI mới ném. Phân biệt được "chặn có nói
+  // lý do" với "promise reject trần" — đó là cả điểm của phép kiểm dưới.
+  throw: (o) => {
+    const msg = (o && o.message) || String(o);
+    window.__throws.push(msg);
+    const e = new Error(msg); e.__frappe_throw = true; throw e;
+  },
   utils: { escape_html: (s) => String(s == null ? "" : s) },
   datetime: { get_today: () => "2026-08-27", nowdate: () => "2026-08-27" },
   format: (v) => String(v),
@@ -132,7 +144,12 @@ window.makeFrm = (doc) => ({
     this.__btns.push(node);
     return $jq([node]);
   },
-  set_value: () => Promise.resolve(),
+  set_value: () => window.__fail === "set_value"
+    ? Promise.reject(new Error("lỗi cố ý ở set_value"))
+    : Promise.resolve(),
+  clear_table: () => {},
+  add_child: () => ({}),
+  cscript: { calculate_taxes_and_totals: () => {} },
   set_df_property: () => {},
   refresh_field: () => {},
   reload_doc: () => {},
@@ -280,6 +297,51 @@ def main():
             print(f"       thoát ra: {res.get('message')}")
         print("       (thoát ra là gãy chuỗi promise của Frappe -> mất nhóm nút Create)")
 
+
+        # ── validate: hỏng thế nào cũng KHÔNG được để form chết câm ─────────
+        print("-" * 82)
+        VAL = """async (mode) => {
+          window.__fail = mode;
+          window.__alerts = []; window.__throws = [];
+          const hs = (frappe.ui.form.handlers["Sales Invoice"] || {}).validate || [];
+          const frm = window.makeFrm({
+            name: "HD-05439", docstatus: 0, is_return: 0,
+            items: [{ item_code: "H25", qty: 3, uom: "Thùng", rate: 640000,
+                      conversion_factor: 1, item_name: "Bánh đậu" }],
+            taxes: [], selling_price_list: "Bán lẻ", posting_date: "2026-08-27",
+            grand_total: 1920000, total: 1920000,
+          });
+          let threw = null;
+          try { for (const h of hs) await h(frm); }
+          catch (e) { threw = { msg: String((e && e.message) || e), frappe: !!(e && e.__frappe_throw) }; }
+          return { threw, alerts: window.__alerts.slice(), throws: window.__throws.slice() };
+        }"""
+
+        r = page.evaluate(VAL, None)
+        ok = r["threw"] is None
+        print(f"  {'✅' if ok else '❌'} validate chạy trơn -> không ném lỗi"
+              + ("" if ok else f"  -> {r['threw']['msg']}"))
+        bad += not ok
+
+        r = page.evaluate(VAL, "item_master")
+        ok = r["threw"] is None
+        print(f"  {'✅' if ok else '❌'} Item THIẾU field quy cách/thể tích -> vẫn LƯU ĐƯỢC "
+              f"(field này app không tạo, site mới là thiếu ngay)")
+        bad += not ok
+        ok = any("quy cách" in a or "thể tích" in a for a in r["alerts"])
+        print(f"  {'✅' if ok else '❌'} … và có báo cho kế toán biết số kiện/thể tích bị trống")
+        bad += not ok
+
+        r = page.evaluate(VAL, "set_value")
+        ok = r["threw"] is not None and r["threw"]["frappe"]
+        print(f"  {'✅' if ok else '❌'} sự cố khác -> chặn lưu bằng `frappe.throw` CÓ NỘI DUNG, "
+              f"không phải promise reject trần")
+        bad += not ok
+        if r["throws"]:
+            ok = "CHƯA" in r["throws"][0]
+            print(f"  {'✅' if ok else '❌'} … và câu báo nói rõ hóa đơn CHƯA được lưu")
+            bad += not ok
+
         browser.close()
 
     # Chốt bằng mã nguồn: cấm hẳn lối cũ quay lại.
@@ -294,12 +356,16 @@ def main():
     print(f"  {'✅' if ok else '❌'} phần MISA nằm trong try/catch, tách khỏi handler")
     bad += not ok
 
+    ok = "enrichInvoice" in src and "frappe.throw({" in src
+    print(f"  {'✅' if ok else '❌'} phần tính tự động tách khỏi `validate` và có lưới báo lỗi")
+    bad += not ok
+
     print("=" * 82)
     if bad:
         print(f"KẾT QUẢ: HỎNG {bad} phép")
         return 1
-    print("KẾT QUẢ: ĐẠT — refresh không ném lỗi ở mọi hình dạng chứng từ, và lỗi trong "
-          "phần MISA không kéo theo thanh công cụ của ERPNext")
+    print("KẾT QUẢ: ĐẠT — refresh không ném lỗi ở mọi hình dạng chứng từ, lỗi phần MISA "
+          "không kéo theo thanh công cụ ERPNext, và validate không bao giờ để form chết câm")
     return 0
 
 

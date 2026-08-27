@@ -276,39 +276,18 @@ const misaButtons = (frm) => {
 
 
 // -----------------------------------------------------------------------------
-// Sales Invoice — main handlers
+// Phần tính tự động khi lưu hóa đơn
 // -----------------------------------------------------------------------------
-frappe.ui.form.on("Sales Invoice", {
-    // ═════════════════════════════════════════════════════════════════════════
-    // BẤT DI BẤT DỊCH: tích hợp MISA hỏng KHÔNG được làm hỏng form của kế toán.
-    //
-    // Đây là bản sao ở tầng client của đúng ràng buộc đã áp cho `ensure_ref_id`
-    // bên server. Lý do ở client còn nặng hơn:
-    //
-    //   Frappe nối các handler `refresh` NỐI TIẾP BẰNG PROMISE (script_manager).
-    //   MỘT ngoại lệ thoát ra là promise reject, và mọi thứ đứng sau trong chuỗi
-    //   không chạy — kể cả phần dựng thanh công cụ. Người dùng mất hẳn nhóm nút
-    //   "Create" của ERPNext (Payment · Return/Credit Note · Payment Request…)
-    //   mà KHÔNG có thông báo nào; lỗi chỉ nằm trong Console.
-    //
-    // Đã xảy ra thật: `add_custom_button` trả về đối tượng jQuery, code cũ gọi
-    // `.setAttribute()` của DOM lên nó -> TypeError -> mất nút Create trên đúng
-    // những hóa đơn CHƯA đẩy MISA (điều kiện hiện nút đẩy tay). Hóa đơn đã đẩy
-    // rồi thì không dựng nút đó nên không nổ — vì vậy lỗi trông như "chỉ một số
-    // hóa đơn bị", loại triệu chứng khó lần nhất.
-    //
-    // Bọc try/catch ở đây không phải để giấu lỗi: lỗi vẫn in ra Console. Nó để
-    // bảo đảm cái hỏng chỉ là mấy nút MISA, không kéo theo cả form.
-    // ═════════════════════════════════════════════════════════════════════════
-    refresh(frm) {
-        try {
-            misaButtons(frm);
-        } catch (e) {
-            console.error("ketoan/MISA: dựng nút trên Sales Invoice thất bại —", e);
-        }
-    },
-
-    validate: async (frm) => {
+// Tách khỏi handler `validate` để chỗ gọi bọc được lỗi.
+//
+// `validate` là `async`, và Frappe chạy validate -> before_save -> save NỐI TIẾP
+// NHAU. Một promise reject ở đây làm lệnh lưu không bao giờ chạy — form đứng im
+// ở "Not Saved" mà không hiện lỗi nào. Đó là kiểu hỏng tệ nhất cho người dùng:
+// bấm Lưu, không có gì xảy ra, bấm lại vẫn không có gì xảy ra.
+//
+// Hàm này KHÔNG chặn lưu bằng nghiệp vụ: nó chỉ tính và điền. Mọi lời `throw`
+// thoát ra khỏi đây đều là SỰ CỐ, không phải luật kiểm — và được xử ở chỗ gọi.
+const enrichInvoice = async (frm) => {
         const {
             items,
             custom_po_: so_po,
@@ -405,7 +384,30 @@ frappe.ui.form.on("Sales Invoice", {
         try { frm.cscript.calculate_taxes_and_totals(); } catch (_) {}
 
         // 3. Batch fetch master data (custom_quycach, custom_thể_tích) từ Item
-        const itemMaster = await fetchItemMasterData(items);
+        //
+        // ⚠ HAI FIELD NÀY KHÔNG DO APP TẠO. Không một dòng nào trong `install.py`
+        // hay patch nào sinh ra chúng — chúng tồn tại vì có người khai tay trên
+        // site production. Site mới, site clone để thử, hay site vừa restore mà
+        // chưa khai lại thì truy vấn này hỏi cột không tồn tại và server trả lỗi.
+        //
+        // Không bọc thì hậu quả KHÔNG dừng ở mất mấy con số phụ: `validate` là
+        // `async`, Frappe chạy validate → before_save → save nối tiếp nhau, một
+        // rejection ở đây làm LỆNH LƯU KHÔNG BAO GIỜ CHẠY. Kế toán bấm Lưu, không
+        // hộp thoại nào hiện, form đứng "Not Saved", bấm lại vẫn thế.
+        //
+        // Số kiện và thể tích là thông tin phụ trợ. Mất nó thì phải NÓI ra, chứ
+        // không được chặn kế toán lưu hóa đơn.
+        let itemMaster = {};
+        try {
+            itemMaster = await fetchItemMasterData(items);
+        } catch (e) {
+            console.error("ketoan: đọc quy cách/thể tích của Item thất bại —", e);
+            frappe.show_alert({
+                message: "Không đọc được quy cách/thể tích mặt hàng — số kiện và thể "
+                    + "tích lô sẽ bằng 0. Hóa đơn vẫn lưu bình thường.",
+                indicator: "orange"
+            }, 10);
+        }
 
         // 4. Tính tổng (KHÔNG persist xuống row — dùng standard fields)
         let total_amount = 0, total_volume = 0, full_boxes = 0, rem_pieces = 0;
@@ -450,6 +452,67 @@ frappe.ui.form.on("Sales Invoice", {
         // 7. Cảnh báo hàng dùng thử cho khách Du lịch
         if (hangdungthu && customer_group === "Du lịch") {
             frappe.msgprint(`Lưu ý hàng dùng thử ${hangdungthu}`, __('Chú ý'));
+        }
+    
+};
+
+
+// -----------------------------------------------------------------------------
+// Sales Invoice — main handlers
+// -----------------------------------------------------------------------------
+frappe.ui.form.on("Sales Invoice", {
+    // ═════════════════════════════════════════════════════════════════════════
+    // BẤT DI BẤT DỊCH: tích hợp MISA hỏng KHÔNG được làm hỏng form của kế toán.
+    //
+    // Đây là bản sao ở tầng client của đúng ràng buộc đã áp cho `ensure_ref_id`
+    // bên server. Lý do ở client còn nặng hơn:
+    //
+    //   Frappe nối các handler `refresh` NỐI TIẾP BẰNG PROMISE (script_manager).
+    //   MỘT ngoại lệ thoát ra là promise reject, và mọi thứ đứng sau trong chuỗi
+    //   không chạy — kể cả phần dựng thanh công cụ. Người dùng mất hẳn nhóm nút
+    //   "Create" của ERPNext (Payment · Return/Credit Note · Payment Request…)
+    //   mà KHÔNG có thông báo nào; lỗi chỉ nằm trong Console.
+    //
+    // Đã xảy ra thật: `add_custom_button` trả về đối tượng jQuery, code cũ gọi
+    // `.setAttribute()` của DOM lên nó -> TypeError -> mất nút Create trên đúng
+    // những hóa đơn CHƯA đẩy MISA (điều kiện hiện nút đẩy tay). Hóa đơn đã đẩy
+    // rồi thì không dựng nút đó nên không nổ — vì vậy lỗi trông như "chỉ một số
+    // hóa đơn bị", loại triệu chứng khó lần nhất.
+    //
+    // Bọc try/catch ở đây không phải để giấu lỗi: lỗi vẫn in ra Console. Nó để
+    // bảo đảm cái hỏng chỉ là mấy nút MISA, không kéo theo cả form.
+    // ═════════════════════════════════════════════════════════════════════════
+    refresh(frm) {
+        try {
+            misaButtons(frm);
+        } catch (e) {
+            console.error("ketoan/MISA: dựng nút trên Sales Invoice thất bại —", e);
+        }
+    },
+
+    // Phần tính tự động nằm ở `enrichInvoice`; ở đây chỉ bọc lỗi. Xem chú thích
+    // dài ngay trên hàm đó về việc VÌ SAO không được để lỗi trôi ra.
+    validate: async (frm) => {
+        try {
+            await enrichInvoice(frm);
+        } catch (e) {
+            console.error("ketoan: phần tính tự động của Sales Invoice thất bại —", e);
+            // KHÔNG nuốt lỗi, và cũng KHÔNG để nó trôi ra trần.
+            //
+            // Trôi ra trần: chuỗi lưu của Frappe reject, form đứng im ở "Not Saved",
+            // không một dòng giải thích — kế toán bấm Lưu mãi không hiểu vì sao.
+            // Nuốt đi: hóa đơn LƯU ĐƯỢC nhưng mang số liệu tính dở — trong đó có
+            // `custom_ghi_bằng_chữ`, thứ IN LÊN CHỨNG TỪ. Số bằng chữ lệch số bằng
+            // số là sai chứng từ, tệ hơn hẳn không lưu được.
+            //
+            // Nên: vẫn chặn lưu, nhưng chặn có nói lý do.
+            frappe.throw({
+                title: "Chưa lưu được — phần tính tự động lỗi",
+                message: `Hóa đơn <b>CHƯA</b> được lưu.<br><br>Lỗi: <code>${
+                    frappe.utils.escape_html(String((e && e.message) || e))}</code>`
+                    + "<br><br>Hay gặp nhất: Item thiếu field <code>custom_quycach</code> / "
+                    + "<code>custom_thể_tích</code>, hoặc tài khoản không có quyền đọc Item.",
+            });
         }
     },
 
