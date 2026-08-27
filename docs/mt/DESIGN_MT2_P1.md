@@ -574,7 +574,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-R** số dư đầu kỳ khớp theo HÓA ĐƠN THAY THẾ | `56f3591` | `opening_store_check` · `replaced_inv_survey` |
 | **MT2-S** gán SỐ HÓA ĐƠN THAY THẾ lên chứng từ đã ghi sổ (patch v0_0_17) | `1414f9b` | `replace_check` |
 | **MT2-T** đối chiếu số dư đầu kỳ Excel ↔ sổ cái ERPNext, từng siêu thị | `90bab9e` | `opening_gl_check` |
-| **MT2-U** bảng không cuộn ngang — đo bằng Chromium, không đoán | *(commit này)* | `table_width_check` |
+| **MT2-U** bảng không cuộn ngang — đo bằng Chromium, không đoán | `a5083b1` | `table_width_check` |
+| **MT2-V** Client Script làm mất nhóm nút Create của ERPNext | *(commit này)* | `client_script_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -585,7 +586,7 @@ for t in regression_check crosscheck_mt2 mutation_check \
          debt_due_check rebate_pdf_check clawback_check ui_board_check \
          chain_filter_check opening_check win_grn_check opening_store_check \
          mega_check refid_check replace_check opening_gl_check \
-         table_width_check; do
+         table_width_check client_script_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -874,6 +875,61 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-V — Client Script làm mất nhóm nút Create
+
+Kế toán báo: **một số** hóa đơn không còn nhóm nút **Create** (Payment ·
+Return/Credit Note · Payment Request …) trên form Sales Invoice. Không thông báo
+lỗi nào, chỉ đơn giản là không có nút.
+
+Console chỉ thẳng vào code của mình:
+
+```
+sales_invoice__custom_js:242  Uncaught (in promise)
+TypeError: btn.setAttribute is not a function
+```
+
+```js
+const btn = frm.add_custom_button("Đẩy hóa đơn sang MISA", ...);
+if (btn) btn.setAttribute("data-misa-push", "1");
+```
+
+`add_custom_button` trả về **đối tượng jQuery**, không phải DOM element. jQuery
+object luôn truthy nên `if (btn)` lọt qua, rồi `.setAttribute` ném TypeError.
+
+**Vì sao mất cả nhóm Create chứ không chỉ mất một nút:** Frappe nối các handler
+`refresh` NỐI TIẾP BẰNG PROMISE (`script_manager.js`). Một ngoại lệ thoát ra là
+promise reject, và mọi thứ đứng sau trong chuỗi không chạy — kể cả phần dựng
+thanh công cụ.
+
+**Vì sao chỉ "một số" hóa đơn:** nút đẩy tay chỉ dựng khi
+`docstatus = 1 && !is_return && !custom_misa_pushed_at && !vn_einvoice_lookup_code`.
+Hóa đơn ĐÃ đẩy MISA thì không dựng nút đó nên không nổ. Đúng cái điều kiện này
+biến một lỗi hằng số thành triệu chứng ngắt quãng — loại khó lần nhất.
+
+Sửa hai tầng:
+
+1. dùng đúng API jQuery: `.attr("data-misa-push", "1")`;
+2. tách phần MISA ra hàm riêng và bọc `try/catch` ở handler — **bản sao ở tầng
+   client của ràng buộc đã áp cho `ensure_ref_id` bên server: tích hợp MISA hỏng
+   KHÔNG được làm hỏng việc của kế toán.** Lỗi vẫn in ra Console, nhưng cái hỏng
+   chỉ còn là mấy nút MISA.
+
+Nhân tiện sửa luôn `_setPushDisabled`: nút nằm trong nhóm nên Frappe render nó
+thành `<a class="dropdown-item">`, gán `.disabled` lên thẻ `<a>` là lệnh chạy
+được nhưng không có tác dụng gì.
+
+`client_script_check.py` nạp CHÍNH file đó vào Chromium với bộ giả `frappe`
+khắt khe (`add_custom_button` trả về đối tượng chỉ có API jQuery, KHÔNG có
+`setAttribute` — đúng như thật), chạy `refresh` trên 8 hình dạng chứng từ, và
+bơm một lỗi cố ý vào giữa để kiểm hợp đồng try/catch. Khôi phục lại code cũ thì
+bộ kiểm HỎNG 5 phép với đúng câu lỗi của production.
+
+> ⚠ **File trong git KHÔNG tự tới site.** Script này chạy dưới dạng bản ghi
+> DocType "Client Script", phải chép tay sang. Sửa git xong mà quên chép là site
+> vẫn lỗi. Cách bỏ hẳn rủi ro lệch: khai qua `doctype_js` trong `hooks.py` rồi
+> xóa bản ghi Client Script — nhưng phải làm CẢ HAI, giữ cả hai là script chạy
+> hai lần và nút bị nhân đôi.
 
 ### MT2-U — bảng không cuộn ngang
 

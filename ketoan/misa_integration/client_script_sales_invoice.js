@@ -127,12 +127,26 @@ const fetchItemMasterData = async (items) => {
 // -----------------------------------------------------------------------------
 const _pushing = new Set();   // tên hóa đơn đang có request đẩy bay trên đường
 
+// Khóa/mở nút đẩy. Nút nằm TRONG nhóm "MISA" nên Frappe render nó thành
+// `<a class="dropdown-item">`, không phải `<button>` — gán `.disabled` lên thẻ
+// `<a>` là câu lệnh chạy được nhưng KHÔNG có tác dụng gì, bấm vẫn ăn. Phải chặn
+// bằng lớp `disabled` + `pointer-events`.
+//
+// Đây không phải chốt chặn chính: `_pushing` và khóa hàng ở server mới là chốt.
+// Nhưng một nút trông vẫn bấm được trong lúc đang đẩy thì kế toán sẽ bấm lại.
+const _setPushDisabled = (on) => {
+    $('[data-misa-push]')
+        .prop("disabled", on)
+        .toggleClass("disabled", on)
+        .css("pointer-events", on ? "none" : "");
+};
+
 const pushToMisa = async (frm, { silent = false } = {}) => {
     // Server còn khóa lần nữa; đây chỉ để tránh auto-push (không freeze màn hình)
     // và nút bấm tay cùng gửi hai request tạo hai hóa đơn cho một chứng từ.
     if (_pushing.has(frm.doc.name)) return;
     _pushing.add(frm.doc.name);
-    document.querySelectorAll('[data-misa-push]').forEach(b => { b.disabled = true; });
+    _setPushDisabled(true);
     try {
         const r = await frappe.call({
             method: "ketoan.api.misa_push.push_invoice",
@@ -162,7 +176,7 @@ const pushToMisa = async (frm, { silent = false } = {}) => {
         console.error("push_invoice:", e);
     } finally {
         _pushing.delete(frm.doc.name);
-        document.querySelectorAll('[data-misa-push]').forEach(b => { b.disabled = false; });
+        _setPushDisabled(false);
     }
 };
 
@@ -198,59 +212,99 @@ frappe.ui.form.on("Sales Invoice Item", {
 
 
 // -----------------------------------------------------------------------------
+// Nút của nhóm "MISA" trên thanh công cụ
+// -----------------------------------------------------------------------------
+// Tách khỏi handler `refresh` để chỗ gọi bọc được try/catch — xem chú thích dài
+// ở `refresh` bên dưới.
+//
+// `frm.add_custom_button` trả về **đối tượng jQuery**, KHÔNG phải DOM element.
+// Mọi thao tác lên nó phải dùng API của jQuery (`.attr`, `.prop`, `.addClass`).
+// Gọi `.setAttribute` / `.disabled` lên nó là ném TypeError, và ở đây một
+// TypeError không chỉ mất một nút — nó làm gãy cả chuỗi refresh của form.
+const misaButtons = (frm) => {
+    // Mở hóa đơn bên MISA. Mẫu URL khai trong MISA Settings nên sửa được
+    // mà không phải đụng code.
+    if (frm.doc.custom_misa_transaction_id || frm.doc.custom_misa_link) {
+        frm.add_custom_button("Mở hóa đơn trên MISA", async () => {
+            const r = await frappe.call({
+                method: "ketoan.api.misa_desk.get_invoice_links",
+                args: { sales_invoice: frm.doc.name }
+            });
+            const link = (r.message || {}).misa;
+            if (link) window.open(link, "_blank", "noopener");
+            else frappe.msgprint("Chưa khai mẫu link trong MISA Settings.");
+        }, "MISA");
+
+        frm.add_custom_button("Tra cứu công khai", async () => {
+            const r = await frappe.call({
+                method: "ketoan.api.misa_desk.get_invoice_links",
+                args: { sales_invoice: frm.doc.name }
+            });
+            const res = r.message || {};
+            if (res.lookup) window.open(res.lookup, "_blank", "noopener");
+            if (res.transaction_id) {
+                frappe.show_alert({
+                    message: `Mã tra cứu: <b>${frappe.utils.escape_html(res.transaction_id)}</b>`,
+                    indicator: "blue"
+                }, 15);
+            }
+        }, "MISA");
+    }
+
+    // Nút đẩy tay — dùng khi đẩy tự động lỗi, hoặc khi kế toán muốn chủ động.
+    if (frm.doc.docstatus === 1 && !frm.doc.is_return
+        && !frm.doc.custom_misa_pushed_at && !frm.doc.vn_einvoice_lookup_code) {
+        frm.add_custom_button("Đẩy hóa đơn sang MISA", () => pushToMisa(frm), "MISA")
+            .attr("data-misa-push", "1");
+    }
+    if (frm.doc.docstatus === 1 && frm.doc.custom_misa_ref_id) {
+        frm.add_custom_button("Xem trước dữ liệu gửi MISA", () => {
+            frappe.call({
+                method: "ketoan.api.misa_push.preview_payload",
+                args: { sales_invoice: frm.doc.name }
+            }).then(r => {
+                frappe.msgprint({
+                    title: "Dữ liệu sẽ gửi sang MISA",
+                    message: `<pre style="max-height:60vh;overflow:auto">${
+                        frappe.utils.escape_html(JSON.stringify(r.message, null, 2))}</pre>`,
+                    wide: true
+                });
+            });
+        }, "MISA");
+    }
+};
+
+
+// -----------------------------------------------------------------------------
 // Sales Invoice — main handlers
 // -----------------------------------------------------------------------------
 frappe.ui.form.on("Sales Invoice", {
+    // ═════════════════════════════════════════════════════════════════════════
+    // BẤT DI BẤT DỊCH: tích hợp MISA hỏng KHÔNG được làm hỏng form của kế toán.
+    //
+    // Đây là bản sao ở tầng client của đúng ràng buộc đã áp cho `ensure_ref_id`
+    // bên server. Lý do ở client còn nặng hơn:
+    //
+    //   Frappe nối các handler `refresh` NỐI TIẾP BẰNG PROMISE (script_manager).
+    //   MỘT ngoại lệ thoát ra là promise reject, và mọi thứ đứng sau trong chuỗi
+    //   không chạy — kể cả phần dựng thanh công cụ. Người dùng mất hẳn nhóm nút
+    //   "Create" của ERPNext (Payment · Return/Credit Note · Payment Request…)
+    //   mà KHÔNG có thông báo nào; lỗi chỉ nằm trong Console.
+    //
+    // Đã xảy ra thật: `add_custom_button` trả về đối tượng jQuery, code cũ gọi
+    // `.setAttribute()` của DOM lên nó -> TypeError -> mất nút Create trên đúng
+    // những hóa đơn CHƯA đẩy MISA (điều kiện hiện nút đẩy tay). Hóa đơn đã đẩy
+    // rồi thì không dựng nút đó nên không nổ — vì vậy lỗi trông như "chỉ một số
+    // hóa đơn bị", loại triệu chứng khó lần nhất.
+    //
+    // Bọc try/catch ở đây không phải để giấu lỗi: lỗi vẫn in ra Console. Nó để
+    // bảo đảm cái hỏng chỉ là mấy nút MISA, không kéo theo cả form.
+    // ═════════════════════════════════════════════════════════════════════════
     refresh(frm) {
-        // Mở hóa đơn bên MISA. Mẫu URL khai trong MISA Settings nên sửa được
-        // mà không phải đụng code.
-        if (frm.doc.custom_misa_transaction_id || frm.doc.custom_misa_link) {
-            frm.add_custom_button("Mở hóa đơn trên MISA", async () => {
-                const r = await frappe.call({
-                    method: "ketoan.api.misa_desk.get_invoice_links",
-                    args: { sales_invoice: frm.doc.name }
-                });
-                const link = (r.message || {}).misa;
-                if (link) window.open(link, "_blank", "noopener");
-                else frappe.msgprint("Chưa khai mẫu link trong MISA Settings.");
-            }, "MISA");
-
-            frm.add_custom_button("Tra cứu công khai", async () => {
-                const r = await frappe.call({
-                    method: "ketoan.api.misa_desk.get_invoice_links",
-                    args: { sales_invoice: frm.doc.name }
-                });
-                const res = r.message || {};
-                if (res.lookup) window.open(res.lookup, "_blank", "noopener");
-                if (res.transaction_id) {
-                    frappe.show_alert({
-                        message: `Mã tra cứu: <b>${frappe.utils.escape_html(res.transaction_id)}</b>`,
-                        indicator: "blue"
-                    }, 15);
-                }
-            }, "MISA");
-        }
-
-        // Nút đẩy tay — dùng khi đẩy tự động lỗi, hoặc khi kế toán muốn chủ động.
-        if (frm.doc.docstatus === 1 && !frm.doc.is_return
-            && !frm.doc.custom_misa_pushed_at && !frm.doc.vn_einvoice_lookup_code) {
-            const btn = frm.add_custom_button("Đẩy hóa đơn sang MISA", () => pushToMisa(frm), "MISA");
-            if (btn) btn.setAttribute("data-misa-push", "1");
-        }
-        if (frm.doc.docstatus === 1 && frm.doc.custom_misa_ref_id) {
-            frm.add_custom_button("Xem trước dữ liệu gửi MISA", () => {
-                frappe.call({
-                    method: "ketoan.api.misa_push.preview_payload",
-                    args: { sales_invoice: frm.doc.name }
-                }).then(r => {
-                    frappe.msgprint({
-                        title: "Dữ liệu sẽ gửi sang MISA",
-                        message: `<pre style="max-height:60vh;overflow:auto">${
-                            frappe.utils.escape_html(JSON.stringify(r.message, null, 2))}</pre>`,
-                        wide: true
-                    });
-                });
-            }, "MISA");
+        try {
+            misaButtons(frm);
+        } catch (e) {
+            console.error("ketoan/MISA: dựng nút trên Sales Invoice thất bại —", e);
         }
     },
 
