@@ -234,7 +234,15 @@ const misaButtons = (frm) => {
             if (link) window.open(link, "_blank", "noopener");
             else frappe.msgprint("Chưa khai mẫu link trong MISA Settings.");
         }, "MISA");
+    }
 
+    // Tra cứu công khai gác theo MÃ TRA CỨU, không theo `custom_misa_link`.
+    //
+    // Link tra cứu dựng từ `{transaction_id}`; không có mã thì server trả None.
+    // Gác chung với nút trên thì hóa đơn có link mà chưa có mã (đúng trạng thái
+    // `misa_replace` chế độ "gán tay" tạo ra) vẫn hiện nút, bấm vào KHÔNG mở gì,
+    // KHÔNG báo gì, KHÔNG lỗi gì — nút chết câm, kiểu hỏng khó ngờ nhất.
+    if (frm.doc.custom_misa_transaction_id) {
         frm.add_custom_button("Tra cứu công khai", async () => {
             const r = await frappe.call({
                 method: "ketoan.api.misa_desk.get_invoice_links",
@@ -242,6 +250,10 @@ const misaButtons = (frm) => {
             });
             const res = r.message || {};
             if (res.lookup) window.open(res.lookup, "_blank", "noopener");
+            else frappe.msgprint(
+                "Chưa dựng được link tra cứu. Mẫu <code>lookup_url_template</code> trong "
+                + "MISA Settings đang dùng một chỗ giữ mà hóa đơn này chưa có giá trị "
+                + "(ví dụ mã số thuế đơn vị chưa khai).");
             if (res.transaction_id) {
                 frappe.show_alert({
                     message: `Mã tra cứu: <b>${frappe.utils.escape_html(res.transaction_id)}</b>`,
@@ -252,8 +264,16 @@ const misaButtons = (frm) => {
     }
 
     // Nút đẩy tay — dùng khi đẩy tự động lỗi, hoặc khi kế toán muốn chủ động.
+    //
+    // BA cờ, đúng bằng bộ ba mà `misa_push.push_invoice` đọc dưới khóa hàng.
+    // Thiếu `custom_misa_inv_no` thì hóa đơn cũ đã chuyển số bằng
+    // `misa_legacy.commit` (ghi inv_no, KHÔNG ghi pushed_at, cố ý không chép
+    // lookup_code rác) vẫn hiện nút "Đẩy hóa đơn" dù ĐÃ CÓ SỐ THẬT. Hôm nay
+    // server còn chặn nên chưa phát hành trùng — nhưng để client lệch server ở
+    // chốt chặn phát hành hóa đơn là đặt cả chuyện đó lên một lớp bảo vệ duy nhất.
     if (frm.doc.docstatus === 1 && !frm.doc.is_return
-        && !frm.doc.custom_misa_pushed_at && !frm.doc.vn_einvoice_lookup_code) {
+        && !frm.doc.custom_misa_pushed_at && !frm.doc.vn_einvoice_lookup_code
+        && !frm.doc.custom_misa_inv_no) {
         frm.add_custom_button("Đẩy hóa đơn sang MISA", () => pushToMisa(frm), "MISA")
             .attr("data-misa-push", "1");
     }
@@ -416,10 +436,31 @@ const enrichInvoice = async (frm) => {
             const m = itemMaster[row.item_code] || { quycach: 0, thetich: 0 };
             const stockQty = row.stock_qty || (row.qty * (row.conversion_factor || 1));
 
-            total_amount += (row.qty || 0) * (row.price_list_rate || 0);
+            // `price_list_rate || rate` — cái `|| rate` là CHỐT CHẶN TIỀN, không
+            // phải phòng hờ cho đẹp.
+            //
+            // Bước 1 ở trên CỐ Ý chỉ đặt `row.rate`, không đụng `price_list_rate`
+            // (để báo cáo soát giá còn mốc so sánh). Mà bước 1 chỉ chạy khi dòng
+            // CHƯA có đơn giá — tức đúng những dòng ERPNext không tìm được giá
+            // niêm yết, nên `price_list_rate` ở đó bằng 0.
+            //
+            // Lấy trần `price_list_rate` thì với những dòng đó:
+            //     custom_tổng_cộng      = 0
+            //     custom_tiền_chiết_khấu = 0 − tổng tiền hàng  =  ÂM
+            // Nạp giá cho cả hóa đơn là "Tổng cộng 0đ, Chiết khấu −(cả hóa đơn)"
+            // được LƯU và IN RA. Kế toán gõ tay đơn giá cũng rơi vào đúng ca này.
+            //
+            // Không có giá niêm yết thì giá bán CHÍNH LÀ giá niêm yết -> chiết
+            // khấu bằng 0. Đó mới là con số đúng.
+            total_amount += (row.qty || 0) * (row.price_list_rate || row.rate || 0);
 
             if (m.quycach > 0) {
-                full_boxes += Math.floor(stockQty / m.quycach);
+                // `trunc` chứ không phải `floor`: hóa đơn TRẢ HÀNG mang số âm, mà
+                // `floor` làm tròn xuống còn `%` giữ dấu — hai phép cắt ngược
+                // chiều nhau nên cộng lại không ra tổng. Trả 70 hộp loại 30
+                // hộp/thùng: floor cho −3 kiện −10 lẻ (= −100), đúng phải là
+                // −2 kiện −10 lẻ (= −70). `trunc` cắt về 0 nên cùng chiều với `%`.
+                full_boxes += Math.trunc(stockQty / m.quycach);
                 rem_pieces += stockQty % m.quycach;
             }
             total_volume += m.thetich * stockQty;
@@ -533,7 +574,12 @@ frappe.ui.form.on("Sales Invoice", {
             // định dạng là PHÁT HÀNH hóa đơn điện tử có giá trị pháp lý.
             frm.doc.custom_xuất_hoá_đơn === 1 &&
             !frm.doc.custom_misa_pushed_at &&
-            !frm.doc.vn_einvoice_lookup_code
+            !frm.doc.vn_einvoice_lookup_code &&
+            // Vế thứ BA, đúng bằng bộ ba của `push_invoice`. Thiếu nó thì hóa
+            // đơn cũ đã có số (chuyển bằng `misa_legacy`) bị gọi đẩy lại ở chế độ
+            // im lặng MỖI LẦN LƯU — server trả "đã xuất trước đó" và client
+            // không hiện gì (dòng `if (!silent)`), nên không ai biết là đang gọi.
+            !frm.doc.custom_misa_inv_no
         ) {
             pushToMisa(frm, { silent: true });
         }

@@ -66,9 +66,15 @@ def invoice_links(si, settings=None):
     return {
         "misa": misa,
         "lookup": lookup,
-        # Link lưu vào hóa đơn: ưu tiên link tra cứu vì nó mở ĐÚNG hóa đơn đó.
-        # Link quản trị chỉ mở trang danh sách nên không đáng lưu.
-        "primary": lookup or misa,
+        # Link lưu vào hóa đơn: CHỈ link tra cứu, vì chỉ nó mở ĐÚNG hóa đơn đó.
+        #
+        # `lookup or misa` (bản cũ) tự mâu thuẫn với chính câu trên: khi chưa có
+        # mã tra cứu, `lookup` là None nên `primary` rơi về URL TRANG DANH SÁCH
+        # quản trị. Cái URL đó được ghi vào `custom_misa_link`, và màn hình lại
+        # coi "có link" là "tra cứu được" — sinh ra một nút bấm vào không mở gì,
+        # không báo gì. Chưa tra cứu được thì để TRỐNG, đúng như câu "thà không
+        # có link còn hơn link hỏng" của `build_url`.
+        "primary": lookup,
         "transaction_id": ctx["transaction_id"],
         "inv_no": ctx["inv_no"],
     }

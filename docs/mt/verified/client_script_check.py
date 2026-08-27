@@ -78,6 +78,8 @@ window.__buttons = [];
 window.__alerts = [];
 window.__throws = [];
 window.__fail = null;      // "item_master" | "set_value" | null
+window.__setValues = [];   // mọi payload frm.set_value đã nhận
+window.__items = [];       // dữ liệu Item giả cho fetchItemMasterData
 window.__ = (t) => t;
 
 function $jq(nodes) {
@@ -112,7 +114,7 @@ window.frappe = {
   db: {
     get_list: () => window.__fail === "item_master"
       ? Promise.reject(new Error("Unknown column 'custom_quycach' in 'SELECT'"))
-      : Promise.resolve([]),
+      : Promise.resolve(window.__items),
     get_value: () => Promise.resolve({ message: {} }),
     get_doc: () => Promise.resolve({}),
   },
@@ -144,9 +146,11 @@ window.makeFrm = (doc) => ({
     this.__btns.push(node);
     return $jq([node]);
   },
-  set_value: () => window.__fail === "set_value"
-    ? Promise.reject(new Error("lỗi cố ý ở set_value"))
-    : Promise.resolve(),
+  set_value: (o) => {
+    if (window.__fail === "set_value") return Promise.reject(new Error("lỗi cố ý ở set_value"));
+    window.__setValues.push(o);
+    return Promise.resolve();
+  },
   clear_table: () => {},
   add_child: () => ({}),
   cscript: { calculate_taxes_and_totals: () => {} },
@@ -179,6 +183,12 @@ CASES = [
       "custom_misa_ref_id": "uuid-1"}),
     ("đã hủy",
      {"docstatus": 2, "is_return": 0}),
+    ("hóa đơn CŨ đã chuyển số (có inv_no, không có pushed_at)",
+     {"docstatus": 1, "is_return": 0, "custom_misa_inv_no": "5449",
+      "custom_misa_inv_series": "1C26THG"}),
+    ("có link nhưng CHƯA có mã tra cứu (misa_replace gán tay)",
+     {"docstatus": 1, "is_return": 0, "custom_misa_link": "https://app3.meinvoice.vn/v3/hoa-don",
+      "custom_misa_inv_no": "6537", "custom_misa_no_locked": 1}),
 ]
 
 RUN = r"""(payload) => {
@@ -298,6 +308,72 @@ def main():
         print("       (thoát ra là gãy chuỗi promise của Frappe -> mất nhóm nút Create)")
 
 
+
+        # ── 5 lỗi audit tìm thêm ────────────────────────────────────────────
+        print("-" * 82)
+        cu = by["hóa đơn CŨ đã chuyển số (có inv_no, không có pushed_at)"]
+        ok = "Đẩy hóa đơn sang MISA" not in cu["buttons"]
+        print(f"  {'✅' if ok else '❌'} hóa đơn CŨ đã có số MISA -> KHÔNG hiện nút đẩy "
+              f"(client khớp đúng BA cờ của `push_invoice`)")
+        bad += not ok
+
+        deadlink = by["có link nhưng CHƯA có mã tra cứu (misa_replace gán tay)"]
+        ok = "Tra cứu công khai" not in deadlink["buttons"]
+        print(f"  {'✅' if ok else '❌'} có link mà chưa có mã tra cứu -> KHÔNG hiện nút "
+              f"'Tra cứu công khai' (nút đó bấm vào không mở gì, không báo gì)")
+        bad += not ok
+
+        có_mã = by["đã phát hành, có mã tra cứu + link"]
+        ok = "Tra cứu công khai" in có_mã["buttons"]
+        print(f"  {'✅' if ok else '❌'} có mã tra cứu -> VẪN hiện nút (không sửa quá tay)")
+        bad += not ok
+
+        # Tiền: dòng có `rate` nhưng `price_list_rate` = 0 (kế toán gõ tay đơn
+        # giá, hoặc bước tự nạp giá vừa chạy) KHÔNG được ra chiết khấu ÂM.
+        MONEY = """async () => {
+          window.__fail = null; window.__setValues = []; window.__items = [];
+          const hs = (frappe.ui.form.handlers["Sales Invoice"] || {}).validate || [];
+          const frm = window.makeFrm({
+            name: "HD-05439", docstatus: 0, is_return: 0, posting_date: "2026-08-27",
+            items: [{ item_code: "H25", qty: 10, uom: "Thùng", rate: 50000,
+                      price_list_rate: 0, conversion_factor: 1, item_name: "Bánh" }],
+            taxes: [], total: 500000, grand_total: 500000,
+          });
+          for (const h of hs) await h(frm);
+          const v = Object.assign({}, ...window.__setValues);
+          return { tong: v["custom_tổng cộng"] ?? v["custom_tổng_cộng"],
+                   ck: v["custom_tiền_chiết_khấu"] };
+        }"""
+        m = page.evaluate(MONEY)
+        ok = m["ck"] is not None and m["ck"] >= 0
+        print(f"  {'✅' if ok else '❌'} dòng gõ tay đơn giá -> tiền chiết khấu = "
+              f"{m['ck']} (ÂM là in số sai lên chứng từ)")
+        bad += not ok
+        ok = m["tong"] == 500000
+        print(f"  {'✅' if ok else '❌'} … và 'Tổng cộng' = {m['tong']} chứ không phải 0")
+        bad += not ok
+
+        # Dấu: hóa đơn TRẢ HÀNG chia kiện/hộp lẻ phải cộng lại đúng tổng.
+        SIGN = """async () => {
+          window.__fail = null; window.__setValues = [];
+          window.__items = [{ name: "H25", custom_quycach: 30, "custom_thể_tích": 0 }];
+          const hs = (frappe.ui.form.handlers["Sales Invoice"] || {}).validate || [];
+          const frm = window.makeFrm({
+            name: "HD-TRA", docstatus: 0, is_return: 1, posting_date: "2026-08-27",
+            items: [{ item_code: "H25", qty: -70, uom: "Hộp", rate: 1000,
+                      price_list_rate: 1000, conversion_factor: 1, stock_qty: -70 }],
+            taxes: [], total: -70000, grand_total: -70000,
+          });
+          for (const h of hs) await h(frm);
+          const v = Object.assign({}, ...window.__setValues);
+          return { kien: v["custom_tổng_kiện"], le: v["custom_hộp_lẻ"] };
+        }"""
+        g = page.evaluate(SIGN)
+        ok = g["kien"] is not None and (g["kien"] * 30 + g["le"]) == -70
+        print(f"  {'✅' if ok else '❌'} hóa đơn TRẢ HÀNG: {g['kien']} kiện × 30 + {g['le']} lẻ "
+              f"= {None if g['kien'] is None else g['kien'] * 30 + g['le']} (phải bằng −70)")
+        bad += not ok
+
         # ── validate: hỏng thế nào cũng KHÔNG được để form chết câm ─────────
         print("-" * 82)
         VAL = """async (mode) => {
@@ -358,6 +434,20 @@ def main():
 
     ok = "enrichInvoice" in src and "frappe.throw({" in src
     print(f"  {'✅' if ok else '❌'} phần tính tự động tách khỏi `validate` và có lưới báo lỗi")
+    bad += not ok
+
+    # Vá GỐC phía server của nút tra cứu chết.
+    desk = open(os.path.join(REPO, "ketoan/api/misa_desk.py"), encoding="utf-8").read()
+    ok = '"primary": lookup,' in desk and '"primary": lookup or misa' not in desk
+    print(f"  {'✅' if ok else '❌'} `invoice_links` không còn ghi URL trang danh sách vào ô "
+          f"link của hóa đơn")
+    bad += not ok
+
+    sync = open(os.path.join(REPO, "ketoan/api/misa_sync.py"), encoding="utf-8").read()
+    seg = sync.split("def _poll_pending")[1]
+    ok = 'if link:' in seg and 'values["custom_misa_link"] = link' in seg
+    print(f"  {'✅' if ok else '❌'} đồng bộ chỉ ghi link khi dựng được — không xóa trắng link "
+          f"tốt đang có")
     bad += not ok
 
     print("=" * 82)

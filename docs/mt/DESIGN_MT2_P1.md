@@ -925,6 +925,25 @@ khắt khe (`add_custom_button` trả về đối tượng chỉ có API jQuery,
 bơm một lỗi cố ý vào giữa để kiểm hợp đồng try/catch. Khôi phục lại code cũ thì
 bộ kiểm HỎNG 5 phép với đúng câu lỗi của production.
 
+#### Audit toàn file — 28 phát hiện, 5 sống sót phản biện
+
+Soi tiếp bằng 4 lăng kính độc lập (dùng sai API · gãy chuỗi refresh · logic &
+tên field · bất đồng bộ & tiền), mỗi phát hiện đưa qua một agent phản biện có
+nhiệm vụ CHỨNG MINH NÓ SAI. 23/28 bị bác. Năm cái còn lại đều sửa:
+
+| Chỗ | Lỗi | Hậu quả |
+|---|---|---|
+| `total_amount` | cộng theo `price_list_rate`, mà bước tự nạp giá CỐ Ý chỉ đặt `rate` | dòng gõ tay đơn giá / vừa nạp giá ⇒ **Tổng cộng = 0**, **Tiền chiết khấu = ÂM cả hóa đơn**, lưu và IN RA |
+| chia kiện | `Math.floor` + `%` ngược chiều nhau ở số âm | hóa đơn trả 70 hộp loại 30 ⇒ −3 kiện −10 lẻ (= −100) thay vì −2 −10 |
+| nút đẩy | client kiểm 2 cờ, `push_invoice` kiểm **3** (thiếu `custom_misa_inv_no`) | hóa đơn cũ đã chuyển số vẫn hiện nút đẩy; `after_save` gọi đẩy im lặng mỗi lần lưu |
+| "Tra cứu công khai" | gác theo `custom_misa_link`, nhưng link tra cứu dựng từ `transaction_id` | nút hiện mà bấm **không mở gì, không báo gì** — đúng trạng thái `misa_replace` chế độ gán tay tạo ra |
+| `invoice_links` | `"primary": lookup or misa` tự mâu thuẫn với chú thích ngay trên nó | ghi URL **trang danh sách** vào ô link của từng hóa đơn — gốc của nút chết |
+
+Vá gốc `invoice_links` kéo theo một chốt nữa: `_poll_pending` đang gán thẳng
+`primary` vào `values`, mà `primary` nay trả `None` khi chưa có mã tra cứu ⇒ sẽ
+**xóa trắng link tốt đang có** ở lượt quét sau. Đã đổi thành chỉ ghi khi dựng
+được. (`misa_replace.apply` và `backfill_links` vốn đã có chốt này.)
+
 > ⚠ **File trong git KHÔNG tự tới site.** Script này chạy dưới dạng bản ghi
 > DocType "Client Script", phải chép tay sang. Sửa git xong mà quên chép là site
 > vẫn lỗi. Cách bỏ hẳn rủi ro lệch: khai qua `doctype_js` trong `hooks.py` rồi

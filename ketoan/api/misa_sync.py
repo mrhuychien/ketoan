@@ -537,13 +537,6 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
             "custom_misa_relation": relation,
             "custom_misa_org_ref_id": org_ref,
             "custom_misa_org_inv": org_inv,
-            "custom_misa_link": invoice_links({
-                "custom_misa_ref_id": si.custom_misa_ref_id,
-                "custom_misa_transaction_id": _pick(inv, "TransactionID"),
-                "custom_misa_inv_no": inv_no,
-                "custom_misa_inv_series": _pick(inv, "InvSeries"),
-                "custom_misa_invoice_code": _pick(inv, "InvoiceCode"),
-            }, settings).get("primary"),
             "custom_misa_status": status,
             "custom_misa_last_checked": now,
             # Đồng bộ ngược sang nhóm hiển thị — chỉ ghi khi đang trống, không đè
@@ -551,6 +544,20 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
             **_legacy_values(si.name, inv_no, inv_date, _pick(inv, "TransactionID")),
         }
         conflict = values.pop("__conflict__", None)
+
+        # Link tra cứu: CHỈ ghi khi dựng được. `primary` nay trả None khi hóa đơn
+        # chưa có mã tra cứu (xem `misa_desk.invoice_links`), mà gán None vào
+        # `values` là XÓA TRẮNG link tốt đang có ở lượt quét sau — MISA có lúc
+        # trả thiếu TransactionID (hóa đơn "Chờ cấp mã").
+        link = invoice_links({
+            "custom_misa_ref_id": si.custom_misa_ref_id,
+            "custom_misa_transaction_id": _pick(inv, "TransactionID"),
+            "custom_misa_inv_no": inv_no,
+            "custom_misa_inv_series": _pick(inv, "InvSeries"),
+            "custom_misa_invoice_code": _pick(inv, "InvoiceCode"),
+        }, settings).get("primary")
+        if link:
+            values["custom_misa_link"] = link
 
         # Tách VẤN ĐỀ với THÔNG TIN. Gộp chung thì hóa đơn điều chỉnh — vốn
         # hoàn toàn bình thường — bị đếm vào ô "lệch" và sinh ToDo giả.
