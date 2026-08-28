@@ -580,7 +580,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-X** hai cuốn sổ công nợ đặt cạnh nhau (sổ ERPNext ↔ đầu HĐĐT) | `8f4dee3` | `two_books_check` |
 | **MT2-Y** vá lỗi cú pháp làm TRẮNG portal + bịt vùng mù của bước kiểm | `4c5299d` | `portal_js_check` |
 | **MT2-Z** hai cuốn sổ tách CHI TIẾT TỪNG CHUỖI + vá lỗi bấm-ra-số-khác | `e2c7854` | `two_books_check` |
-| **MT2-Z2** năm lỗi bản soát đối kháng tìm ra ngay trong MT2-Z | *(commit này)* | `two_books_check` |
+| **MT2-Z2** năm lỗi bản soát đối kháng tìm ra ngay trong MT2-Z | `5c27310` | `two_books_check` |
+| **MT2-Z3** hạn xuất hóa đơn RIÊNG của chuỗi + vá bộ giả `add_months` | *(commit này)* | `two_books_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -881,6 +882,43 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-Z3 — "chưa xuất HĐĐT" ở mỗi chuỗi nghĩa khác nhau
+
+Con số "chưa xuất HĐĐT" trước đó in **chung một câu** cho cả 8 chuỗi. Soi lại
+SOP thì chỉ có **đúng một** luật riêng mà máy tính được:
+
+> §5 Lịch tháng — "Ngày 1–5: Xuất nốt toàn bộ HĐ hàng tháng trước cho **Emart**
+> (deadline ngày 5)."
+
+Hóa đơn tháng M phải xuất xong trước ngày 5 tháng M+1. Quá ngày đó là **vỡ hạn
+với chuỗi**, không còn là việc "làm dần". `mt_hub.EINV_DEADLINE` chép đúng câu
+đó, `_einv_deadline()` so tháng của tờ cũ nhất với mốc còn hạn.
+
+**Bảy chuỗi còn lại không có mặt trong bảng, và đó là chủ ý.** SOP không quy
+định hạn xuất hóa đơn bán cho chúng; bịa một cái hạn nghe hợp lý là cách chắc
+chắn để màn hình kêu sai rồi kế toán tắt luôn cảnh báo. Bộ kiểm khẳng định
+`set(EINV_DEADLINE) == {"Emart"}` — thêm chuỗi phải kèm trích dẫn văn bản.
+
+**Winmart bị loại sau khi kiểm, không phải bị bỏ quên.** SOP §2.2 có luật riêng
+("chỉ xuất hóa đơn sau khi có phiếu nhập kho khớp PO"), nhưng luật đó chặn ở
+khâu **tạo** Sales Invoice — `MT Win Pending` theo dõi đợt giao *trước khi* có
+hóa đơn (`sales_invoice` chỉ được điền khi đã xuất). Hóa đơn đã ghi sổ là đã qua
+cửa đó, nên nó không thuộc về con số này. Viết "Win đang chờ phiếu nhập kho" lên
+đây là sai.
+
+**Và một lỗi ở chính bộ đo.** Phép thử đầu tiên báo sai 3/7 mốc. Không phải lỗi
+luật — lỗi **bộ giả**:
+
+```python
+u.add_months = lambda d, n: _gd(d)      # trả về chính ngày đưa vào, bỏ hẳn `n`
+```
+
+Cửa sổ ân hạn tính bằng `add_months(today, -1)` nên luôn ra `today`, và luật
+chấm "vỡ hạn" cho đúng những trường hợp còn trong hạn. Lỗi trông y hệt lỗi của
+code. Bộ giả sai nguy hiểm hơn không có bộ giả: mọi phép kiểm chạm vào nó đều
+vô nghĩa mà vẫn báo ĐẠT. Nay `_add_months` cộng tháng thật — vắt năm, kẹp cuối
+tháng, năm nhuận — và bộ kiểm khóa chính bộ giả đó lại.
 
 ### MT2-Z2 — năm lỗi bản soát đối kháng tìm ra ngay trong MT2-Z
 

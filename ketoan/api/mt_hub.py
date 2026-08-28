@@ -45,7 +45,7 @@ MODULE NÀY CHỈ ĐỌC. Không ghi, không tạo chứng từ.
 
 import frappe
 from frappe import _
-from frappe.utils import cint, cstr, flt, getdate, nowdate
+from frappe.utils import add_months, cint, cstr, flt, getdate, nowdate
 
 from ketoan.api._guard import guard_mt, is_chief
 from ketoan.api.mt import (
@@ -97,6 +97,55 @@ def _capabilities():
         by_label.setdefault(label, {"chain_key": None, "can_read_payment": False,
                                     "we_issue_discount": False, "has_dossier": False})
     return by_label
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HẠN XUẤT HÓA ĐƠN RIÊNG CỦA CHUỖI
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# "Chưa xuất HĐĐT" ở phần lớn chuỗi là việc tồn đọng: xuất lúc nào cũng được,
+# muộn thì chậm thu tiền. Emart KHÔNG như vậy — SOP §5 (Lịch tháng) ghi:
+#
+#     "Ngày 1–5 | Xuất nốt toàn bộ HĐ hàng tháng trước cho Emart (deadline
+#      ngày 5)."
+#
+# Tức hóa đơn của tháng M phải xuất xong trước ngày 5 tháng M+1. Quá ngày đó là
+# vỡ hạn với chuỗi, không còn là việc "làm dần".
+#
+# ⚠ BẢNG NÀY CHỈ CHÉP THỨ CÓ TRONG VĂN BẢN. Bảy chuỗi còn lại KHÔNG có mặt ở
+# đây vì SOP không quy định hạn xuất hóa đơn bán cho chúng — và bịa ra một cái
+# hạn nghe hợp lý là cách chắc chắn để màn hình kêu sai rồi kế toán tắt luôn
+# cảnh báo. Chuỗi có luật riêng mà chưa ai chép vào SOP thì vẫn chưa vào đây.
+#
+# (Winmart CÓ luật riêng — SOP §2.2: chỉ xuất hóa đơn sau khi có phiếu nhập kho
+#  khớp PO. Nhưng luật đó chặn ở khâu TẠO Sales Invoice, tức trước khi chứng từ
+#  thành công nợ; nó được theo dõi ở `MT Win Pending` / bước "Chờ xuất hóa đơn".
+#  Hóa đơn đã ghi sổ là đã qua cửa đó, nên nó KHÔNG thuộc về con số này.)
+EINV_DEADLINE = {
+    "Emart": {"day": 5, "cite": "SOP §5 — Lịch tháng"},
+}
+
+
+def _einv_deadline(label, oldest, today):
+    """Chuỗi này có hạn xuất hóa đơn không, và tờ cũ nhất đã vỡ hạn chưa.
+
+    Trả None khi chuỗi không có hạn khai trong `EINV_DEADLINE`, hoặc không còn
+    tờ nào chưa xuất.
+
+    Cách tính: hóa đơn tháng M có hạn tới ngày `day` của tháng M+1. Nên tháng
+    SỚM NHẤT còn trong hạn là:
+      · hôm nay <= ngày `day`  ->  tháng trước (vẫn đang trong cửa sổ ân hạn);
+      · hôm nay >  ngày `day`  ->  tháng này.
+    Tờ cũ nhất rơi vào tháng sớm hơn mốc đó là ĐÃ VỠ HẠN.
+    """
+    rule = EINV_DEADLINE.get(label)
+    if not rule or not oldest:
+        return None
+    today = getdate(today)
+    oldest = getdate(oldest)
+    first_ok = getdate(add_months(today, -1) if today.day <= rule["day"] else today)
+    breached = (oldest.year, oldest.month) < (first_ok.year, first_ok.month)
+    return {"day": rule["day"], "cite": rule["cite"], "breached": breached}
 
 
 def _count_by_chain(sql, params):
@@ -286,6 +335,9 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
             "debt_no_einv": flt(d.get("einv_pending")),
             "debt_no_einv_count": cint(d.get("einv_pending_n")),
             "debt_no_einv_oldest": cstr(d.get("einv_pending_oldest") or "") or None,
+            # Hạn xuất hóa đơn RIÊNG của chuỗi (chỉ Emart có — xem EINV_DEADLINE).
+            "einv_deadline": _einv_deadline(
+                label, d.get("einv_pending_oldest"), as_of),
         })
 
     # Chuỗi nào nhiều việc nhất lên trước; hết việc thì xếp theo nợ quá hạn.
@@ -318,6 +370,7 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
         "debt_no_einv": flt(ua.get("einv_pending")),
         "debt_no_einv_count": cint(ua.get("einv_pending_n")),
         "debt_no_einv_oldest": cstr(ua.get("einv_pending_oldest") or "") or None,
+        "einv_deadline": None,
     }
     # Chỉ đưa vào phép cộng khi nó THẬT SỰ có tiền. Không thì mọi site sạch sẽ
     # đều mọc thêm một dòng rỗng chẳng nói gì.

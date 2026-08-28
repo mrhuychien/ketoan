@@ -386,6 +386,10 @@ function chainCard(c) {
                 · ${c.debt_no_einv_count} HĐ${c.debt_no_einv_oldest
                   ? html` · từ ${formatDate(c.debt_no_einv_oldest)}`
                   : ""}
+                ${c.einv_deadline && c.einv_deadline.breached
+                  ? html`<span class="kt-badge kt-badge--red" style="margin-left:6px">
+                      quá hạn ngày ${c.einv_deadline.day}</span>`
+                  : ""}
               </div>`
             : ""}
         </div>
@@ -917,9 +921,26 @@ function twoBooksRow(c) {
       : chua
         ? html`<b style="color:var(--kt-danger)">${formatVND(chua)}</b>
             <div class="kt-sub">${c.debt_no_einv_count || 0} HĐ${
-              c.debt_no_einv_oldest ? html` · từ ${formatDate(c.debt_no_einv_oldest)}` : ""}</div>`
+              c.debt_no_einv_oldest ? html` · từ ${formatDate(c.debt_no_einv_oldest)}` : ""}</div>
+            ${deadlineNote(c)}`
         : html`<span class="kt-sub">—</span>`}</td>
   </tr>`;
+}
+
+// Hạn xuất hóa đơn RIÊNG của chuỗi. Chỉ hiện cho chuỗi thật sự có hạn khai
+// trong `mt_hub.EINV_DEADLINE` (hiện chỉ Emart, nguồn SOP §5).
+//
+// Bảy chuỗi còn lại KHÔNG hiện gì — chúng không có hạn quy định, và vẽ một dòng
+// "còn hạn" cho chúng là dạy kế toán đọc lướt qua cả cột.
+function deadlineNote(c) {
+  const d = c.einv_deadline;
+  if (!d) return "";
+  return d.breached
+    ? html`<div class="kt-sub" style="color:var(--kt-danger);font-weight:600">
+        <i class="fas fa-calendar-xmark"></i> QUÁ HẠN — ${c.chain} chốt ngày ${d.day}
+        hàng tháng cho hóa đơn tháng trước</div>`
+    : html`<div class="kt-sub" style="color:var(--kt-warning)">
+        <i class="fas fa-calendar-day"></i> hạn ngày ${d.day} tháng sau</div>`;
 }
 
 

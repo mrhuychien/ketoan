@@ -450,6 +450,55 @@ def main():
           f"(không đi bảo kế toán chạy migrate), và không mọc dòng rỗng")
     bad += not ok
 
+    # ── 9c. HẠN XUẤT HÓA ĐƠN RIÊNG CỦA CHUỖI ────────────────────────────
+    #
+    # Nguồn: SOP §5 (Lịch tháng) — "Ngày 1–5: Xuất nốt toàn bộ HĐ hàng tháng
+    # trước cho Emart (deadline ngày 5)". Chỉ Emart có; bảy chuỗi còn lại KHÔNG
+    # có hạn quy định và tuyệt đối không được bịa ra một cái nghe hợp lý.
+    print("-" * 82)
+    DL = [  # (hôm nay, tờ cũ nhất, vỡ hạn?, vì sao)
+        ("2026-08-28", "2026-07-31", True,  "HĐ tháng 7 hạn 05/08 — đã qua"),
+        ("2026-08-05", "2026-07-31", False, "đúng ngày 5 thì VẪN còn hạn"),
+        ("2026-08-06", "2026-07-31", True,  "quá đúng một ngày"),
+        ("2026-08-28", "2026-08-01", False, "HĐ tháng 8 hạn 05/09"),
+        ("2026-01-03", "2025-12-20", False, "vắt năm, còn trong ân hạn"),
+        ("2026-01-06", "2025-12-20", True,  "vắt năm, đã vỡ hạn"),
+    ]
+    miss = [(t, o, w) for t, o, w, _y in DL
+            if (hub._einv_deadline("Emart", o, t) or {}).get("breached") != w]
+    ok = not miss
+    print(f"  {'✅' if ok else '❌'} luật hạn Emart đúng cả 6 mốc (kể cả đúng-ngày-5 và vắt năm)"
+          f"{'' if ok else ' — sai: ' + str(miss)}")
+    bad += not ok
+
+    ok = hub._einv_deadline("WinCommerce", "2020-01-01", "2026-08-28") is None
+    print(f"  {'✅' if ok else '❌'} chuỗi KHÔNG có hạn khai -> None. Bịa hạn cho 7 chuỗi còn lại "
+          f"là dạy kế toán đọc lướt qua cả cột cảnh báo")
+    bad += not ok
+
+    ok = hub._einv_deadline("Emart", None, "2026-08-28") is None
+    print(f"  {'✅' if ok else '❌'} xuất hết rồi -> không kêu")
+    bad += not ok
+
+    ok = set(hub.EINV_DEADLINE) == {"Emart"}
+    print(f"  {'✅' if ok else '❌'} bảng hạn chỉ chép thứ CÓ trong SOP — thêm chuỗi vào đây phải "
+          f"kèm trích dẫn văn bản, không thì bộ kiểm này chặn")
+    bad += not ok
+
+    # BỘ GIẢ PHẢI ĐÚNG, nếu không mọi phép trên đều vô nghĩa mà vẫn báo ĐẠT.
+    # `add_months` từng được giả bằng `lambda d, n: _gd(d)` — trả về chính ngày
+    # đưa vào, bỏ hẳn `n`. Luật hạn khi đó chấm "vỡ hạn" cho đúng những trường
+    # hợp còn trong hạn, và lỗi trông y như lỗi của code.
+    from frappe.utils import add_months as _am
+    fixt = [("2026-08-03", -1, "2026-07-03"), ("2026-01-03", -1, "2025-12-03"),
+            ("2026-03-31", -1, "2026-02-28"), ("2024-03-31", -1, "2024-02-29"),
+            ("2026-11-15", 2, "2027-01-15")]
+    wrong = [(d, n, str(_am(d, n)), w) for d, n, w in fixt if str(_am(d, n)) != w]
+    ok = not wrong
+    print(f"  {'✅' if ok else '❌'} bộ giả `add_months` cộng tháng THẬT (vắt năm, kẹp cuối tháng, "
+          f"năm nhuận){'' if ok else ' — sai: ' + str(wrong)}")
+    bad += not ok
+
     # ── 10. Giao diện ───────────────────────────────────────────────────
     print("-" * 82)
     js = open(os.path.join(rc.REPO, "ketoan/public/ketoan/views/mt.js"), encoding="utf-8").read()
@@ -479,6 +528,10 @@ def main():
     ok = "unassigned_debt" in js and "(chưa gán chuỗi)" in js
     print(f"  {'✅' if ok else '❌'} nợ của khách CHƯA GÁN CHUỖI hiện thành MỘT DÒNG của bảng — "
           f"để nó ngoài bảng thì các dòng không cộng lại bằng con số ghi trên đầu")
+    bad += not ok
+
+    ok = "deadlineNote" in js and "einv_deadline" in js
+    print(f"  {'✅' if ok else '❌'} hạn riêng của chuỗi hiện ngay trên con số 'chưa đòi được'")
     bad += not ok
 
     ok = "state.dueAsOf" in seg

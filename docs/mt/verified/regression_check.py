@@ -175,7 +175,25 @@ def _stub_frappe():
     u.nowdate = lambda: str(datetime.date.today())
     u.today = u.nowdate
     u.add_days = lambda d, n: _gd(d) + datetime.timedelta(days=n)
-    u.add_months = lambda d, n: _gd(d)
+
+    def _add_months(d, n):
+        """Cộng/trừ tháng THẬT SỰ, giữ ngày, kẹp về cuối tháng khi tràn.
+
+        ⚠ Bản cũ ở đây là `lambda d, n: _gd(d)` — TRẢ VỀ CHÍNH NGÀY ĐƯA VÀO,
+        bỏ hẳn tham số `n`. Bộ giả trả lời sai thì mọi phép kiểm chạm vào nó
+        đều vô nghĩa mà vẫn báo ĐẠT: `_einv_deadline` bị chấm "vỡ hạn" cho
+        đúng những trường hợp còn trong hạn, và bộ kiểm sẽ đổ lỗi cho code
+        thay vì cho bộ giả. Bộ giả sai nguy hiểm hơn không có bộ giả.
+        """
+        d = _gd(d)
+        total = (d.year * 12 + d.month - 1) + n
+        y, m = divmod(total, 12)
+        m += 1
+        last = [31, 29 if (y % 4 == 0 and (y % 100 or y % 400 == 0)) else 28,
+                31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]
+        return datetime.date(y, m, min(d.day, last))
+
+    u.add_months = _add_months
     u.get_datetime = lambda v=None: datetime.datetime.now()
     u.formatdate = lambda v, f=None: str(v)
     u.fmt_money = lambda v, *a, **k: str(v)
