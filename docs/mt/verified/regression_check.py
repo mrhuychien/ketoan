@@ -30,6 +30,12 @@ EXPECTED = {
     "Chi tiết thanh toán Winmart.xlsx": {
         "chain": "wincommerce", "thanh_toan": 245795904, "pay_lines": 36, "periods": 1,
         "reconciled": True},
+    # CÙNG MỘT CHỨNG TỪ với dòng trên, ở dạng PDF gốc do WinCommerce gửi. Hai
+    # định dạng phải ra CÙNG con số — mọi thay đổi ở parser từ nay bị soi trên
+    # cả hai đường đọc, không chỉ đường Excel.
+    "Chi tiết thanh toán Winmart.PDF": {
+        "chain": "wincommerce", "thanh_toan": 245795904, "pay_lines": 36, "periods": 1,
+        "reconciled": True},
     "Chi tiết thanh toán BigC.xlsx": {
         "chain": "central_retail", "thanh_toan": -721996632, "phi": 134708790,
         "chiet_khau": 27240347, "ghi_giam": 5119605, "pay_lines": 184, "periods": 1,

@@ -575,7 +575,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-S** gán SỐ HÓA ĐƠN THAY THẾ lên chứng từ đã ghi sổ (patch v0_0_17) | `1414f9b` | `replace_check` |
 | **MT2-T** đối chiếu số dư đầu kỳ Excel ↔ sổ cái ERPNext, từng siêu thị | `90bab9e` | `opening_gl_check` |
 | **MT2-U** bảng không cuộn ngang — đo bằng Chromium, không đoán | `a5083b1` | `table_width_check` |
-| **MT2-V** Client Script làm mất nhóm nút Create của ERPNext | *(commit này)* | `client_script_check` |
+| **MT2-V** Client Script làm mất nhóm nút Create của ERPNext | `080f585` `4c18a50` `4ae5e6c` | `client_script_check` |
+| **MT2-W** đọc THẲNG bảng kê thanh toán PDF của WinCommerce | *(commit này)* | `win_pdf_check` · `regression_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -586,7 +587,7 @@ for t in regression_check crosscheck_mt2 mutation_check \
          debt_due_check rebate_pdf_check clawback_check ui_board_check \
          chain_filter_check opening_check win_grn_check opening_store_check \
          mega_check refid_check replace_check opening_gl_check \
-         table_width_check client_script_check; do
+         table_width_check client_script_check win_pdf_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -875,6 +876,52 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-W — đọc thẳng bảng kê PDF của WinCommerce
+
+WinCommerce gửi bảng kê thanh toán bằng **PDF**. Trước đây phải có người chuyển
+sang Excel rồi mới nạp được — một bước tay nằm giữa chứng từ gốc và sổ sách, và
+là bước không ai kiểm được: trình chuyển đổi tách cột sai thì con số vẫn vào hệ
+thống trông như bình thường.
+
+`ketoan/api/mt_advice_pdf.py` đọc thẳng PDF và trả về **đúng khuôn `[(tên, lưới)]`
+mà `read_sheets` của Excel trả về**. Nhờ vậy *không một parser nào phải sửa* —
+`detect_chain`, `parse_wincommerce`, `preview`, `commit` chạy nguyên như cũ.
+
+**Dựng lại cột bằng cách đo, không đếm trước:** cắt trang theo đường kẻ `_____`
+bản in vẽ sẵn, rồi trong mỗi khối gom tọa độ ngang của mọi từ thành các dải —
+khoảng trống giữa hai dải là ranh giới cột. Đo trên file thật: 6 dải cách nhau
+20–39pt, trong khi hai từ trong cùng một ô cách nhau ≤2.8pt. Ngưỡng 8pt nằm giữa,
+cách xa cả hai đầu.
+
+**Dòng tổng đi đường riêng, và đó là chủ ý.** Đo được: dòng `Tổng cộng` in lệch
+phải **34pt** so với các dòng dữ liệu. Ép nó vào cùng mô hình cột thì ô `0` của
+cột *Chiết khấu* rơi trúng dải của cột *Số tiền* — hai con số vào một ô. Nên các
+dòng tổng kết được nhận theo **nhãn in sẵn** và trả ra nguyên văn; `parse_wincommerce`
+đọc bằng regex, đúng cách nó vốn đã đọc chân trang "Số dư mang sang trang sau".
+
+#### Phép kiểm mạnh nhất có được: hai định dạng, một chứng từ
+
+Bộ mẫu có **cả hai bản của cùng một chứng từ** (thanh toán 25.06.2026, số
+2000141337): PDF gốc và Excel chuyển đổi đã dùng suốt. Nên không kiểm "PDF ra số
+đẹp" mà kiểm:
+
+```
+đọc từ PDF  ==  đọc từ Excel,  TỪNG DÒNG, TỪNG TRƯỜNG
+```
+
+Kết quả: **36 dòng trùng khớp tuyệt đối**, 245.795.904đ, cùng `advice_no`, cùng
+ngày, mọi số kiểm tra in trên giấy đều khớp. Trùng tới từng trường thì tầng PDF
+không thể đang đọc sai cột mà vẫn ra tổng đúng — kiểu hỏng nguy hiểm nhất của
+mọi tầng đọc file. File PDF cũng đã vào `regression_check`, nên từ nay mọi thay
+đổi parser bị soi trên **cả hai đường đọc**.
+
+**Một lỗi thật gặp khi làm:** bản in kẻ ngang cả trên lẫn dưới hàng tiêu đề, nên
+cắt khối theo đường kẻ làm tiêu đề thành sheet riêng — `_wc_find_header` không
+thấy tiêu đề trên sheet dữ liệu và **bỏ sạch 36 dòng**. Số kiểm tra của file bắt
+được (0đ so với 245.795.904đ), nhưng lưới an toàn không phải chỗ để đỡ một lỗi đã
+biết: `_is_label_block` nối khối toàn chữ vào khối ngay sau nó, và bộ kiểm khóa
+hình dạng đó lại.
 
 ### MT2-V — Client Script làm mất nhóm nút Create
 

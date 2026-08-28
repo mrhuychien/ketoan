@@ -794,6 +794,16 @@ def parse_wincommerce(sheets):
 
     rows, carry_forwards = [], []
     declared_total, declared_discount = None, None
+    # Dòng 'Tổng cộng' đọc từ sheet KHÔNG có header — đường PDF.
+    #
+    # Bản in để dòng tổng LỆCH PHẢI 34pt so với các dòng dữ liệu (đo trên file
+    # thật), nên `mt_advice_pdf` không ép nó vào mô hình cột của bảng mà trả ra
+    # nguyên văn một ô. Đọc bằng regex, đúng cách chân trang vẫn được đọc.
+    #
+    # Giữ ở BIẾN RIÊNG rồi mới dùng ở cuối, KHÔNG gán thẳng: gán thẳng thì kết
+    # quả phụ thuộc thứ tự sheet nào tới trước — đường Excel có dòng tổng nằm
+    # trong sheet CÓ header và đó mới là nguồn chính.
+    total_from_text, discount_from_text = None, None
 
     for name, grid in sheets:
         hi, cols = _wc_find_header(grid)
@@ -809,6 +819,11 @@ def parse_wincommerce(sheets):
                     m = re.search(r"Số dư mang sang trang sau\s+([\d.,]+)\s+([\d.,]+)", txt)
                     if m:
                         carry_forwards.append(to_number(m.group(2)))
+                elif txt.strip().startswith("Tổng cộng"):
+                    m = re.search(r"Tổng cộng\s+([\d.,]+)\s+([\d.,]+)", txt)
+                    if m:
+                        discount_from_text = to_number(m.group(1))
+                        total_from_text = to_number(m.group(2))
             continue
 
         def cell(row, key):
@@ -880,6 +895,13 @@ def parse_wincommerce(sheets):
 
     computed_payment = _sum(rows, "signed_amount", {"thanh_toan"})
     computed_discount = _sum(rows, "signed_amount", {"chiet_khau"})
+
+    # Sheet CÓ header là nguồn chính; dòng tổng đọc nguyên văn chỉ bù vào khi
+    # nguồn chính không có (đường PDF). Không đảo ngược thứ tự này.
+    if declared_total is None:
+        declared_total = total_from_text
+    if declared_discount is None:
+        declared_discount = discount_from_text
 
     checks = [_check("Tổng cộng (cuối bảng)", declared_total, computed_payment)]
     if pay_amount is not None:
@@ -2972,7 +2994,11 @@ def read_payment_advice(content, chain=None):
     không nhận ra được thì THROW để người chọn tay, không đoán bừa — parser sai
     chuỗi vẫn ra một con số trông hợp lý nhưng đọc sai cột tiền.
     """
-    sheets = read_sheets(content)
+    # Nhận cả Excel lẫn PDF. Nhập trong hàm để tránh vòng import:
+    # mt_advice_pdf -> mt_rebate_pdf -> mt_advice.
+    from ketoan.api.mt_advice_pdf import read_sheets_any
+
+    sheets = read_sheets_any(content)
     if chain:
         key = _resolve_chain_key(chain)
         # Người đã CHỌN chuỗi mà báo "không nhận ra chuỗi từ file" là thông báo
@@ -3036,7 +3062,9 @@ def preview(content, chain=None):
 def detect(content):
     """Chỉ nhận diện chuỗi + liệt kê sheet, không bóc dòng. Dùng cho bước chọn chuỗi."""
     guard_mt()
-    sheets = read_sheets(content)
+    from ketoan.api.mt_advice_pdf import read_sheets_any
+
+    sheets = read_sheets_any(content)
     key = detect_chain(sheets)
     return {
         "chain_key": key,
