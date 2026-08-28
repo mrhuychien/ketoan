@@ -576,7 +576,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-T** đối chiếu số dư đầu kỳ Excel ↔ sổ cái ERPNext, từng siêu thị | `90bab9e` | `opening_gl_check` |
 | **MT2-U** bảng không cuộn ngang — đo bằng Chromium, không đoán | `a5083b1` | `table_width_check` |
 | **MT2-V** Client Script làm mất nhóm nút Create của ERPNext | `080f585` `4c18a50` `4ae5e6c` | `client_script_check` |
-| **MT2-W** đọc THẲNG bảng kê thanh toán PDF của WinCommerce | *(commit này)* | `win_pdf_check` · `regression_check` |
+| **MT2-W** đọc THẲNG bảng kê thanh toán PDF của WinCommerce | `8a78341` | `win_pdf_check` · `regression_check` |
+| **MT2-X** hai cuốn sổ công nợ đặt cạnh nhau (sổ ERPNext ↔ đầu HĐĐT) | *(commit này)* | `two_books_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -587,7 +588,8 @@ for t in regression_check crosscheck_mt2 mutation_check \
          debt_due_check rebate_pdf_check clawback_check ui_board_check \
          chain_filter_check opening_check win_grn_check opening_store_check \
          mega_check refid_check replace_check opening_gl_check \
-         table_width_check client_script_check win_pdf_check; do
+         table_width_check client_script_check win_pdf_check \
+         two_books_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -876,6 +878,49 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-X — hai cuốn sổ công nợ, đặt cạnh nhau
+
+Kế toán nêu: **công nợ trên ERPNext khác, công nợ kế toán theo dõi trên Excel
+khác.** ERPNext ghi nợ ngay khi Sales Invoice được ghi sổ; Excel theo dõi theo
+**đầu hóa đơn điện tử**, vì siêu thị chỉ trả tiền cho hóa đơn đã phát hành.
+
+Soi lại toàn bộ: `mt.get_overview`, `mt_debt`, `receivables`, `mt_hub`,
+`dashboard` — **không một màn nào lọc theo số hóa đơn MISA.** Gate
+`custom_misa_inv_no > ''` chỉ có ĐÚNG MỘT chỗ trong app: `mt._si_index`, chỉ mục
+để khớp bảng kê thanh toán. Tức là phần mềm chỉ theo dõi MỘT trong hai cuốn sổ,
+và kế toán vẫn phải giữ Excel riêng. (Kênh NPP thì đã có tab "Chưa xuất HĐĐT";
+kênh MT không có bản tương đương.)
+
+**Không dựng màn công nợ thứ hai.** Đó là đường thẳng tới hai nguồn sự thật rồi
+có ngày hai màn lệch nhau mà không ai biết tin cái nào. Thay vào đó bổ đôi CHÍNH
+rổ "chưa thanh toán" theo một trục mới, trong **cùng một vòng lặp / cùng một
+truy vấn** — nên hai vế cộng lại bằng tổng **theo cấu tạo**, không nhờ hai phép
+tính tình cờ khớp:
+
+```
+Chuỗi còn nợ  =  Đòi được (đã xuất HĐĐT)  +  Chưa đòi được (chưa xuất HĐĐT)
+```
+
+Chênh lệch không phải sai sót — nó là **việc phải làm**: xuất nốt hóa đơn. Nên
+thẻ "chưa đòi được" **bấm vào mở thẳng danh sách** đó; một con số không mở ra
+được việc phải làm thì chỉ để nhìn.
+
+#### Chốt chặn: phải hỏi CẢ HAI ô số hóa đơn
+
+`einvoice_issued_expr()` hỏi `custom_misa_inv_no` **OR** `vn_einvoice_number`.
+Hóa đơn cũ chưa chạy `misa_legacy` thì ô thứ nhất trống trong khi hóa đơn đã
+phát hành từ lâu — chỉ hỏi ô thứ nhất là toàn bộ hóa đơn cũ bị xếp vào "chưa
+xuất HĐĐT", một danh sách việc phải làm dài hàng nghìn dòng toàn việc không có
+thật, và kế toán sẽ bỏ luôn cả màn hình.
+
+Site chưa có ô nào → trả `None`, tầng trên **bỏ hẳn** phép chia thay vì chia
+bừa: *không biết ≠ chưa xuất*.
+
+Luật này có **một** định nghĩa dùng chung cho cả tầng tổng quan lẫn tầng công
+nợ. Ba chỗ khác trong app cũng đọc `custom_misa_inv_no` (`mt_win` gom hồ sơ nộp,
+`mt_discount` in bảng kê, `misa_vat` đối soát MISA) nhưng chúng hỏi **câu khác**
+— gộp vào đây là bắt ba màn hình trả lời một câu không phải câu của nó.
 
 ### MT2-W — đọc thẳng bảng kê PDF của WinCommerce
 

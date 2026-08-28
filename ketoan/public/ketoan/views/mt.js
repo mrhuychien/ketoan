@@ -271,6 +271,8 @@ function boardShell(state, board) {
       </div>
     </div>
 
+    ${twoBooks(t, board)}
+
     ${BASIS_NOTE}
 
     ${board.orphan_advices
@@ -374,6 +376,17 @@ function chainCard(c) {
 }
 
 function bindBoard(container, state) {
+  // Thẻ "Chưa đòi được" mở thẳng danh sách hóa đơn chưa xuất HĐĐT trong rổ
+  // 'chưa thu đủ'. Con số không mở ra được việc phải làm thì chỉ để nhìn.
+  const tb = container.querySelector("#tb-open");
+  if (tb) tb.addEventListener("click", () => {
+    state.tab = "thanh-toan";
+    state.bucket = "chua_thanh_toan";
+    state.einvoice = "chua";
+    state.page = 1;
+    loadTab(container, state);
+  });
+
   bindDates(container, state);
   container.querySelectorAll(".kt-chain-card").forEach((el) => {
     el.addEventListener("click", () => {
@@ -644,6 +657,7 @@ async function loadTab(container, state) {
       from_date: state.from, to_date: state.to, search: state.search,
       page: state.page, chain: state.chain || undefined,
       customer: state.customer || undefined,
+      einvoice: state.einvoice || undefined,
     });
   } catch (e) {
     setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
@@ -662,7 +676,19 @@ async function loadTab(container, state) {
       ${PAY_VIEWS.map((v) => html`<button
         class="kt-btn kt-btn--sm ${state.bucket === v.key ? "" : "kt-btn--outline"}"
         data-payview="${v.key}">${v.label}</button>`)}
-    </div></div>`;
+    </div></div>
+
+    ${state.einvoice
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+          <div class="kt-card-body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <span><b>Đang lọc:</b> ${state.einvoice === "chua"
+              ? "hóa đơn CHƯA xuất hóa đơn điện tử — đã ghi sổ nhưng chưa đòi được"
+              : "hóa đơn ĐÃ xuất hóa đơn điện tử — phần đòi được"}</span>
+            <span class="kt-sub">${res.total || 0} hóa đơn</span>
+            <button class="kt-btn kt-btn--outline kt-btn--sm" id="einv-clear"
+                    style="margin-left:auto">Bỏ lọc</button>
+          </div></div>`
+      : ""}
 
   if (bucket === "chiet_khau") {
     setHTML(body, html`${head}${customerFilterBar(state)}${deductionTable(state, res)}`);
@@ -673,13 +699,68 @@ async function loadTab(container, state) {
   container.querySelectorAll("button[data-payview]").forEach((b) => {
     b.addEventListener("click", () => {
       state.bucket = b.dataset.payview;
+      // Bỏ lọc HĐĐT khi đổi rổ: giữ lại là kế toán đọc "rổ đã thu đủ" mà thật
+      // ra đang xem một lát cắt của nó, không có gì trên màn hình nói ra điều đó.
+      state.einvoice = "";
       state.page = 1;
       loadTab(container, state);
     });
   });
+  // Bộ lọc đang bật PHẢI hiện ra và PHẢI tắt được ngay tại chỗ. Một danh sách bị
+  // lọc ngầm là con đường ngắn nhất để kế toán đọc ra một con số không phải con
+  // số của rổ đang chọn.
+  const ec = container.querySelector("#einv-clear");
+  if (ec) ec.addEventListener("click", () => {
+    state.einvoice = "";
+    state.page = 1;
+    loadTab(container, state);
+  });
   bindCustomerFilter(container, state);
   bindPager(container, state);
 }
+
+// ── HAI CUỐN SỔ, ĐẶT CẠNH NHAU ──────────────────────────────
+// ERPNext ghi công nợ NGAY khi Sales Invoice được ghi sổ. Kế toán thì theo dõi
+// trên Excel theo ĐẦU HÓA ĐƠN ĐIỆN TỬ, vì siêu thị chỉ trả tiền cho hóa đơn đã
+// phát hành. Hai con số khác nhau, và chênh lệch KHÔNG phải sai sót — đó là
+// hàng đã giao, đã ghi sổ, chưa xuất hóa đơn điện tử.
+//
+// Không dựng màn công nợ thứ hai: đó là đường thẳng tới hai nguồn sự thật rồi
+// có ngày hai màn lệch nhau mà không ai biết tin cái nào. Đây là MỘT con số
+// được bổ đôi — hai vế luôn cộng lại bằng "Chuỗi còn nợ" ở trên.
+//
+// Vế "chưa xuất HĐĐT" bấm vào MỞ ĐƯỢC danh sách: thấy một con số mà không
+// mở ra được việc phải làm thì con số đó chỉ để nhìn.
+function twoBooks(t, board) {
+  if (t.debt_no_einv === undefined || t.debt_no_einv === null) return "";
+  const chua = t.debt_no_einv || 0;
+  const roi = t.debt_einv || 0;
+  return html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px">
+        <b>Hai cách theo dõi công nợ — đặt cạnh nhau</b>
+        <span class="kt-sub">cộng lại đúng bằng ${formatVND(t.debt)} ở trên</span>
+      </div>
+      <div class="kt-grid-2">
+        <div class="kt-stat">
+          <div class="kt-stat-label"><i class="fas fa-file-invoice"></i> Đòi được — đã xuất HĐĐT</div>
+          <div class="kt-stat-value pos">${formatVNDShort(roi)}</div>
+          <div class="kt-stat-sub">${formatVND(roi)} · đây là cột kế toán theo dõi trên Excel</div>
+        </div>
+        <div class="kt-stat is-link" id="tb-open" style="cursor:pointer">
+          <div class="kt-stat-label"><i class="fas fa-triangle-exclamation"></i> Chưa đòi được — CHƯA xuất HĐĐT</div>
+          <div class="kt-stat-value ${chua ? "neg" : ""}">${formatVNDShort(chua)}</div>
+          <div class="kt-stat-sub">${t.debt_no_einv_count || 0} hóa đơn · ${formatVND(chua)}${chua ? " — bấm để mở danh sách" : ""}</div>
+        </div>
+      </div>
+      <div class="kt-sub" style="margin-top:10px">
+        Sổ ERPNext ghi nợ ngay khi hóa đơn được ghi sổ. Siêu thị chỉ trả cho hóa đơn
+        <b>đã phát hành</b>, nên phần chưa xuất HĐĐT tuy đã là doanh thu nhưng chưa đòi
+        được. Chênh lệch này không phải sai sót — nó là <b>việc phải làm</b>: xuất nốt hóa đơn.
+      </div>
+    </div></div>`;
+}
+
 
 // Bốn cách nhìn của bước "Đối soát thanh toán" — khóa đúng như `mt.get_invoices`.
 // Ba rổ đầu là HÓA ĐƠN, rổ cuối là DÒNG BẢNG KÊ: khoản chuỗi trừ lại phần lớn

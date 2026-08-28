@@ -264,6 +264,12 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
             "debt_overdue": flt(d.get("overdue")),
             "debt_invoices": cint(d.get("count")),
             "debt_unknown_term": cint(d.get("unknown_term")),
+            # HAI CUỐN SỔ: ERPNext ghi nợ khi ghi sổ hóa đơn, kế toán theo dõi
+            # theo đầu hóa đơn điện tử. Chênh lệch = hàng đã giao, đã ghi sổ,
+            # CHƯA xuất HĐĐT — chưa đòi được, và là việc phải xử.
+            "debt_einv": flt(d.get("einv_issued")),
+            "debt_no_einv": flt(d.get("einv_pending")),
+            "debt_no_einv_count": cint(d.get("einv_pending_n")),
         })
 
     # Chuỗi nào nhiều việc nhất lên trước; hết việc thì xếp theo nợ quá hạn.
@@ -281,6 +287,9 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
             "todo": sum(r["todo"] for r in out),
             "debt": sum(r["debt"] for r in out),
             "debt_overdue": sum(r["debt_overdue"] for r in out),
+            "debt_einv": sum(r["debt_einv"] for r in out),
+            "debt_no_einv": sum(r["debt_no_einv"] for r in out),
+            "debt_no_einv_count": sum(r["debt_no_einv_count"] for r in out),
             "draft_je": sum(r["draft_je"] for r in out),
         },
         "can_manage": is_chief(),

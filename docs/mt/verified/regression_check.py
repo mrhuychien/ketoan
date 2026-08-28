@@ -138,6 +138,26 @@ def _stub_frappe():
 
     fr.db = _DB()
 
+    # `frappe.get_meta(dt).has_field(f)` — production dùng nó ở `_has_si_field`
+    # để hỏi "site có ô này chưa". Bộ giả trước đây KHÔNG có, nên mọi bộ kiểm
+    # chạm vào đường đó nổ `AttributeError` giữa chừng.
+    #
+    # Ủy quyền THẲNG sang `db.has_column`: hai câu hỏi đó trả lời cùng một điều,
+    # và ủy quyền thì bộ kiểm nào bật `has_column = True` là tự động có luôn
+    # `has_field = True` — không phải nhớ bật hai chỗ rồi quên một.
+    class _Meta:
+        def __init__(self, dt):
+            self.doctype = dt
+
+        def has_field(self, field):
+            return bool(fr.db.has_column(self.doctype, field))
+
+        def get_field(self, field):
+            return None
+
+    fr.get_meta = _Meta
+    fr.get_cached_doc = lambda *a, **k: None
+
     u = types.ModuleType("frappe.utils")
     u.flt = lambda v, p=None: float(v or 0)
     u.cint = lambda v: int(v or 0)

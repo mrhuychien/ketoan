@@ -416,6 +416,40 @@ _NET_DUE = "(ABS(si.grand_total) - IFNULL(rt.returned, 0))"
 # nó nằm mãi ở "đã thu đủ" trong khi tiền đã bị lấy đi.
 _NET_PAID = "(IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0))"
 
+# CÒN PHẢI THU của một hóa đơn. Dùng CHUNG cho mọi chỗ chia nhỏ rổ 'chưa thanh
+# toán' — tách ra viết lại là có ngày hai màn hình cộng ra hai số.
+_REMAIN = f"GREATEST({_NET_DUE} - {_NET_PAID}, 0)"
+
+# Ô số hóa đơn điện tử của LUỒNG CŨ. Kế toán gõ tay vào đây trước khi có tích hợp
+# MISA; `misa_legacy` là module chép ngược sang `custom_misa_inv_no`.
+LEGACY_NO_FIELD = "vn_einvoice_number"
+
+
+def einvoice_issued_expr():
+    """Mệnh đề SQL: hóa đơn này ĐÃ có số hóa đơn điện tử chưa.
+
+    HỎI CẢ HAI Ô, và đây là chốt chặn chứ không phải cẩn thận thừa:
+
+      · `custom_misa_inv_no`  — luồng tích hợp MISA;
+      · `vn_einvoice_number`  — luồng CŨ, kế toán gõ tay.
+
+    Hóa đơn cũ chưa chạy `misa_legacy` thì ô thứ nhất TRỐNG trong khi hóa đơn đã
+    phát hành từ lâu. Chỉ hỏi ô thứ nhất là toàn bộ hóa đơn cũ bị xếp vào
+    "chưa xuất HĐĐT" — một danh sách việc phải làm dài hàng nghìn dòng, toàn
+    việc không có thật, và kế toán sẽ bỏ luôn cả màn hình.
+
+    Site chưa có ô nào thì trả None: tầng gọi phải BỎ HẲN phép chia này thay vì
+    chia bừa (không có ô nghĩa là không biết, không phải là "chưa xuất").
+    """
+    parts = []
+    if _has_si_field(SI_NO_FIELD):
+        parts.append(f"IFNULL(si.{SI_NO_FIELD}, '') != ''")
+    if _has_si_field(LEGACY_NO_FIELD):
+        parts.append(f"IFNULL(si.{LEGACY_NO_FIELD}, '') != ''")
+    if not parts:
+        return None
+    return "(" + " OR ".join(parts) + ")"
+
 _BUCKET_WHERE = {
     # Hóa đơn bị trả lại một phần thì phần còn phải thu là `_NET_DUE`, không
     # phải cả `grand_total` — xem `_returns_join`.
@@ -534,6 +568,35 @@ def get_overview(company=None, from_date=None, to_date=None):
     chua = bucket(_bucket_where("chua_thanh_toan", p, company))
     da = bucket(_bucket_where("da_thanh_toan", p, company))
 
+    # ── HAI CUỐN SỔ, ĐẶT CẠNH NHAU ───────────────────────────────────────
+    #
+    # ERPNext ghi công nợ ngay khi Sales Invoice được ghi sổ. Kế toán thì theo
+    # dõi trên Excel theo ĐẦU HÓA ĐƠN ĐIỆN TỬ — siêu thị chỉ trả tiền cho hóa
+    # đơn đã phát hành. Hai con số khác nhau, và chênh lệch KHÔNG phải sai sót:
+    # đó là hàng đã giao, đã ghi sổ, chưa xuất hóa đơn điện tử.
+    #
+    # Không dựng màn công nợ thứ hai — đó là đường thẳng tới hai nguồn sự thật.
+    # Chia CHÍNH rổ 'chưa thanh toán' làm hai, trong MỘT truy vấn, bằng CASE
+    # trên cùng một tập dòng. Nhờ vậy hai vế cộng lại BẰNG ĐÚNG tổng rổ theo
+    # cấu tạo, không phải nhờ hai truy vấn tình cờ khớp nhau.
+    einv = einvoice_issued_expr()
+    by_einvoice = None
+    if einv:
+        w = _bucket_where("chua_thanh_toan", p, company)
+        by_einvoice = frappe.db.sql(f"""
+            SELECT
+              SUM(CASE WHEN {einv} THEN 1 ELSE 0 END) AS n_issued,
+              SUM(CASE WHEN {einv} THEN 0 ELSE 1 END) AS n_pending,
+              IFNULL(SUM(CASE WHEN {einv} THEN {_REMAIN} ELSE 0 END), 0) AS amt_issued,
+              IFNULL(SUM(CASE WHEN {einv} THEN 0 ELSE {_REMAIN} END), 0) AS amt_pending
+            FROM `tabSales Invoice` si
+            INNER JOIN `tabCustomer` c ON c.name = si.customer
+            {join}
+            WHERE si.docstatus = 1 AND si.company = %(company)s
+              AND si.posting_date BETWEEN %(fd)s AND %(td)s
+              AND {mt} AND {w}
+        """, p, as_dict=True)[0]
+
     # Rổ 3 đếm DÒNG BẢNG KÊ, không đếm hóa đơn: khoản chuỗi trừ lại thường không
     # gắn với hóa đơn nào (phí hỗ trợ, chiết khấu tháng, NET OFF).
     #
@@ -640,7 +703,16 @@ def get_overview(company=None, from_date=None, to_date=None):
                                 "remaining": flt(chua.remaining), "collected": flt(chua.collected),
                                 # Tiền đã về nhưng liên kết mới là PHỎNG ĐOÁN —
                                 # chưa được trừ vào nợ, phải hiện riêng.
-                                "pending_review": flt(chua.pending_review)},
+                                "pending_review": flt(chua.pending_review),
+                                # Hai cuốn sổ đặt cạnh nhau — xem chú thích ở
+                                # chỗ tính. `None` khi site chưa có ô số HĐĐT nào:
+                                # màn hình phải ẩn hẳn phần này thay vì hiện 0.
+                                "by_einvoice": ({
+                                    "issued": {"count": cint(by_einvoice.n_issued),
+                                               "remaining": flt(by_einvoice.amt_issued)},
+                                    "pending": {"count": cint(by_einvoice.n_pending),
+                                                "remaining": flt(by_einvoice.amt_pending)},
+                                } if by_einvoice else None)},
             "da_thanh_toan": {"count": da.cnt, "amount": flt(da.amount),
                               "collected": flt(da.collected),
                               "pending_review": flt(da.pending_review)},
@@ -695,7 +767,7 @@ def _parser_chains():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _invoice_page(company, from_date, to_date, bucket, search, page_size, offset, sort=None,
-                  customer=None, chain=None):
+                  customer=None, chain=None, einvoice=None):
     p = {"company": company, "fd": from_date, "td": to_date, "tol": PAID_TOLERANCE,
          "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT, "limit": page_size, "offset": offset}
     # Điều kiện rổ dựng Ở ĐÂY chứ không nhận sẵn từ ngoài: rổ 'chưa thanh toán'
@@ -715,6 +787,15 @@ def _invoice_page(company, from_date, to_date, bucket, search, page_size, offset
     if customer:
         p["cus"] = customer
         where += " AND si.customer = %(cus)s"
+    # Lọc theo TRỤC HÓA ĐƠN ĐIỆN TỬ. Đây là cái làm phần chênh giữa hai cuốn sổ
+    # BẤM VÀO XỬ LÝ ĐƯỢC: thấy 'chưa xuất HĐĐT 412 triệu' mà không mở ra được
+    # danh sách thì con số đó chỉ để nhìn.
+    #
+    # Ô số HĐĐT chưa có trên site -> BỎ QUA bộ lọc thay vì lọc bừa: không có ô
+    # nghĩa là không biết, và "không biết" không được biến thành "chưa xuất".
+    einv = einvoice_issued_expr()
+    if einvoice and einv:
+        where += " AND " + (einv if einvoice == "da" else "NOT " + einv)
     join = _debt_joins()
     if search:
         p["kw"] = f"%{search}%"
@@ -845,7 +926,7 @@ def _deduction_page(company, from_date, to_date, search, page_size, offset, chai
 
 @frappe.whitelist()
 def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None,
-                 page=1, page_size=PAGE_SIZE, chain=None, customer=None):
+                 page=1, page_size=PAGE_SIZE, chain=None, customer=None, einvoice=None):
     """Một TRANG của một rổ. bucket ∈ chua_thanh_toan | da_thanh_toan | chiet_khau | tat_ca.
 
     Chia trang ở tầng SQL, 20 dòng/trang. Kênh MT một tháng có hàng nghìn hóa
@@ -855,6 +936,11 @@ def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None
     _require_tables()
     if bucket not in BUCKETS:
         frappe.throw(_("Rổ không hợp lệ: {0}").format(bucket))
+    einvoice = norm_text(einvoice) or None
+    if einvoice and einvoice not in ("da", "chua"):
+        # Không im lặng bỏ qua giá trị lạ: bỏ qua thì màn hình tưởng đang lọc mà
+        # thật ra đang hiện cả hai vế, và con số đọc ra sai gấp đôi.
+        frappe.throw(_("Bộ lọc hóa đơn điện tử không hợp lệ: {0}").format(einvoice))
     from_date, to_date = _range(from_date, to_date)
     company = _company(company)
     page, page_size, offset = _page(page, page_size)
@@ -869,13 +955,14 @@ def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None
         source = "erp"
         rows, total = _invoice_page(company, from_date, to_date, bucket,
                                     search, page_size, offset, customer=customer,
-                                    chain=chain)
+                                    chain=chain, einvoice=einvoice)
 
     return {
         "bucket": bucket,
         "source": source,
         "chain": chain or "",
         "customer": customer,
+        "einvoice": einvoice or "",
         "rows": rows,
         "total": total,
         "page": page,

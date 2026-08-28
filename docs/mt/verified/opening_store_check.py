@@ -586,10 +586,20 @@ def main():
     frappe.db.sql, mt.channel_group_clause = keep_sql, keep_group
 
     hit = [" ".join(x.split()) for x in caught if "MT Opening Match" in x]
-    ok = (len(hit) == 1 and hit[0].count("(") == hit[0].count(")")
-          and "%(obd0)s" in hit[0] and "%(ob0c0)s" in hit[0])
-    print(f"  {'✅' if ok else '❌'} câu SQL của Tổng quan dựng được: đúng {len(hit)}/"
-          f"{len(caught)} câu mang luật, ngoặc cân, mọi giá trị đi qua tham số ràng buộc")
+    # MỌI câu mang luật đều phải dựng đúng — không chỉ câu đầu tiên.
+    ok = bool(hit) and all(
+        q.count("(") == q.count(")") and "%(obd0)s" in q and "%(ob0c0)s" in q for q in hit)
+    print(f"  {'✅' if ok else '❌'} câu SQL của Tổng quan dựng được: {len(hit)}/{len(caught)} "
+          f"câu mang luật, câu nào cũng ngoặc cân và mọi giá trị đi qua tham số ràng buộc")
+    bad += not ok
+
+    # Rổ 'chưa thanh toán' bị bổ đôi theo trục hóa đơn điện tử (hai cuốn sổ).
+    # Câu chia BẮT BUỘC mang cùng luật số dư đầu kỳ với câu tổng — thiếu nó thì
+    # hai vế cộng lại KHÔNG bằng tổng rổ, và không màn hình nào báo được điều đó.
+    split = [q for q in hit if "n_issued" in q or "amt_issued" in q]
+    ok = len(split) == 1
+    print(f"  {'✅' if ok else '❌'} câu chia hai vế 'đã/chưa xuất HĐĐT' cũng áp luật số dư "
+          f"đầu kỳ — thiếu là hai vế không cộng lại bằng tổng rổ")
     bad += not ok
 
     # ── 8. Chặn của DocType ─────────────────────────────────────────────

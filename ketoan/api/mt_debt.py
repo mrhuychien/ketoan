@@ -54,6 +54,7 @@ from ketoan.api.mt import (
     PAID_TOLERANCE,
     _customer_chain_map,
     _customer_in_clause,
+    einvoice_issued_expr,
     chain_customers,
     KIND_DEDUCT,
     KIND_PAYMENT,
@@ -165,6 +166,9 @@ def _fetch(company, as_of, chain=None, customer=None, search=None):
                   " OR c.name LIKE %(q)s)")
 
     credit = "c.custom_mt_credit_days" if _has_credit_days() else "NULL"
+    # Trục HAI CUỐN SỔ. Định nghĩa nằm ở `mt.einvoice_issued_expr` — MỘT nơi cho
+    # cả app, để màn công nợ và màn tổng quan không bao giờ chia theo hai luật.
+    einv = einvoice_issued_expr() or "NULL"
 
     # Hóa đơn đã tất toán TRƯỚC ngày chuyển giao không còn là nợ. Gọi đúng cái
     # hàm mà `mt.get_overview` gọi — màn hình công nợ và rổ 'chưa thanh toán'
@@ -182,6 +186,7 @@ def _fetch(company, as_of, chain=None, customer=None, search=None):
                IFNULL(p.paid_review, 0) AS paid_review,
                p.last_payment_date,
                IFNULL(rt.returned, 0) AS returned,
+               {einv} AS has_einvoice,
                GREATEST(ABS(si.grand_total) - IFNULL(rt.returned, 0)
                         - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) AS remaining
         FROM `tabSales Invoice` si
@@ -241,6 +246,17 @@ def _rollup(rows):
     overdue_count = 0
     conflicts = 0
     review = 0.0
+    # HAI CUỐN SỔ, cộng trên CÙNG một tập dòng nên luôn cộng lại bằng `total`.
+    #
+    # ERPNext ghi công nợ ngay khi hóa đơn được ghi sổ; kế toán theo dõi trên
+    # Excel theo ĐẦU HÓA ĐƠN ĐIỆN TỬ vì siêu thị chỉ trả cho hóa đơn đã phát
+    # hành. Chênh lệch không phải sai sót — đó là hàng đã giao, đã ghi sổ, chưa
+    # xuất hóa đơn điện tử. Đặt cạnh nhau để còn xử, đừng bắt ai nhớ.
+    einv_issued = 0.0
+    einv_pending = 0.0
+    einv_issued_n = 0
+    einv_pending_n = 0
+    einv_known = False
 
     for r in rows:
         amt = flt(r["remaining"])
@@ -256,11 +272,31 @@ def _rollup(rows):
             conflicts += 1
         review += flt(r.get("paid_review"))
 
+        # `None` = site chưa có ô số hóa đơn điện tử nào -> KHÔNG chia. Không có
+        # ô nghĩa là không biết, và "không biết" không được biến thành "chưa xuất".
+        has_e = r.get("has_einvoice")
+        if has_e is not None:
+            einv_known = True
+            if cint(has_e):
+                einv_issued += amt
+                einv_issued_n += 1
+            else:
+                einv_pending += amt
+                einv_pending_n += 1
+
         ch = r.get("chain") or ""
         c = by_chain.setdefault(ch, {"chain": ch, "count": 0, "amount": 0.0,
-                                     "overdue": 0.0, "unknown_term": 0})
+                                     "overdue": 0.0, "unknown_term": 0,
+                                     "einv_issued": 0.0, "einv_pending": 0.0,
+                                     "einv_pending_n": 0})
         c["count"] += 1
         c["amount"] += amt
+        if has_e is not None:
+            if cint(has_e):
+                c["einv_issued"] += amt
+            else:
+                c["einv_pending"] += amt
+                c["einv_pending_n"] += 1
         if r["days_overdue"] is not None and r["days_overdue"] > 0:
             c["overdue"] += amt
         if r["bucket"] == BUCKET_UNKNOWN:
@@ -272,6 +308,11 @@ def _rollup(rows):
         "chains": chains,
         "total": total,
         "total_count": len(rows),
+        # Hai vế cộng lại BẰNG `total` theo cấu tạo — cùng vòng lặp, cùng `amt`.
+        "by_einvoice": ({
+            "issued": {"amount": round(einv_issued, 2), "count": einv_issued_n},
+            "pending": {"amount": round(einv_pending, 2), "count": einv_pending_n},
+        } if einv_known else None),
         "overdue": overdue,
         "overdue_count": overdue_count,
         "unknown_term_count": by_bucket[BUCKET_UNKNOWN]["count"],
