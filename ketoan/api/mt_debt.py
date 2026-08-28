@@ -256,6 +256,7 @@ def _rollup(rows):
     einv_pending = 0.0
     einv_issued_n = 0
     einv_pending_n = 0
+    einv_pending_oldest = None
     einv_known = False
 
     for r in rows:
@@ -275,6 +276,12 @@ def _rollup(rows):
         # `None` = site chưa có ô số hóa đơn điện tử nào -> KHÔNG chia. Không có
         # ô nghĩa là không biết, và "không biết" không được biến thành "chưa xuất".
         has_e = r.get("has_einvoice")
+        # So sánh ngày bằng CHUỖI, nên phải cắt về đúng `YYYY-MM-DD`. Nếu một
+        # nguồn nào đó trả `datetime` thì `cstr` ra "2026-03-15 00:00:00", và
+        # chuỗi đó lớn hơn "2026-03-15" — cùng một ngày mà xếp ra hai thứ hạng.
+        posting = (cstr(r.get("posting_date") or "") or None)
+        if posting:
+            posting = posting[:10]
         if has_e is not None:
             einv_known = True
             if cint(has_e):
@@ -283,20 +290,35 @@ def _rollup(rows):
             else:
                 einv_pending += amt
                 einv_pending_n += 1
+                # Hóa đơn chưa xuất HĐĐT CŨ NHẤT. Tiền và số lượng nói "to bao
+                # nhiêu"; ngày này nói "đọng bao lâu" — và đọng lâu mới là thứ
+                # quyết định làm chuỗi nào trước.
+                if einv_pending_oldest is None or (posting and posting < einv_pending_oldest):
+                    einv_pending_oldest = posting
 
         ch = r.get("chain") or ""
         c = by_chain.setdefault(ch, {"chain": ch, "count": 0, "amount": 0.0,
                                      "overdue": 0.0, "unknown_term": 0,
-                                     "einv_issued": 0.0, "einv_pending": 0.0,
-                                     "einv_pending_n": 0})
+                                     "einv_known": False,
+                                     "einv_issued": 0.0, "einv_issued_n": 0,
+                                     "einv_pending": 0.0, "einv_pending_n": 0,
+                                     "einv_pending_oldest": None})
         c["count"] += 1
         c["amount"] += amt
         if has_e is not None:
+            # Cờ đặt THEO TỪNG CHUỖI chứ không dùng chung cờ toàn kênh: chuỗi nào
+            # có dòng thì chuỗi đó biết. Không có cờ riêng thì chuỗi 0 hóa đơn
+            # cũng đội lốt "đã xuất hết" — mà thật ra nó không có gì để nói.
+            c["einv_known"] = True
             if cint(has_e):
                 c["einv_issued"] += amt
+                c["einv_issued_n"] += 1
             else:
                 c["einv_pending"] += amt
                 c["einv_pending_n"] += 1
+                if c["einv_pending_oldest"] is None or (
+                        posting and posting < c["einv_pending_oldest"]):
+                    c["einv_pending_oldest"] = posting
         if r["days_overdue"] is not None and r["days_overdue"] > 0:
             c["overdue"] += amt
         if r["bucket"] == BUCKET_UNKNOWN:
@@ -309,9 +331,11 @@ def _rollup(rows):
         "total": total,
         "total_count": len(rows),
         # Hai vế cộng lại BẰNG `total` theo cấu tạo — cùng vòng lặp, cùng `amt`.
+        "einv_known": einv_known,
         "by_einvoice": ({
             "issued": {"amount": round(einv_issued, 2), "count": einv_issued_n},
-            "pending": {"amount": round(einv_pending, 2), "count": einv_pending_n},
+            "pending": {"amount": round(einv_pending, 2), "count": einv_pending_n,
+                        "oldest": einv_pending_oldest},
         } if einv_known else None),
         "overdue": overdue,
         "overdue_count": overdue_count,
@@ -357,16 +381,48 @@ def _orphan_returns(company, as_of):
 # Method cho portal
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _norm_einvoice(einvoice):
+    einvoice = cstr(einvoice or "").strip() or None
+    if einvoice and einvoice not in ("da", "chua"):
+        frappe.throw(_("Bộ lọc hóa đơn điện tử không hợp lệ: {0}").format(einvoice))
+    return einvoice
+
+
+def _filter_einvoice(rows, einvoice):
+    """Lọc theo trục HÓA ĐƠN ĐIỆN TỬ. Trả về (rows, đã_lọc, biết_hay_không).
+
+    MỘT hàm cho CẢ tổng hợp lẫn danh sách. Hai chỗ tự lọc lấy là con đường tới
+    cảnh đầu trang ghi "còn nợ 4,8 tỷ / 300 HĐ" trong khi bảng dưới liệt kê 65
+    dòng — cùng màn hình, hai tập hóa đơn, không chỗ nào nói ra.
+
+    Site chưa có ô số hóa đơn điện tử nào -> `has_einvoice` là None trên MỌI
+    dòng. Lọc lúc đó là biến "không biết" thành "chưa xuất". Bỏ qua và báo về
+    để màn hình nói được là nó KHÔNG lọc, thay vì im lặng trả nguyên danh sách.
+    """
+    known = any(r.get("has_einvoice") is not None for r in rows)
+    if not einvoice or not known:
+        return rows, False, known
+    want = 1 if einvoice == "da" else 0
+    return [r for r in rows if cint(r.get("has_einvoice")) == want], True, known
+
+
 @frappe.whitelist()
-def get_due_summary(company=None, as_of=None, chain=None, search=None):
+def get_due_summary(company=None, as_of=None, chain=None, search=None, einvoice=None):
     """Tổng hợp công nợ MT đến hạn: theo rổ tuổi nợ và theo chuỗi."""
     guard_mt()
     _require_tables()
     company = _company(company)
     as_of = getdate(as_of or nowdate())
+    einvoice = _norm_einvoice(einvoice)
 
     rows = _enrich(_fetch(company, as_of, chain=chain, search=search), as_of)
+    rows, einv_applied, einv_known = _filter_einvoice(rows, einvoice)
     data = _rollup(rows)
+    data["einvoice"] = einvoice or ""
+    data["einvoice_applied"] = einv_applied
+    # `_rollup` chỉ biết những dòng CÒN LẠI sau khi lọc; hỏi nó "site có ô HĐĐT
+    # không" sau một lượt lọc rỗng thì nó trả lời sai. Lấy từ tập TRƯỚC khi lọc.
+    data["einv_known"] = einv_known
     # Đếm ở ĐÂY chứ không trong `_rollup`: `_rollup` chỉ nhận `rows`, mà phiếu
     # trả hàng rời KHÔNG nằm trong `rows` — chính vì nó không nối vào hóa đơn
     # nào nên nó vắng mặt khỏi mọi màn hình. Đó là lý do phải đếm riêng.
@@ -386,8 +442,15 @@ def get_due_summary(company=None, as_of=None, chain=None, search=None):
 
 @frappe.whitelist()
 def get_due_invoices(company=None, as_of=None, bucket=None, chain=None,
-                     customer=None, search=None, page=1, page_size=50):
-    """Danh sách hóa đơn còn nợ, lọc theo rổ tuổi nợ / chuỗi / khách."""
+                     customer=None, search=None, page=1, page_size=50,
+                     einvoice=None):
+    """Danh sách hóa đơn còn nợ, lọc theo rổ tuổi nợ / chuỗi / khách / trục HĐĐT.
+
+    ⚠ `einvoice` LỌC TRÊN CHÍNH `rows` mà `get_due_summary` đã cộng, chứ không
+    thêm một mệnh đề SQL thứ hai. Đó là điều kiện để con số trên thẻ và danh
+    sách bấm ra là CÙNG MỘT TẬP HÓA ĐƠN — khớp theo cấu tạo, không phải khớp
+    nhờ hai câu SQL viết giống nhau rồi có ngày một câu được sửa.
+    """
     guard_mt()
     _require_tables()
     company = _company(company)
@@ -395,8 +458,13 @@ def get_due_invoices(company=None, as_of=None, bucket=None, chain=None,
     page = max(1, cint(page))
     page_size = min(200, max(10, cint(page_size) or 50))
 
+    einvoice = _norm_einvoice(einvoice)
+
     rows = _enrich(_fetch(company, as_of, chain=chain, customer=customer,
                           search=search), as_of)
+    # Lọc HĐĐT TRƯỚC rổ tuổi nợ, đúng thứ tự `get_due_summary` làm — đảo lại thì
+    # cờ `einv_known` đọc trên một tập đã bị rổ cắt bớt và có thể ra False oan.
+    rows, einv_applied, einv_known = _filter_einvoice(rows, einvoice)
     if bucket and bucket != "tat_ca":
         if bucket not in BUCKET_LABEL:
             frappe.throw(_("Rổ tuổi nợ không hợp lệ: {0}").format(bucket))
@@ -418,6 +486,10 @@ def get_due_invoices(company=None, as_of=None, bucket=None, chain=None,
         "amount": sum(flt(r["remaining"]) for r in rows),
         "bucket": bucket or "tat_ca",
         "bucket_label": BUCKET_LABEL.get(bucket or "", _("Tất cả")),
+        "einvoice": einvoice or "",
+        # Màn hình PHẢI phân biệt "đã lọc" với "xin lọc mà không lọc được".
+        "einvoice_applied": einv_applied,
+        "einv_known": einv_known,
         "as_of": cstr(as_of),
         # KHÔNG cắt bớt dòng nào — cắt là giấu nợ. Chỉ báo "nhiều" để màn hình
         # gợi ý lọc bớt.

@@ -578,7 +578,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-V** Client Script làm mất nhóm nút Create của ERPNext | `080f585` `4c18a50` `4ae5e6c` | `client_script_check` |
 | **MT2-W** đọc THẲNG bảng kê thanh toán PDF của WinCommerce | `8a78341` | `win_pdf_check` · `regression_check` |
 | **MT2-X** hai cuốn sổ công nợ đặt cạnh nhau (sổ ERPNext ↔ đầu HĐĐT) | `8f4dee3` | `two_books_check` |
-| **MT2-Y** vá lỗi cú pháp làm TRẮNG portal + bịt vùng mù của bước kiểm | *(commit này)* | `portal_js_check` |
+| **MT2-Y** vá lỗi cú pháp làm TRẮNG portal + bịt vùng mù của bước kiểm | `4c5299d` | `portal_js_check` |
+| **MT2-Z** hai cuốn sổ tách CHI TIẾT TỪNG CHUỖI + vá lỗi bấm-ra-số-khác | *(commit này)* | `two_books_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -879,6 +880,56 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-Z — hai cuốn sổ, tách chi tiết TỪNG CHUỖI
+
+Kế toán yêu cầu tách con số "hai cuốn sổ" xuống từng chuỗi. Lý do rõ ràng khi
+nghĩ tới việc phải làm: biết *"toàn kênh chưa xuất 375tr"* thì chưa gọi được cho
+ai; biết *"WinCommerce 210tr, đọng từ 15/03"* thì gọi được ngay.
+
+**Vá trước một lỗi thật, do MT2-X gây ra.** Thẻ đếm một tập hóa đơn, bấm vào lại
+ra tập khác:
+
+```
+con số trên thẻ  — mt_debt._fetch    : si.posting_date <= as_of
+                                       (KHÔNG chặn dưới — nợ là SỐ DƯ)
+danh sách bấm ra — mt._invoice_page  : si.posting_date BETWEEN fd AND td
+                                       (mặc định portal: 3 THÁNG GẦN ĐÂY)
+```
+
+Thẻ đếm 65 tờ từ mọi thời kỳ; bấm vào chỉ ra những tờ trong 3 tháng gần nhất.
+Tờ bị giấu chính là tờ **cũ nhất** — thứ nguy hiểm nhất. Phần chênh nay đi màn
+**Công nợ đến hạn**, nơi cả tổng lẫn danh sách đều gọi `mt_debt._fetch`, nên hai
+bên khớp *theo cấu tạo* chứ không nhờ hai câu SQL tình cờ giống nhau.
+
+**Một luật lọc, dùng chung.** `_filter_einvoice` phục vụ cả `get_due_summary` lẫn
+`get_due_invoices`. Hai chỗ tự lọc lấy là con đường tới cảnh đầu trang ghi "còn
+nợ 4,8 tỷ / 300 HĐ" trong khi bảng dưới liệt kê 65 dòng.
+
+**Ba thứ mỗi chuỗi phải nói ra**, vì thiếu cái thứ ba thì chỉ xếp được theo số to
+và luôn bỏ quên khoản nhỏ mà chết lâu:
+
+| | ý nghĩa |
+|---|---|
+| tiền chưa xuất HĐĐT | to bao nhiêu |
+| số tờ (cả hai vế) | bao nhiêu việc |
+| ngày tờ **cũ nhất** | đọng bao lâu → làm chuỗi nào trước |
+
+**Hai chỗ "không biết" bị bịt.**
+
+- `einv_known` theo **từng chuỗi**: chuỗi không có dữ kiện thì nói "chưa tách
+  được", không vẽ 0đ — 0đ đọc thành "đã xuất hết".
+- `mt_hub.get_board` chỉ chạy qua danh sách chuỗi khai sẵn, nên nợ của khách
+  **chưa gán chuỗi** (chưa khai `custom_mt_chain`, hoặc bị gán hai chuỗi nên
+  `_customer_chain_map` cố ý trả None) rơi ra ngoài mọi thẻ. Trước đây nó biến
+  mất câm — màn Công nợ đến hạn có dòng *(chưa gán chuỗi)*, màn bảng chuỗi thì
+  không, hai màn cộng ra hai tổng khác nhau. Nay hiện thành cảnh báo riêng.
+
+Bộ kiểm chạy THẬT (không đọc chữ trong file): dựng hóa đơn cũ hơn 3 tháng rồi
+khẳng định `get_due_summary(einvoice="chua").total == get_due_invoices(...).amount`
+và tờ cũ đó **có** trong danh sách. Đã thử lại bằng bốn lỗi cố ý — khôi phục
+đường bấm cũ, lọc cả khi không biết, bỏ ngày cũ nhất, dùng chung cờ `einv_known`
+— bộ kiểm bắt cả bốn.
 
 ### MT2-Y — lỗi cú pháp làm TRẮNG portal, và bước kiểm đã bỏ sót nó
 

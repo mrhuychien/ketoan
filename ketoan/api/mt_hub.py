@@ -267,13 +267,43 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
             # HAI CUỐN SỔ: ERPNext ghi nợ khi ghi sổ hóa đơn, kế toán theo dõi
             # theo đầu hóa đơn điện tử. Chênh lệch = hàng đã giao, đã ghi sổ,
             # CHƯA xuất HĐĐT — chưa đòi được, và là việc phải xử.
+            #
+            # `debt_einv_known` là cái GIỮ CHO SỐ 0 KHÔNG NÓI DỐI. Site chưa có ô
+            # số HĐĐT thì mọi chuỗi ra 0đ "chưa xuất" — đọc thành "xuất hết rồi",
+            # trong khi sự thật là KHÔNG BIẾT. Có cờ thì màn hình nói được điều đó.
+            "debt_einv_known": bool(d.get("einv_known")),
             "debt_einv": flt(d.get("einv_issued")),
+            "debt_einv_count": cint(d.get("einv_issued_n")),
             "debt_no_einv": flt(d.get("einv_pending")),
             "debt_no_einv_count": cint(d.get("einv_pending_n")),
+            "debt_no_einv_oldest": cstr(d.get("einv_pending_oldest") or "") or None,
         })
 
     # Chuỗi nào nhiều việc nhất lên trước; hết việc thì xếp theo nợ quá hạn.
     out.sort(key=lambda r: (-r["todo"], -r["debt_overdue"], r["chain"]))
+
+    # Nợ của khách MT KHÔNG gán được chuỗi nào.
+    #
+    # `out` chỉ chạy qua MT_CHAINS, nên nhóm chuỗi rỗng — khách chưa khai
+    # `custom_mt_chain` và cũng chưa có bảng kê nào, hoặc khách bị gán HAI chuỗi
+    # nên `_customer_chain_map` cố ý trả None — KHÔNG lọt vào thẻ chuỗi nào.
+    # Trước đây nó biến mất câm khỏi bảng chuỗi (màn Công nợ đến hạn có hiện,
+    # màn này thì không), nên hai màn hình cộng ra hai tổng khác nhau mà không
+    # chỗ nào nói vì sao. Đếm ra và trả về để giao diện hiện được.
+    ua = debt.get("") or {}
+    unassigned = {
+        "amount": flt(ua.get("amount")),
+        "count": cint(ua.get("count")),
+        "overdue": flt(ua.get("overdue")),
+        "debt_no_einv": flt(ua.get("einv_pending")),
+        "debt_no_einv_count": cint(ua.get("einv_pending_n")),
+    }
+
+    # Cờ "biết hay không" ở mức toàn kênh = CÓ chuỗi nào biết không. Không có
+    # chuỗi nào biết -> trả None chứ không trả 0: `sum()` của toàn số 0 vẫn là
+    # một con số, và một con số thì giao diện không phân biệt được với "xuất hết
+    # rồi". Chính chỗ này trước đây làm cái chốt chặn trong `twoBooks` chết cứng.
+    einv_known = any(r["debt_einv_known"] for r in out) or bool(ua.get("einv_known"))
 
     return {
         "company": company,
@@ -283,13 +313,19 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
         "steps": list(STEPS),
         "chains": out,
         "orphan_advices": n_orphan,
+        "unassigned_debt": unassigned,
         "totals": {
             "todo": sum(r["todo"] for r in out),
             "debt": sum(r["debt"] for r in out),
             "debt_overdue": sum(r["debt_overdue"] for r in out),
-            "debt_einv": sum(r["debt_einv"] for r in out),
-            "debt_no_einv": sum(r["debt_no_einv"] for r in out),
-            "debt_no_einv_count": sum(r["debt_no_einv_count"] for r in out),
+            "debt_einv_known": einv_known,
+            "debt_einv": sum(r["debt_einv"] for r in out) if einv_known else None,
+            "debt_einv_count": sum(r["debt_einv_count"] for r in out) if einv_known else None,
+            "debt_no_einv": sum(r["debt_no_einv"] for r in out) if einv_known else None,
+            "debt_no_einv_count": sum(r["debt_no_einv_count"] for r in out) if einv_known else None,
+            "debt_no_einv_oldest": min(
+                (r["debt_no_einv_oldest"] for r in out if r["debt_no_einv_oldest"]),
+                default=None),
             "draft_je": sum(r["draft_je"] for r in out),
         },
         "can_manage": is_chief(),

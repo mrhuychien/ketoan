@@ -163,6 +163,12 @@ export async function render({ container, query }) {
     openOnly: "",
     dueBucket: "tat_ca",
     dueAsOf: "",
+    // Trục HÓA ĐƠN ĐIỆN TỬ trên màn Công nợ đến hạn: "" · "da" · "chua".
+    // Đọc lại được từ URL để cái link kế toán gửi cho nhau còn mở ra đúng
+    // danh sách — bộ lọc chỉ sống trong bộ nhớ là bộ lọc không chia sẻ được.
+    dueEinv: ["da", "chua"].includes(query?.due_einv) ? query.due_einv : "",
+    // Trục HĐĐT trên danh sách hóa đơn (`mt.get_invoices`) — khác màn, khác ô.
+    einvoice: "",
     board: null,
   };
 
@@ -212,6 +218,9 @@ function syncHash(state) {
     p.push(`g=${state.global}`);
     if (state.global === "g-so-du" && state.openName) p.push(`open=${q(state.openName)}`);
   }
+  // Bộ lọc HĐĐT vào URL: nó là thứ kế toán bấm rồi F5, hoặc gửi link cho nhau.
+  // Không mang theo thì F5 ra một danh sách KHÁC mà đầu trang vẫn ghi cùng tiêu đề.
+  if (state.dueEinv) p.push(`due_einv=${state.dueEinv}`);
   history.replaceState(null, "", `#/cong-no-mt?${p.join("&")}`);
 }
 
@@ -272,6 +281,8 @@ function boardShell(state, board) {
     </div>
 
     ${twoBooks(t, board)}
+
+    ${unassignedNote(board)}
 
     ${BASIS_NOTE}
 
@@ -370,21 +381,28 @@ function chainCard(c) {
           ${c.debt_unknown_term
             ? html` · <span style="color:var(--kt-warning)">${c.debt_unknown_term} HĐ chưa khai hạn</span>`
             : ""}
+          ${c.debt_einv_known && c.debt_no_einv
+            ? html`<div style="margin-top:4px">
+                Chưa xuất HĐĐT
+                <b style="color:var(--kt-danger)">${formatVNDShort(c.debt_no_einv)}</b>
+                · ${c.debt_no_einv_count} HĐ${c.debt_no_einv_oldest
+                  ? html` · từ ${formatDate(c.debt_no_einv_oldest)}`
+                  : ""}
+              </div>`
+            : ""}
         </div>
       </div>
     </div>`;
 }
 
 function bindBoard(container, state) {
-  // Thẻ "Chưa đòi được" mở thẳng danh sách hóa đơn chưa xuất HĐĐT trong rổ
-  // 'chưa thu đủ'. Con số không mở ra được việc phải làm thì chỉ để nhìn.
+  const da = container.querySelector("#tb-open-da");
+  if (da) da.addEventListener("click", () => openDueEinv(container, state, "", "da"));
   const tb = container.querySelector("#tb-open");
-  if (tb) tb.addEventListener("click", () => {
-    state.tab = "thanh-toan";
-    state.bucket = "chua_thanh_toan";
-    state.einvoice = "chua";
-    state.page = 1;
-    loadTab(container, state);
+  if (tb) tb.addEventListener("click", () => openDueEinv(container, state, "", "chua"));
+  container.querySelectorAll("tr.tb-chain").forEach((tr) => {
+    tr.addEventListener("click", () =>
+      openDueEinv(container, state, tr.dataset.chain, "chua"));
   });
 
   bindDates(container, state);
@@ -411,6 +429,43 @@ function bindBoard(container, state) {
     });
   });
   bindSetup(container, state);
+}
+
+// Mở danh sách hóa đơn đứng sau một con số của thẻ "hai cuốn sổ".
+//
+// ⚠ ĐI TỚI MÀN "CÔNG NỢ ĐẾN HẠN", KHÔNG PHẢI DANH SÁCH HÓA ĐƠN.
+//
+// Bản đầu (MT2-X) mở rổ 'chưa thu đủ' của `mt.get_invoices`, và điều đó SAI:
+//
+//   · con số trên thẻ  — `mt_debt._fetch`   : si.posting_date <= as_of
+//                                             (KHÔNG chặn dưới — nợ là SỐ DƯ)
+//   · danh sách bấm ra — `mt._invoice_page` : si.posting_date BETWEEN fd AND td
+//                                             (mặc định của portal: 3 THÁNG GẦN ĐÂY)
+//
+// Thẻ đếm 65 hóa đơn từ mọi thời kỳ, bấm vào chỉ ra những tờ trong 3 tháng gần
+// nhất. Hóa đơn cũ — đúng thứ đọng lâu nhất, nguy hiểm nhất — chính là thứ bị
+// giấu. Số trên thẻ và danh sách bấm ra không bao giờ bằng nhau.
+//
+// Màn "Công nợ đến hạn" gọi CHÍNH `mt_debt._fetch` cho cả tổng lẫn danh sách,
+// nên hai bên khớp THEO CẤU TẠO chứ không nhờ hai câu SQL tình cờ giống nhau.
+function openDueEinv(container, state, chain, mode) {
+  state.dueEinv = mode;
+  state.dueBucket = "tat_ca";
+  state.page = 1;
+  if (chain) {
+    state.chain = chain;
+    state.view = "chuoi";
+    state.step = "cong-no";
+    state.customer = "";
+    state.search = "";
+  } else {
+    state.view = "toan-kenh";
+    state.global = "g-cong-no";
+    state.chain = "";
+    state.dueChain = "";
+  }
+  syncHash(state);
+  paint(container, state);
 }
 
 // Các màn thiết lập đều là modal — không đổi tầng, nên không paint lại.
@@ -467,7 +522,11 @@ function chainShell(state, board) {
         </div>
         <div class="kt-sub">
           ${c.todo ? `${c.todo} việc đang chờ` : "Không còn việc nào trong khoảng đang xem"} ·
-          còn nợ ${formatVNDShort(c.debt)}${c.debt_overdue ? ` · quá hạn ${formatVNDShort(c.debt_overdue)}` : ""}
+          còn nợ ${formatVNDShort(c.debt)}${c.debt_overdue ? ` · quá hạn ${formatVNDShort(c.debt_overdue)}` : ""}${
+            c.debt_einv_known && c.debt_no_einv
+              ? html` · <span style="color:var(--kt-danger)">chưa xuất HĐĐT
+                  ${formatVNDShort(c.debt_no_einv)} / ${c.debt_no_einv_count} HĐ</span>`
+              : ""}
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -729,12 +788,37 @@ async function loadTab(container, state) {
 // có ngày hai màn lệch nhau mà không ai biết tin cái nào. Đây là MỘT con số
 // được bổ đôi — hai vế luôn cộng lại bằng "Chuỗi còn nợ" ở trên.
 //
-// Vế "chưa xuất HĐĐT" bấm vào MỞ ĐƯỢC danh sách: thấy một con số mà không
-// mở ra được việc phải làm thì con số đó chỉ để nhìn.
+// TÁCH THEO CHUỖI vì việc đi đòi làm theo chuỗi, không làm trên số gộp: biết
+// "toàn kênh chưa xuất 375tr" thì chưa gọi cho ai được, biết "WinCommerce
+// 210tr, đọng từ tháng 3" thì gọi được ngay.
+//
+// Mọi con số ở đây bấm vào MỞ ĐƯỢC danh sách đúng tập hóa đơn đã đếm — xem chú
+// thích của `openDueEinv`.
 function twoBooks(t, board) {
-  if (t.debt_no_einv === undefined || t.debt_no_einv === null) return "";
+  // "Chưa biết" KHÔNG được hiển thị thành 0. Site chưa có ô số hóa đơn điện tử
+  // nào thì mọi phép chia đều vô nghĩa; hiện "0đ chưa xuất" là nói với kế toán
+  // rằng đã xuất hết, mà sự thật là không có gì để mà biết.
+  if (!t.debt_einv_known) {
+    return html`
+      <div class="kt-card kt-mb"><div class="kt-card-body kt-sub">
+        <i class="fas fa-circle-question"></i>
+        Chưa tách được công nợ theo <b>đầu hóa đơn điện tử</b>: site chưa có ô số HĐĐT
+        (<code>custom_misa_inv_no</code> hoặc <code>vn_einvoice_number</code>) trên Sales Invoice.
+        Chạy <code>bench migrate</code> rồi con số sẽ tự hiện — không phải "đã xuất hết".
+      </div></div>`;
+  }
+
   const chua = t.debt_no_einv || 0;
   const roi = t.debt_einv || 0;
+
+  // Chuỗi nào còn nợ chưa xuất HĐĐT nhiều nhất lên trước. Chuỗi hết sạch xếp
+  // cuối nhưng VẪN hiện — biến mất khỏi bảng thì không phân biệt được với
+  // "chuỗi này chưa bao giờ có dữ liệu".
+  const rows = (board.chains || [])
+    .filter((c) => c.debt_einv_known || c.debt)
+    .sort((a, b) => (b.debt_no_einv || 0) - (a.debt_no_einv || 0)
+                    || (b.debt || 0) - (a.debt || 0));
+
   return html`
     <div class="kt-card kt-mb"><div class="kt-card-body">
       <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px">
@@ -742,23 +826,96 @@ function twoBooks(t, board) {
         <span class="kt-sub">cộng lại đúng bằng ${formatVND(t.debt)} ở trên</span>
       </div>
       <div class="kt-grid-2">
-        <div class="kt-stat">
+        <div class="kt-stat is-link" id="tb-open-da" style="cursor:pointer">
           <div class="kt-stat-label"><i class="fas fa-file-invoice"></i> Đòi được — đã xuất HĐĐT</div>
           <div class="kt-stat-value pos">${formatVNDShort(roi)}</div>
-          <div class="kt-stat-sub">${formatVND(roi)} · đây là cột kế toán theo dõi trên Excel</div>
+          <div class="kt-stat-sub">${t.debt_einv_count || 0} hóa đơn · ${formatVND(roi)}
+            · đây là cột kế toán theo dõi trên Excel</div>
         </div>
         <div class="kt-stat is-link" id="tb-open" style="cursor:pointer">
           <div class="kt-stat-label"><i class="fas fa-triangle-exclamation"></i> Chưa đòi được — CHƯA xuất HĐĐT</div>
           <div class="kt-stat-value ${chua ? "neg" : ""}">${formatVNDShort(chua)}</div>
-          <div class="kt-stat-sub">${t.debt_no_einv_count || 0} hóa đơn · ${formatVND(chua)}${chua ? " — bấm để mở danh sách" : ""}</div>
+          <div class="kt-stat-sub">${t.debt_no_einv_count || 0} hóa đơn · ${formatVND(chua)}${
+            t.debt_no_einv_oldest
+              ? html` · cũ nhất <b>${formatDate(t.debt_no_einv_oldest)}</b>`
+              : ""}${chua ? " — bấm để mở danh sách" : ""}</div>
         </div>
       </div>
+
+      ${rows.length
+        ? html`<div class="kt-table-wrap" style="margin-top:12px"><table class="kt-table">
+            <thead><tr>
+              <th class="kt-col-mid">Chuỗi</th>
+              <th class="num">Còn nợ</th>
+              <th class="num">Đòi được<div class="kt-sub">đã xuất HĐĐT</div></th>
+              <th class="num">Chưa đòi được<div class="kt-sub">chưa xuất HĐĐT</div></th>
+            </tr></thead>
+            <tbody>${rows.map((c) => twoBooksRow(c))}</tbody>
+          </table></div>`
+        : ""}
+
       <div class="kt-sub" style="margin-top:10px">
         Sổ ERPNext ghi nợ ngay khi hóa đơn được ghi sổ. Siêu thị chỉ trả cho hóa đơn
         <b>đã phát hành</b>, nên phần chưa xuất HĐĐT tuy đã là doanh thu nhưng chưa đòi
         được. Chênh lệch này không phải sai sót — nó là <b>việc phải làm</b>: xuất nốt hóa đơn.
       </div>
     </div></div>`;
+}
+
+// Một dòng của bảng tách theo chuỗi.
+//
+// Ô "chưa đòi được" mang cả ba thứ quyết định thứ tự làm: BAO NHIÊU TIỀN, BAO
+// NHIÊU TỜ, và ĐỌNG TỪ BAO GIỜ. Ngày cũ nhất là thứ hay bị bỏ quên nhất mà lại
+// nói nhiều nhất — 2 triệu đọng từ tháng 3 nguy hơn 20 triệu của tuần trước.
+function twoBooksRow(c) {
+  const chua = c.debt_no_einv || 0;
+  const roi = c.debt_einv || 0;
+  if (!c.debt_einv_known) {
+    return html`<tr>
+      <td class="kt-col-mid">${c.chain}</td>
+      <td class="num">${formatVND(c.debt)}</td>
+      <td class="num kt-sub" colspan="2">chưa có hóa đơn nào còn nợ để tách</td>
+    </tr>`;
+  }
+  return html`<tr class="tb-chain" data-chain="${c.chain}" style="cursor:pointer"
+        title="bấm để mở danh sách hóa đơn chưa xuất HĐĐT của ${c.chain}">
+    <td class="kt-col-mid">${c.chain}</td>
+    <td class="num">${formatVND(c.debt)}</td>
+    <td class="num"><span style="color:var(--kt-success)">${formatVND(roi)}</span>
+      <div class="kt-sub">${c.debt_einv_count || 0} HĐ</div></td>
+    <td class="num">${chua
+      ? html`<b style="color:var(--kt-danger)">${formatVND(chua)}</b>
+          <div class="kt-sub">${c.debt_no_einv_count || 0} HĐ${
+            c.debt_no_einv_oldest ? html` · từ ${formatDate(c.debt_no_einv_oldest)}` : ""}</div>`
+      : html`<span class="kt-sub">—</span>`}</td>
+  </tr>`;
+}
+
+// Nợ của khách MT chưa gán được chuỗi nào — KHÔNG nằm trong thẻ chuỗi nào.
+//
+// `mt_hub.get_board` chỉ chạy qua danh sách chuỗi khai sẵn, nên khách chưa khai
+// `custom_mt_chain` (hoặc bị gán hai chuỗi nên hệ cố ý không chọn bừa) rơi ra
+// ngoài mọi thẻ. Trước đây nó biến mất câm: màn Công nợ đến hạn có hiện dòng
+// "(chưa gán chuỗi)", màn này thì không — hai màn cộng ra hai tổng khác nhau mà
+// không chỗ nào nói vì sao.
+function unassignedNote(board) {
+  const u = board.unassigned_debt || {};
+  if (!u.count) return "";
+  return html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+      <div class="kt-card-body">
+        <div style="font-weight:600;color:var(--kt-warning)">
+          <i class="fas fa-user-slash"></i>
+          ${u.count} hóa đơn · ${formatVND(u.amount)} thuộc khách CHƯA GÁN CHUỖI
+        </div>
+        <div class="kt-sub" style="margin-top:6px">
+          Số này <b>không</b> nằm trong bảng chuỗi bên dưới, cũng không nằm trong
+          ${formatVND((board.totals || {}).debt)} ở trên — vì hệ thống chưa biết xếp nó vào
+          chuỗi nào. Bấm <b>Gán chuỗi cho khách</b> ở cuối trang, hoặc mở
+          <a href="#/cong-no-mt?g=g-cong-no">Công nợ đến hạn toàn kênh</a> xem dòng
+          <i>(chưa gán chuỗi)</i>.
+        </div>
+      </div></div>`;
 }
 
 
@@ -3777,13 +3934,75 @@ async function renderWinDetail(container, state, modal, name) {
 const dueChainOf = (state) =>
   (state.view === "chuoi" ? state.chain : state.dueChain) || undefined;
 
+// Trục HÓA ĐƠN ĐIỆN TỬ trên màn Công nợ đến hạn.
+//
+// Bộ lọc này áp cho CẢ tổng hợp lẫn danh sách (`get_due_summary` và
+// `get_due_invoices` gọi chung `_filter_einvoice`), nên mọi con số trên màn —
+// kể cả "Còn nợ" ở đầu trang và các rổ tuổi nợ — đều nói về đúng tập đang xem.
+// Vì thế phải NÓI RA là đang lọc: một màn hình bị lọc ngầm là cách chắc chắn
+// nhất để kế toán chép nhầm một con số vào báo cáo.
+function dueEinvBar(state, sum, list) {
+  const cur = state.dueEinv || "";
+  const asked = !!cur;
+  const applied = !!(list && list.einvoice_applied);
+
+  if (asked && !applied) {
+    return html`
+      <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)">
+        <div class="kt-card-body">
+          <div style="font-weight:600;color:var(--kt-danger)">
+            <i class="fas fa-filter-circle-xmark"></i> KHÔNG lọc được theo hóa đơn điện tử
+          </div>
+          <div class="kt-sub" style="margin-top:6px">
+            Site chưa có ô số HĐĐT trên Sales Invoice nên không biết tờ nào đã xuất.
+            Danh sách dưới đây là <b>toàn bộ</b> hóa đơn còn nợ, không phải phần đã lọc.
+            <button class="kt-btn kt-btn--outline kt-btn--sm" id="dd-einv-clear"
+                    style="margin-left:8px">Bỏ lọc</button>
+          </div>
+        </div></div>`;
+  }
+  if (!sum.einv_known) return "";
+
+  const be = sum.by_einvoice || {};
+  const issued = be.issued || {};
+  const pending = be.pending || {};
+  return html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span class="kt-sub">Theo đầu hóa đơn điện tử:</span>
+        <button class="kt-btn kt-btn--sm ${cur ? "kt-btn--outline" : ""}" data-einv="">Tất cả</button>
+        <button class="kt-btn kt-btn--sm ${cur === "da" ? "" : "kt-btn--outline"}" data-einv="da">
+          Đã xuất — đòi được</button>
+        <button class="kt-btn kt-btn--sm ${cur === "chua" ? "" : "kt-btn--outline"}" data-einv="chua">
+          Chưa xuất — chưa đòi được</button>
+      </div>
+      ${cur
+        ? html`<div class="kt-sub" style="margin-top:8px;color:var(--kt-warning)">
+            <i class="fas fa-filter"></i>
+            Đang lọc: chỉ hóa đơn <b>${cur === "chua" ? "CHƯA" : "ĐÃ"} xuất hóa đơn điện tử</b>.
+            Mọi con số trên màn này — kể cả <b>Còn nợ</b> ở đầu trang và các rổ tuổi nợ —
+            đều là của riêng phần đang lọc.
+          </div>`
+        : html`<div class="kt-sub" style="margin-top:8px">
+            Đòi được <b style="color:var(--kt-success)">${formatVND(issued.amount || 0)}</b>
+            / ${issued.count || 0} HĐ ·
+            chưa đòi được <b style="color:var(--kt-danger)">${formatVND(pending.amount || 0)}</b>
+            / ${pending.count || 0} HĐ${pending.oldest
+              ? html` · tờ cũ nhất ${formatDate(pending.oldest)}`
+              : ""}.
+            Hai vế cộng lại đúng bằng ${formatVND(sum.total)} ở trên.
+          </div>`}
+    </div></div>`;
+}
+
 async function loadDueDebt(container, state) {
   const body = container.querySelector("#mt-body");
   let sum;
   try {
     sum = await api.mtDueSummary({ as_of: state.dueAsOf || undefined,
                                    chain: dueChainOf(state),
-                                   search: state.search || undefined });
+                                   search: state.search || undefined,
+                                   einvoice: state.dueEinv || undefined });
   } catch (e) {
     setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
     return;
@@ -3797,6 +4016,7 @@ async function loadDueDebt(container, state) {
       as_of: state.dueAsOf, chain: dueChainOf(state),
       search: state.search || undefined,
       bucket: state.dueBucket, page: state.page, page_size: 50,
+      einvoice: state.dueEinv || undefined,
     });
   } catch (e) {
     setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
@@ -3848,6 +4068,8 @@ async function loadDueDebt(container, state) {
         : ""}
     </div></div>
 
+    ${dueEinvBar(state, sum, list)}
+
     <div class="kt-card kt-mb"><div class="kt-card-body">
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="kt-btn kt-btn--sm ${state.dueBucket === "tat_ca" ? "" : "kt-btn--outline"}"
@@ -3863,15 +4085,30 @@ async function loadDueDebt(container, state) {
     ${(sum.chains || []).length > 1
       ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
           <div class="kt-table-wrap"><table class="kt-table">
-            <thead><tr><th>Chuỗi</th><th class="num">Số HĐ</th>
+            <thead><tr><th class="kt-col-mid">Chuỗi</th><th class="num">Số HĐ</th>
               <th class="num">Còn nợ</th><th class="num">Trong đó quá hạn</th>
+              ${sum.einv_known
+                ? html`<th class="num">Đòi được<div class="kt-sub">đã xuất HĐĐT</div></th>
+                       <th class="num">Chưa đòi được<div class="kt-sub">chưa xuất HĐĐT</div></th>`
+                : ""}
               <th class="num">HĐ chưa khai hạn</th></tr></thead>
             <tbody>${sum.chains.map((c) => html`<tr class="dd-chain" data-chain="${c.chain}"
                   style="cursor:pointer" title="bấm để chỉ xem chuỗi này">
-              <td>${c.chain || html`<span class="kt-sub">(chưa gán chuỗi)</span>`}</td>
+              <td class="kt-col-mid">${c.chain || html`<span class="kt-sub">(chưa gán chuỗi)</span>`}</td>
               <td class="num">${c.count}</td>
               <td class="num">${formatVND(c.amount)}</td>
               <td class="num">${c.overdue ? html`<b style="color:var(--kt-danger)">${formatVND(c.overdue)}</b>` : "—"}</td>
+              ${sum.einv_known
+                ? html`<td class="num">${c.einv_known
+                        ? html`<span style="color:var(--kt-success)">${formatVND(c.einv_issued)}</span>
+                               <div class="kt-sub">${c.einv_issued_n || 0} HĐ</div>`
+                        : html`<span class="kt-sub">—</span>`}</td>
+                       <td class="num">${c.einv_known && c.einv_pending
+                        ? html`<b style="color:var(--kt-danger)">${formatVND(c.einv_pending)}</b>
+                               <div class="kt-sub">${c.einv_pending_n || 0} HĐ${
+                                 c.einv_pending_oldest ? html` · từ ${formatDate(c.einv_pending_oldest)}` : ""}</div>`
+                        : html`<span class="kt-sub">—</span>`}</td>`
+                : ""}
               <td class="num">${c.unknown_term || "—"}</td>
             </tr>`)}</tbody>
           </table></div>
@@ -3928,6 +4165,16 @@ async function loadDueDebt(container, state) {
     b.addEventListener("click", () => {
       state.dueBucket = b.dataset.bucket; state.page = 1; loadTab(container, state);
     });
+  });
+  container.querySelectorAll("button[data-einv]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.dueEinv = b.dataset.einv; state.page = 1;
+      syncHash(state); loadTab(container, state);
+    });
+  });
+  const ec = container.querySelector("#dd-einv-clear");
+  if (ec) ec.addEventListener("click", () => {
+    state.dueEinv = ""; state.page = 1; syncHash(state); loadTab(container, state);
   });
   const cc = container.querySelector("#dd-clear-chain");
   if (cc) cc.addEventListener("click", () => {

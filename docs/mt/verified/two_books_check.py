@@ -199,20 +199,166 @@ def main():
           f"{'' if ok else '— ' + ', '.join(stray or []) + f' / mt.py x{n_mt}'}")
     bad += not ok
 
-    # ── 7. Giao diện: bày hai số, và bấm được vào phần chênh ─────────────
+    # ── 7. TÁCH THEO TỪNG CHUỖI — dữ kiện phải đủ để XẾP THỨ TỰ LÀM ──────
+    #
+    # Tiền và số tờ nói "to bao nhiêu". Ngày tờ cũ nhất nói "đọng bao lâu", và
+    # đọng lâu mới là thứ quyết định gọi chuỗi nào trước. Thiếu nó thì bảng chỉ
+    # xếp được theo số to, tức là luôn bỏ quên khoản nhỏ mà chết lâu.
+    print("-" * 82)
+    rows = [dict(row(100, 1, "WinCommerce"), bucket=md.BUCKET_UNKNOWN,
+                 posting_date="2026-08-01"),
+            dict(row(250, 0, "WinCommerce"), bucket=md.BUCKET_UNKNOWN,
+                 posting_date="2026-03-15"),
+            dict(row(70, 0, "WinCommerce"), bucket=md.BUCKET_UNKNOWN,
+                 posting_date="2026-07-20"),
+            dict(row(60, 1, "LOTTE"), bucket=md.BUCKET_UNKNOWN,
+                 posting_date="2026-06-01")]
+    res = md._rollup(rows)
+    by = {c["chain"]: c for c in res["chains"]}
+
+    ok = by["WinCommerce"]["einv_issued_n"] == 1 and by["WinCommerce"]["einv_pending_n"] == 2
+    print(f"  {'✅' if ok else '❌'} mỗi chuỗi đếm CẢ HAI vế (Win: 1 đã xuất / 2 chưa xuất) — "
+          f"chỉ đếm vế chưa xuất thì không nói được 'còn bao nhiêu phần trăm'")
+    bad += not ok
+
+    ok = by["WinCommerce"]["einv_pending_oldest"] == "2026-03-15"
+    print(f"  {'✅' if ok else '❌'} tờ chưa xuất CŨ NHẤT của chuỗi = 2026-03-15 "
+          f"(không phải tờ mới hơn, cũng không phải tờ đã xuất)")
+    bad += not ok
+
+    ok = res["by_einvoice"]["pending"]["oldest"] == "2026-03-15"
+    print(f"  {'✅' if ok else '❌'} mức toàn kênh lấy tờ cũ nhất của MỌI chuỗi")
+    bad += not ok
+
+    ok = by["LOTTE"]["einv_pending_oldest"] is None and by["LOTTE"]["einv_pending"] == 0
+    print(f"  {'✅' if ok else '❌'} chuỗi xuất hết -> không bịa ra ngày 'cũ nhất'")
+    bad += not ok
+
+    # Cờ "biết hay không" ĐẶT THEO TỪNG CHUỖI.
+    mixed = [dict(row(100, None, "AEON"), bucket=md.BUCKET_UNKNOWN, posting_date="2026-01-01"),
+             dict(row(200, 0, "Emart"), bucket=md.BUCKET_UNKNOWN, posting_date="2026-01-01")]
+    r2 = {c["chain"]: c for c in md._rollup(mixed)["chains"]}
+    ok = r2["AEON"]["einv_known"] is False and r2["Emart"]["einv_known"] is True
+    print(f"  {'✅' if ok else '❌'} chuỗi không có dữ kiện HĐĐT -> `einv_known` False, để giao "
+          f"diện nói 'chưa biết' thay vì vẽ 0đ (0đ đọc thành 'đã xuất hết')")
+    bad += not ok
+
+    # ── 8. BỘ LỌC: một luật cho CẢ tổng hợp lẫn danh sách ────────────────
+    print("-" * 82)
+    ok = md._filter_einvoice([{"has_einvoice": None}], "chua") == ([{"has_einvoice": None}], False, False)
+    print(f"  {'✅' if ok else '❌'} site không có ô HĐĐT -> KHÔNG lọc, và báo về `applied=False`. "
+          f"Lọc lúc đó là biến 'không biết' thành 'chưa xuất'")
+    bad += not ok
+
+    keep, applied, known = md._filter_einvoice(
+        [{"has_einvoice": 1}, {"has_einvoice": 0}], "chua")
+    ok = applied and known and len(keep) == 1 and keep[0]["has_einvoice"] == 0
+    print(f"  {'✅' if ok else '❌'} có dữ kiện -> lọc thật, giữ đúng vế được hỏi")
+    bad += not ok
+
+    try:
+        md._norm_einvoice("bịa")
+        ok = False
+    except Exception:
+        ok = True
+    print(f"  {'✅' if ok else '❌'} giá trị lọc lạ -> CHẶN ở cả tầng công nợ, không riêng "
+          f"`mt.get_invoices`")
+    bad += not ok
+
+    # ── 9. CHỐT CHẶN LỚN NHẤT: con số trên thẻ = danh sách bấm ra ────────
+    #
+    # Lỗi thật đã xảy ra (MT2-X): thẻ đếm bằng `mt_debt._fetch` (posting_date
+    # <= as_of, KHÔNG chặn dưới — nợ là SỐ DƯ) còn danh sách bấm ra dùng
+    # `mt._invoice_page` (posting_date BETWEEN fd AND td, mặc định portal là 3
+    # THÁNG GẦN ĐÂY). Thẻ nói 65 tờ, bấm vào ra ít hơn, và tờ bị giấu chính là
+    # tờ cũ nhất — thứ nguy hiểm nhất.
+    #
+    # Đây là phép kiểm CHẠY THẬT, không phải đọc chữ trong file.
+    print("-" * 82)
+    frappe.get_roles = lambda *a, **kw: ["Ke Toan Truong"]
+    frappe.db.table_exists = lambda dt: True
+    md._company = lambda company=None: "HGC"
+    md._orphan_returns = lambda company, as_of: {"orphan_return_count": 0,
+                                                 "orphan_return_amount": 0.0}
+    AS_OF = "2026-08-28"
+
+    def _r(name, amount, has_e, posting):
+        return {"name": name, "customer": "K", "customer_name": "K",
+                "posting_date": posting, "due_date": None, "grand_total": amount,
+                "chain": "WinCommerce", "credit_days": 0, "paid": 0.0,
+                "clawed_back": 0.0, "paid_review": 0.0, "last_payment_date": None,
+                "returned": 0.0, "has_einvoice": has_e, "remaining": amount}
+
+    FIXTURE = [
+        _r("SI-CU", 250, 0, "2025-11-02"),      # CŨ HƠN 3 THÁNG — tờ từng bị giấu
+        _r("SI-MOI", 70, 0, "2026-08-01"),
+        _r("SI-DAXUAT", 100, 1, "2026-07-01"),
+    ]
+    md._fetch = lambda company, as_of, chain=None, customer=None, search=None: [
+        dict(r) for r in FIXTURE]
+
+    s = md.get_due_summary(as_of=AS_OF, einvoice="chua")
+    l = md.get_due_invoices(as_of=AS_OF, einvoice="chua", page_size=200)
+    ok = (round(s["total"], 2) == round(l["amount"], 2)
+          and s["total_count"] == l["total"])
+    print(f"  {'✅' if ok else '❌'} lọc 'chưa xuất': tổng hợp {s['total']:,.0f}đ/{s['total_count']}HĐ "
+          f"= danh sách {l['amount']:,.0f}đ/{l['total']}HĐ — đầu trang và bảng dưới CÙNG một tập")
+    bad += not ok
+
+    ok = "SI-CU" in [r["name"] for r in l["rows"]]
+    print(f"  {'✅' if ok else '❌'} hóa đơn cũ hơn 3 tháng VẪN có trong danh sách — chính chỗ "
+          f"này là lỗi đã lọt ra người dùng ở MT2-X")
+    bad += not ok
+
+    ok = [r["name"] for r in l["rows"]] == ["SI-CU", "SI-MOI"]
+    print(f"  {'✅' if ok else '❌'} và chỉ đúng hai tờ chưa xuất, không lẫn tờ đã xuất")
+    bad += not ok
+
+    s_all = md.get_due_summary(as_of=AS_OF)
+    ok = round(s_all["total"], 2) == 420.0 and round(s["total"], 2) == 320.0
+    print(f"  {'✅' if ok else '❌'} bỏ lọc thì tổng quay về đủ ({s_all['total']:,.0f}đ) — "
+          f"bộ lọc không dính lại")
+    bad += not ok
+
+    # Vì sao KHÔNG được quay lại dùng `mt.get_invoices` cho phần chênh này.
+    mtsrc2 = open(os.path.join(rc.REPO, "ketoan/api/mt.py"), encoding="utf-8").read()
+    pg2 = mtsrc2.split("def _invoice_page")[1].split("\ndef ")[0]
+    fetch_src = open(os.path.join(rc.REPO, "ketoan/api/mt_debt.py"),
+                     encoding="utf-8").read().split("def _fetch")[1].split("\ndef ")[0]
+    ok = ("posting_date BETWEEN" in pg2) and ("posting_date BETWEEN" not in fetch_src)
+    print(f"  {'✅' if ok else '❌'} hai đường VẪN khác nhau về phạm vi ngày "
+          f"(`_invoice_page` chặn khoảng, `_fetch` không) — nên phần chênh phải đi màn công nợ")
+    bad += not ok
+
+    # ── 10. Giao diện ───────────────────────────────────────────────────
     print("-" * 82)
     js = open(os.path.join(rc.REPO, "ketoan/public/ketoan/views/mt.js"), encoding="utf-8").read()
     ok = "twoBooks" in js and "debt_no_einv" in js
     print(f"  {'✅' if ok else '❌'} bảng điều khiển MT bày HAI số cạnh nhau")
     bad += not ok
 
-    ok = 'id="tb-open"' in js and 'state.einvoice = "chua"' in js
-    print(f"  {'✅' if ok else '❌'} bấm vào phần chênh MỞ ĐƯỢC danh sách — con số không mở ra "
-          f"được việc phải làm thì chỉ để nhìn")
+    ok = "twoBooksRow" in js and "debt_einv_count" in js and "debt_no_einv_oldest" in js
+    print(f"  {'✅' if ok else '❌'} và tách CHI TIẾT THEO TỪNG CHUỖI, kèm số tờ và ngày tờ cũ nhất")
     bad += not ok
 
-    ok = 'id="einv-clear"' in js and "Đang lọc:" in js
-    print(f"  {'✅' if ok else '❌'} khi đang lọc thì NÓI RA và tắt được ngay tại chỗ")
+    seg = js.split("function openDueEinv")[1].split("\nfunction ")[0]
+    ok = ('"cong-no"' in seg and '"g-cong-no"' in seg
+          and "state.bucket" not in seg and "state.einvoice" not in seg)
+    print(f"  {'✅' if ok else '❌'} bấm vào phần chênh đi màn CÔNG NỢ ĐẾN HẠN (cùng hàm với con "
+          f"số), KHÔNG đi danh sách hóa đơn bị chặn khoảng ngày")
+    bad += not ok
+
+    ok = 'data-einv="chua"' in js and "Đang lọc:" in js and 'id="dd-einv-clear"' in js
+    print(f"  {'✅' if ok else '❌'} màn công nợ nói RA là đang lọc, và tắt được ngay tại chỗ")
+    bad += not ok
+
+    ok = "if (!t.debt_einv_known)" in js
+    print(f"  {'✅' if ok else '❌'} chưa có ô số HĐĐT -> nói 'chưa tách được', KHÔNG vẽ 0đ")
+    bad += not ok
+
+    ok = "unassignedNote" in js and "unassigned_debt" in js
+    print(f"  {'✅' if ok else '❌'} nợ của khách CHƯA GÁN CHUỖI được hiện ra — nó không thuộc "
+          f"thẻ chuỗi nào nên trước đây biến mất câm khỏi bảng chuỗi")
     bad += not ok
 
     i_bucket = js.index("state.bucket = b.dataset.payview;")
@@ -225,8 +371,8 @@ def main():
     if bad:
         print(f"KẾT QUẢ: HỎNG {bad} phép")
         return 1
-    print("KẾT QUẢ: ĐẠT — hai vế luôn cộng lại đúng tổng, luật 'đã xuất HĐĐT' chỉ có MỘT "
-          "định nghĩa và hỏi cả hai ô, phần chênh bấm vào xử lý được")
+    print("KẾT QUẢ: ĐẠT — hai vế luôn cộng lại đúng tổng ở CẢ mức toàn kênh lẫn từng chuỗi, "
+          "luật 'đã xuất HĐĐT' chỉ có MỘT định nghĩa, và con số bấm vào ra ĐÚNG tập đã đếm")
     return 0
 
 
