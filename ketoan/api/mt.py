@@ -425,6 +425,29 @@ _REMAIN = f"GREATEST({_NET_DUE} - {_NET_PAID}, 0)"
 LEGACY_NO_FIELD = "vn_einvoice_number"
 
 
+# Trạng thái MISA nói tờ hóa đơn ĐIỆN TỬ đó đã CHẾT.
+#
+# Cùng bộ giá trị mà `mt.py` đã dùng cho chỉ mục khớp bảng kê (xem mệnh đề
+# `match_status IN (...)` bên dưới) — MỘT danh sách, không hai.
+MISA_DEAD_STATUS = ("Đã hủy", "Đã thay thế")
+
+
+def misa_dead_expr():
+    """Mệnh đề SQL: SỐ hóa đơn điện tử của chứng từ này đã CHẾT trên MISA chưa.
+
+    Hóa đơn bị hủy hoặc bị thay thế vẫn giữ nguyên số cũ ở `custom_misa_inv_no`,
+    nên `einvoice_issued_expr()` vẫn tính nó là "đã xuất" và nó rơi vào cột
+    "Đòi được". Nhưng siêu thị KHÔNG trả tiền theo một số đã chết — muốn đòi thì
+    phải phát hành lại. Xếp nó vào "đòi được" là hứa một khoản không đòi được.
+
+    Trả None khi site chưa có ô trạng thái — chưa biết thì không bịa.
+    """
+    if not _has_si_field("custom_misa_status"):
+        return None
+    vals = ", ".join("'%s'" % s for s in MISA_DEAD_STATUS)
+    return f"(IFNULL(si.custom_misa_status, '') IN ({vals}))"
+
+
 def einvoice_issued_expr():
     """Mệnh đề SQL: hóa đơn này ĐÃ có số hóa đơn điện tử chưa.
 

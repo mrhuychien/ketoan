@@ -55,6 +55,7 @@ from ketoan.api.mt import (
     _customer_chain_map,
     _customer_in_clause,
     einvoice_issued_expr,
+    misa_dead_expr,
     chain_customers,
     KIND_DEDUCT,
     KIND_PAYMENT,
@@ -169,6 +170,7 @@ def _fetch(company, as_of, chain=None, customer=None, search=None):
     # Trục HAI CUỐN SỔ. Định nghĩa nằm ở `mt.einvoice_issued_expr` — MỘT nơi cho
     # cả app, để màn công nợ và màn tổng quan không bao giờ chia theo hai luật.
     einv = einvoice_issued_expr() or "NULL"
+    dead = misa_dead_expr() or "0"
 
     # Hóa đơn đã tất toán TRƯỚC ngày chuyển giao không còn là nợ. Gọi đúng cái
     # hàm mà `mt.get_overview` gọi — màn hình công nợ và rổ 'chưa thanh toán'
@@ -187,6 +189,7 @@ def _fetch(company, as_of, chain=None, customer=None, search=None):
                p.last_payment_date,
                IFNULL(rt.returned, 0) AS returned,
                {einv} AS has_einvoice,
+               {dead} AS misa_dead,
                GREATEST(ABS(si.grand_total) - IFNULL(rt.returned, 0)
                         - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) AS remaining
         FROM `tabSales Invoice` si
@@ -258,6 +261,11 @@ def _rollup(rows):
     einv_pending_n = 0
     einv_pending_oldest = None
     einv_known = False
+    # Hóa đơn ĐÃ có số HĐĐT nhưng số đó đã HỦY / BỊ THAY THẾ trên MISA. Vẫn nằm
+    # trong vế "đòi được" vì tiền là thật, nhưng đòi bằng số đã chết thì không
+    # đòi được — phải phát hành lại. Đếm riêng để cảnh báo.
+    einv_dead = 0.0
+    einv_dead_n = 0
 
     for r in rows:
         amt = flt(r["remaining"])
@@ -287,6 +295,13 @@ def _rollup(rows):
             if cint(has_e):
                 einv_issued += amt
                 einv_issued_n += 1
+                # SỐ ĐÃ CHẾT nằm TRONG vế "đòi được", không tách thành vế thứ ba.
+                # Tách ra là hai vế không còn cộng lại bằng tổng, và cái đẳng
+                # thức đó là thứ duy nhất giữ cho thẻ không nói dối. Đây là một
+                # LỜI CẢNH BÁO trên vế đã có, không phải một cột mới.
+                if cint(r.get("misa_dead")):
+                    einv_dead += amt
+                    einv_dead_n += 1
             else:
                 einv_pending += amt
                 einv_pending_n += 1
@@ -302,7 +317,8 @@ def _rollup(rows):
                                      "einv_known": False,
                                      "einv_issued": 0.0, "einv_issued_n": 0,
                                      "einv_pending": 0.0, "einv_pending_n": 0,
-                                     "einv_pending_oldest": None})
+                                     "einv_pending_oldest": None,
+                                     "einv_dead": 0.0, "einv_dead_n": 0})
         c["count"] += 1
         c["amount"] += amt
         if has_e is not None:
@@ -313,6 +329,9 @@ def _rollup(rows):
             if cint(has_e):
                 c["einv_issued"] += amt
                 c["einv_issued_n"] += 1
+                if cint(r.get("misa_dead")):
+                    c["einv_dead"] += amt
+                    c["einv_dead_n"] += 1
             else:
                 c["einv_pending"] += amt
                 c["einv_pending_n"] += 1
@@ -333,7 +352,9 @@ def _rollup(rows):
         # Hai vế cộng lại BẰNG `total` theo cấu tạo — cùng vòng lặp, cùng `amt`.
         "einv_known": einv_known,
         "by_einvoice": ({
-            "issued": {"amount": round(einv_issued, 2), "count": einv_issued_n},
+            "issued": {"amount": round(einv_issued, 2), "count": einv_issued_n,
+                       # Nằm TRONG `issued`, không cộng thêm vào tổng.
+                       "dead_amount": round(einv_dead, 2), "dead_count": einv_dead_n},
             "pending": {"amount": round(einv_pending, 2), "count": einv_pending_n,
                         "oldest": einv_pending_oldest},
         } if einv_known else None),
@@ -388,18 +409,32 @@ def _norm_einvoice(einvoice):
     return einvoice
 
 
-def _filter_einvoice(rows, einvoice):
+def einv_available():
+    """Site CÓ ô số hóa đơn điện tử hay không.
+
+    ⚠ HỎI Ở BIỂU THỨC, KHÔNG SUY TỪ DỮ LIỆU. Cách sai là dò `any(has_einvoice
+    is not None for r in rows)`: nó đúng khi có dòng, nhưng khi KHÔNG CÒN NỢ
+    NÀO thì nó cũng trả False — và màn hình sẽ báo "site chưa có ô số HĐĐT,
+    chạy bench migrate" trong khi sự thật chỉ là công nợ đã sạch.
+
+    Hai chuyện khác hẳn nhau: KHÔNG BIẾT (thiếu ô) và KHÔNG CÓ GÌ (hết nợ).
+    """
+    return einvoice_issued_expr() is not None
+
+
+def _filter_einvoice(rows, einvoice, known=None):
     """Lọc theo trục HÓA ĐƠN ĐIỆN TỬ. Trả về (rows, đã_lọc, biết_hay_không).
 
     MỘT hàm cho CẢ tổng hợp lẫn danh sách. Hai chỗ tự lọc lấy là con đường tới
     cảnh đầu trang ghi "còn nợ 4,8 tỷ / 300 HĐ" trong khi bảng dưới liệt kê 65
     dòng — cùng màn hình, hai tập hóa đơn, không chỗ nào nói ra.
 
-    Site chưa có ô số hóa đơn điện tử nào -> `has_einvoice` là None trên MỌI
-    dòng. Lọc lúc đó là biến "không biết" thành "chưa xuất". Bỏ qua và báo về
-    để màn hình nói được là nó KHÔNG lọc, thay vì im lặng trả nguyên danh sách.
+    Site chưa có ô số hóa đơn điện tử nào -> lọc lúc đó là biến "không biết"
+    thành "chưa xuất". Bỏ qua và báo về để màn hình nói được là nó KHÔNG lọc,
+    thay vì im lặng trả nguyên danh sách.
     """
-    known = any(r.get("has_einvoice") is not None for r in rows)
+    if known is None:
+        known = einv_available()
     if not einvoice or not known:
         return rows, False, known
     want = 1 if einvoice == "da" else 0
@@ -420,8 +455,8 @@ def get_due_summary(company=None, as_of=None, chain=None, search=None, einvoice=
     data = _rollup(rows)
     data["einvoice"] = einvoice or ""
     data["einvoice_applied"] = einv_applied
-    # `_rollup` chỉ biết những dòng CÒN LẠI sau khi lọc; hỏi nó "site có ô HĐĐT
-    # không" sau một lượt lọc rỗng thì nó trả lời sai. Lấy từ tập TRƯỚC khi lọc.
+    # `_rollup` suy cờ này từ DỮ LIỆU nên nó nhầm "hết nợ" thành "thiếu ô".
+    # Đè bằng câu trả lời thật, hỏi ở `einvoice_issued_expr`.
     data["einv_known"] = einv_known
     # Đếm ở ĐÂY chứ không trong `_rollup`: `_rollup` chỉ nhận `rows`, mà phiếu
     # trả hàng rời KHÔNG nằm trong `rows` — chính vì nó không nối vào hóa đơn

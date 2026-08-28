@@ -579,7 +579,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-W** đọc THẲNG bảng kê thanh toán PDF của WinCommerce | `8a78341` | `win_pdf_check` · `regression_check` |
 | **MT2-X** hai cuốn sổ công nợ đặt cạnh nhau (sổ ERPNext ↔ đầu HĐĐT) | `8f4dee3` | `two_books_check` |
 | **MT2-Y** vá lỗi cú pháp làm TRẮNG portal + bịt vùng mù của bước kiểm | `4c5299d` | `portal_js_check` |
-| **MT2-Z** hai cuốn sổ tách CHI TIẾT TỪNG CHUỖI + vá lỗi bấm-ra-số-khác | *(commit này)* | `two_books_check` |
+| **MT2-Z** hai cuốn sổ tách CHI TIẾT TỪNG CHUỖI + vá lỗi bấm-ra-số-khác | `e2c7854` | `two_books_check` |
+| **MT2-Z2** năm lỗi bản soát đối kháng tìm ra ngay trong MT2-Z | *(commit này)* | `two_books_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -880,6 +881,45 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-Z2 — năm lỗi bản soát đối kháng tìm ra ngay trong MT2-Z
+
+Sáu góc nhìn độc lập đọc lại code MT2-Z. Năm phát hiện đứng vững sau khi kiểm
+lại bằng cách chạy thật; tất cả đã vá.
+
+**1. Nút bấm ở MT2-X không phải "ra danh sách khác" — nó CHẾT HẲN.**
+`bindBoard` gọi `loadTab(container, state)`, mà `loadTab` mở đầu bằng
+`querySelector("#mt-body"); if (!body) return;` — và `boardShell` **không hề có**
+`#mt-body` (chỉ `chainShell` và `globalShell` có). Bấm vào không xảy ra gì. Nó
+cũng gán `state.tab`, một ô không tồn tại (đúng tên là `state.step`).
+
+Lỗi lệch khoảng ngày là có thật, nhưng nó chưa bao giờ ra tới màn hình vì nút
+không chạy. Bộ kiểm cũ vẫn cấp ✅ vì nó chỉ dò xem chuỗi `id="tb-open"` có trong
+file hay không. Nay có phép kiểm đóng cả lớp: **không handler nào của bảng chuỗi
+được gọi `loadTab`** — ở tầng đó nó luôn thoát ngay dòng đầu.
+
+**2. "Hết nợ" bị dịch thành "thiếu ô số HĐĐT".** `_rollup` suy cờ `einv_known`
+từ dữ liệu (`any(has_einvoice is not None …)`), nên công nợ sạch → False → màn
+hình đi bảo kế toán chạy `bench migrate` cho một site hoàn toàn ổn. Nay hỏi
+`einvoice_issued_expr()` — đúng nơi định nghĩa luật. **Không biết** và **không
+có gì** là hai chuyện khác hẳn nhau.
+
+**3. Thẻ cộng 100đ, bấm vào ra 1.000đ.** `get_board` chỉ lặp `MT_CHAINS`, nên
+khách chưa gán chuỗi rơi khỏi `totals`; nhưng danh sách bấm ra không lọc chuỗi
+nên gồm cả họ. Nay nhóm đó là **một dòng ngang hàng** trong bảng và được cộng
+vào tổng — các dòng cộng lại đúng bằng con số ghi ngay trên đầu.
+
+**4. Hai ngày "tính đến" khác nhau.** Bảng chuỗi luôn tính đến hôm nay; màn công
+nợ nhớ ngày kế toán chọn lần trước. `openDueEinv` nay xóa `dueAsOf`.
+
+**5. Số HĐĐT đã HỦY / BỊ THAY THẾ vẫn nằm trong "Đòi được".** Hóa đơn bị thay
+thế giữ nguyên số cũ ở `custom_misa_inv_no` nên `einvoice_issued_expr()` vẫn
+tính là đã xuất — nhưng siêu thị không trả theo một số đã chết. Thêm
+`mt.misa_dead_expr()` và đếm riêng, **nằm trong** vế "đòi được** chứ không tách
+thành vế thứ ba: tách là hai vế thôi cộng lại bằng tổng, mà đẳng thức đó là thứ
+duy nhất giữ cho thẻ không nói dối.
+
+Bốn lỗi mới đều được thử lại bằng cách khôi phục đúng lỗi đó — bộ kiểm bắt cả bốn.
 
 ### MT2-Z — hai cuốn sổ, tách chi tiết TỪNG CHUỖI
 

@@ -243,18 +243,84 @@ def main():
           f"diện nói 'chưa biết' thay vì vẽ 0đ (0đ đọc thành 'đã xuất hết')")
     bad += not ok
 
+    # ── 7b. SỐ HĐĐT ĐÃ CHẾT nằm TRONG vế "đòi được", không thành vế thứ ba ──
+    #
+    # Hóa đơn bị hủy / bị thay thế trên MISA vẫn giữ nguyên số cũ, nên
+    # `einvoice_issued_expr()` vẫn tính là "đã xuất" và nó rơi vào cột "Đòi
+    # được". Nhưng siêu thị không trả theo một số đã chết. Đếm riêng để cảnh
+    # báo — KHÔNG tách thành vế thứ ba, vì tách là hai vế thôi cộng lại bằng
+    # tổng, mà đẳng thức đó là thứ duy nhất giữ cho thẻ không nói dối.
+    print("-" * 82)
+    rows = [dict(row(100, 1, "WinCommerce"), bucket=md.BUCKET_UNKNOWN,
+                 posting_date="2026-05-01", misa_dead=1),
+            dict(row(300, 1, "WinCommerce"), bucket=md.BUCKET_UNKNOWN,
+                 posting_date="2026-05-02", misa_dead=0),
+            dict(row(50, 0, "WinCommerce"), bucket=md.BUCKET_UNKNOWN,
+                 posting_date="2026-05-03", misa_dead=0)]
+    res = md._rollup(rows)
+    e = res["by_einvoice"]
+    ok = (round(e["issued"]["amount"], 2) == 400.0
+          and round(e["issued"]["dead_amount"], 2) == 100.0
+          and e["issued"]["dead_count"] == 1)
+    print(f"  {'✅' if ok else '❌'} số đã chết ({e['issued']['dead_amount']:,.0f}đ) nằm TRONG "
+          f"'đòi được' ({e['issued']['amount']:,.0f}đ), không cộng thêm")
+    bad += not ok
+
+    ok = round(e["issued"]["amount"] + e["pending"]["amount"], 2) == round(res["total"], 2)
+    print(f"  {'✅' if ok else '❌'} và hai vế VẪN cộng lại đúng bằng tổng — đẳng thức không bị "
+          f"cảnh báo mới làm hỏng")
+    bad += not ok
+
+    frappe.get_meta = lambda dt: type(
+        "M", (), {"has_field": staticmethod(lambda f: f != "custom_misa_status")})()
+    ok = mt.misa_dead_expr() is None
+    print(f"  {'✅' if ok else '❌'} site chưa có ô trạng thái MISA -> trả None, không bịa ra "
+          f"'số đã chết'")
+    bad += not ok
+    frappe.get_meta = lambda dt: type("M", (), {"has_field": staticmethod(lambda f: True)})()
+
+    dsrc = open(os.path.join(rc.REPO, "ketoan/api/mt_debt.py"), encoding="utf-8").read()
+    ok = "Đã hủy" not in dsrc and "Đã thay thế" not in dsrc
+    print(f"  {'✅' if ok else '❌'} danh sách trạng thái 'đã chết' chỉ khai MỘT nơi (`mt.py`), "
+          f"không chép sang module công nợ")
+    bad += not ok
+
     # ── 8. BỘ LỌC: một luật cho CẢ tổng hợp lẫn danh sách ────────────────
     print("-" * 82)
-    ok = md._filter_einvoice([{"has_einvoice": None}], "chua") == ([{"has_einvoice": None}], False, False)
+    ok = md._filter_einvoice([{"has_einvoice": None}], "chua", known=False) \
+        == ([{"has_einvoice": None}], False, False)
     print(f"  {'✅' if ok else '❌'} site không có ô HĐĐT -> KHÔNG lọc, và báo về `applied=False`. "
           f"Lọc lúc đó là biến 'không biết' thành 'chưa xuất'")
     bad += not ok
 
     keep, applied, known = md._filter_einvoice(
-        [{"has_einvoice": 1}, {"has_einvoice": 0}], "chua")
+        [{"has_einvoice": 1}, {"has_einvoice": 0}], "chua", known=True)
     ok = applied and known and len(keep) == 1 and keep[0]["has_einvoice"] == 0
     print(f"  {'✅' if ok else '❌'} có dữ kiện -> lọc thật, giữ đúng vế được hỏi")
     bad += not ok
+
+    # "KHÔNG BIẾT" (thiếu ô) ≠ "KHÔNG CÓ GÌ" (hết nợ).
+    #
+    # Cách sai — và đã từng nằm trong chính bản này — là suy cờ từ dữ liệu:
+    # `any(has_einvoice is not None for r in rows)`. Công nợ sạch thì nó ra
+    # False, và màn hình đi bảo kế toán chạy `bench migrate` cho một site
+    # hoàn toàn ổn.
+    frappe.get_meta = lambda dt: type("M", (), {"has_field": staticmethod(lambda f: True)})()
+    ok = md.einv_available() is True
+    print(f"  {'✅' if ok else '❌'} có ô số HĐĐT -> `einv_available()` True")
+    bad += not ok
+
+    _, _, known0 = md._filter_einvoice([], "chua")
+    ok = known0 is True
+    print(f"  {'✅' if ok else '❌'} HẾT NỢ (0 dòng) mà site VẪN có ô -> vẫn báo 'biết'. "
+          f"Suy cờ từ dữ liệu là bảo kế toán migrate một site không hỏng")
+    bad += not ok
+
+    frappe.get_meta = lambda dt: type("M", (), {"has_field": staticmethod(lambda f: False)})()
+    ok = md.einv_available() is False
+    print(f"  {'✅' if ok else '❌'} thật sự thiếu ô -> False")
+    bad += not ok
+    frappe.get_meta = lambda dt: type("M", (), {"has_field": staticmethod(lambda f: True)})()
 
     try:
         md._norm_einvoice("bịa")
@@ -330,6 +396,60 @@ def main():
           f"(`_invoice_page` chặn khoảng, `_fetch` không) — nên phần chênh phải đi màn công nợ")
     bad += not ok
 
+    # ── 9b. KHÁCH CHƯA GÁN CHUỖI phải nằm TRONG tổng của bảng chuỗi ──────
+    #
+    # `mt_hub.get_board` chỉ lặp qua MT_CHAINS. Khách chưa khai `custom_mt_chain`
+    # (hoặc bị gán hai chuỗi nên bản đồ cố ý trả None) rơi vào nhóm chuỗi rỗng.
+    # Để nhóm đó ngoài `totals` là hỏng theo kiểu khó thấy nhất: thẻ cộng 100đ,
+    # bấm vào mở công nợ KHÔNG lọc chuỗi nên ra 1.000đ.
+    print("-" * 82)
+    hub = importlib.import_module("ketoan.api.mt_hub")
+    hub._capabilities = lambda: {}
+    hub._company = lambda company=None: "HGC"
+    md._fetch = lambda company, as_of, chain=None, customer=None, search=None: [
+        dict(_r("SI-WIN", 100, 0, "2026-05-01")),
+        dict(_r("SI-LAC", 900, 0, "2026-05-01"), chain=""),
+    ]
+    # `_enrich` gán lại chuỗi bằng bản đồ khách->chuỗi; giả lập đúng một khách
+    # thuộc Win, khách còn lại không thuộc đâu.
+    hub_mt = importlib.import_module("ketoan.api.mt")
+    hub_mt._customer_chain_map = lambda: ({"KWIN": "WinCommerce"}, [])
+    md._customer_chain_map = hub_mt._customer_chain_map
+    md._fetch = lambda company, as_of, chain=None, customer=None, search=None: [
+        dict(_r("SI-WIN", 100, 0, "2026-05-01"), customer="KWIN"),
+        dict(_r("SI-LAC", 900, 0, "2026-05-01"), customer="KLAC"),
+    ]
+    board = hub.get_board()
+    tt = board["totals"]
+    ok = round(tt["debt"], 2) == 1000.0
+    print(f"  {'✅' if ok else '❌'} tổng của bảng chuỗi = {tt['debt']:,.0f}đ, tức CÓ cộng 900đ "
+          f"của khách chưa gán chuỗi (danh sách bấm ra cũng gồm nó)")
+    bad += not ok
+
+    ok = round(tt["debt_no_einv"], 2) == 1000.0 and tt["debt_no_einv_count"] == 2
+    print(f"  {'✅' if ok else '❌'} vế 'chưa xuất HĐĐT' cũng cộng đủ ({tt['debt_no_einv']:,.0f}đ "
+          f"/ {tt['debt_no_einv_count']} HĐ)")
+    bad += not ok
+
+    u = board["unassigned_debt"] or {}
+    ok = bool(u) and round(u["debt"], 2) == 900.0 and u.get("unassigned") is True
+    print(f"  {'✅' if ok else '❌'} và nhóm đó hiện thành MỘT DÒNG riêng để còn đi gán chuỗi")
+    bad += not ok
+
+    rows_sum = round(sum(c["debt"] for c in board["chains"])
+                     + (u.get("debt") or 0), 2)
+    ok = rows_sum == round(tt["debt"], 2)
+    print(f"  {'✅' if ok else '❌'} các dòng của bảng cộng lại ĐÚNG bằng con số ghi ngay trên đầu "
+          f"({rows_sum:,.0f} = {tt['debt']:,.0f})")
+    bad += not ok
+
+    md._fetch = lambda company, as_of, chain=None, customer=None, search=None: []
+    b0 = hub.get_board()
+    ok = b0["totals"]["debt_einv_known"] is True and b0["unassigned_debt"] is None
+    print(f"  {'✅' if ok else '❌'} site SẠCH NỢ mà vẫn có ô HĐĐT -> `debt_einv_known` True "
+          f"(không đi bảo kế toán chạy migrate), và không mọc dòng rỗng")
+    bad += not ok
+
     # ── 10. Giao diện ───────────────────────────────────────────────────
     print("-" * 82)
     js = open(os.path.join(rc.REPO, "ketoan/public/ketoan/views/mt.js"), encoding="utf-8").read()
@@ -356,9 +476,35 @@ def main():
     print(f"  {'✅' if ok else '❌'} chưa có ô số HĐĐT -> nói 'chưa tách được', KHÔNG vẽ 0đ")
     bad += not ok
 
-    ok = "unassignedNote" in js and "unassigned_debt" in js
-    print(f"  {'✅' if ok else '❌'} nợ của khách CHƯA GÁN CHUỖI được hiện ra — nó không thuộc "
-          f"thẻ chuỗi nào nên trước đây biến mất câm khỏi bảng chuỗi")
+    ok = "unassigned_debt" in js and "(chưa gán chuỗi)" in js
+    print(f"  {'✅' if ok else '❌'} nợ của khách CHƯA GÁN CHUỖI hiện thành MỘT DÒNG của bảng — "
+          f"để nó ngoài bảng thì các dòng không cộng lại bằng con số ghi trên đầu")
+    bad += not ok
+
+    ok = "state.dueAsOf" in seg
+    print(f"  {'✅' if ok else '❌'} bấm vào thì XÓA ngày 'tính đến' cũ — bảng chuỗi luôn tính đến "
+          f"hôm nay, màn công nợ thì nhớ ngày kế toán chọn lần trước")
+    bad += not ok
+
+    # ── 11. NÚT CHẾT — cả lớp lỗi mà bộ kiểm CŨ đã cấp ✅ nhầm ───────────
+    #
+    # Bản MT2-X gắn `#tb-open` rồi gọi `loadTab(container, state)`. Nhưng
+    # `loadTab` bắt đầu bằng `querySelector("#mt-body"); if (!body) return;`,
+    # mà `boardShell` KHÔNG hề có `#mt-body` — chỉ `chainShell` và `globalShell`
+    # có. Nút bấm không làm gì cả, và bộ kiểm cũ vẫn ĐẠT vì nó chỉ dò xem chuỗi
+    # `id="tb-open"` có trong file không.
+    #
+    # Ở tầng bảng chuỗi, đổi màn hình PHẢI đi qua `paint()`.
+    print("-" * 82)
+    shell = js.split("function boardShell")[1].split("\n// Một thẻ chuỗi")[0]
+    ok = "mt-body" not in shell
+    print(f"  {'✅' if ok else '❌'} `boardShell` vẫn KHÔNG có `#mt-body` (tiền đề của phép dưới)")
+    bad += not ok
+
+    bindb = js.split("function bindBoard")[1].split("\n// Mở danh sách")[0]
+    ok = "loadTab(" not in bindb and "paint(" in js.split("function openDueEinv")[1][:900]
+    print(f"  {'✅' if ok else '❌'} không handler nào của bảng chuỗi gọi `loadTab` — ở tầng này "
+          f"`loadTab` thoát ngay dòng đầu, tức NÚT CHẾT mà không báo lỗi gì")
     bad += not ok
 
     i_bucket = js.index("state.bucket = b.dataset.payview;")

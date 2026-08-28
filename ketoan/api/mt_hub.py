@@ -219,6 +219,11 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
     for _cus, ch in cus_map.items():
         n_cus[ch] = n_cus.get(ch, 0) + 1
 
+    # "Site CÓ ô số hóa đơn điện tử không" — hỏi ở biểu thức, KHÔNG suy từ dữ
+    # liệu. Suy từ dữ liệu thì công nợ sạch (không dòng nào) cũng ra "chưa có ô",
+    # và màn hình đi bảo kế toán chạy `bench migrate` cho một site hoàn toàn ổn.
+    einv_field = mt_debt.einv_available()
+
     caps = _capabilities()
     out = []
     for label in MT_CHAINS:
@@ -271,9 +276,13 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
             # `debt_einv_known` là cái GIỮ CHO SỐ 0 KHÔNG NÓI DỐI. Site chưa có ô
             # số HĐĐT thì mọi chuỗi ra 0đ "chưa xuất" — đọc thành "xuất hết rồi",
             # trong khi sự thật là KHÔNG BIẾT. Có cờ thì màn hình nói được điều đó.
-            "debt_einv_known": bool(d.get("einv_known")),
+            "debt_einv_known": einv_field,
             "debt_einv": flt(d.get("einv_issued")),
             "debt_einv_count": cint(d.get("einv_issued_n")),
+            # Nằm TRONG `debt_einv`, không cộng thêm: số HĐĐT đã hủy/bị thay thế
+            # trên MISA. Tiền là thật nhưng đòi bằng số đã chết thì không đòi được.
+            "debt_einv_dead": flt(d.get("einv_dead")),
+            "debt_einv_dead_count": cint(d.get("einv_dead_n")),
             "debt_no_einv": flt(d.get("einv_pending")),
             "debt_no_einv_count": cint(d.get("einv_pending_n")),
             "debt_no_einv_oldest": cstr(d.get("einv_pending_oldest") or "") or None,
@@ -282,28 +291,37 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
     # Chuỗi nào nhiều việc nhất lên trước; hết việc thì xếp theo nợ quá hạn.
     out.sort(key=lambda r: (-r["todo"], -r["debt_overdue"], r["chain"]))
 
-    # Nợ của khách MT KHÔNG gán được chuỗi nào.
+    # Nợ của khách MT KHÔNG gán được chuỗi nào — MỘT DÒNG NGANG HÀNG, KHÔNG PHẢI
+    # GHI CHÚ BÊN LỀ.
     #
     # `out` chỉ chạy qua MT_CHAINS, nên nhóm chuỗi rỗng — khách chưa khai
-    # `custom_mt_chain` và cũng chưa có bảng kê nào, hoặc khách bị gán HAI chuỗi
-    # nên `_customer_chain_map` cố ý trả None — KHÔNG lọt vào thẻ chuỗi nào.
-    # Trước đây nó biến mất câm khỏi bảng chuỗi (màn Công nợ đến hạn có hiện,
-    # màn này thì không), nên hai màn hình cộng ra hai tổng khác nhau mà không
-    # chỗ nào nói vì sao. Đếm ra và trả về để giao diện hiện được.
+    # `custom_mt_chain`, hoặc bị gán HAI chuỗi nên `_customer_chain_map` cố ý
+    # trả None — không lọt vào thẻ chuỗi nào.
+    #
+    # Để nó ngoài `totals` là hỏng theo đúng cái kiểu khó thấy nhất: thẻ cộng
+    # 100đ, bấm vào mở danh sách công nợ KHÔNG lọc chuỗi nên ra 1.000đ. Con số
+    # và danh sách phải nói về cùng một tập, nên nhóm này được cộng vào tổng và
+    # hiện thành một dòng riêng trong bảng — đúng như màn Công nợ đến hạn vẫn làm.
     ua = debt.get("") or {}
     unassigned = {
-        "amount": flt(ua.get("amount")),
-        "count": cint(ua.get("count")),
-        "overdue": flt(ua.get("overdue")),
+        "chain": "",
+        "unassigned": True,
+        "debt": flt(ua.get("amount")),
+        "debt_invoices": cint(ua.get("count")),
+        "debt_overdue": flt(ua.get("overdue")),
+        "debt_unknown_term": cint(ua.get("unknown_term")),
+        "debt_einv_known": einv_field,
+        "debt_einv": flt(ua.get("einv_issued")),
+        "debt_einv_count": cint(ua.get("einv_issued_n")),
+        "debt_einv_dead": flt(ua.get("einv_dead")),
+        "debt_einv_dead_count": cint(ua.get("einv_dead_n")),
         "debt_no_einv": flt(ua.get("einv_pending")),
         "debt_no_einv_count": cint(ua.get("einv_pending_n")),
+        "debt_no_einv_oldest": cstr(ua.get("einv_pending_oldest") or "") or None,
     }
-
-    # Cờ "biết hay không" ở mức toàn kênh = CÓ chuỗi nào biết không. Không có
-    # chuỗi nào biết -> trả None chứ không trả 0: `sum()` của toàn số 0 vẫn là
-    # một con số, và một con số thì giao diện không phân biệt được với "xuất hết
-    # rồi". Chính chỗ này trước đây làm cái chốt chặn trong `twoBooks` chết cứng.
-    einv_known = any(r["debt_einv_known"] for r in out) or bool(ua.get("einv_known"))
+    # Chỉ đưa vào phép cộng khi nó THẬT SỰ có tiền. Không thì mọi site sạch sẽ
+    # đều mọc thêm một dòng rỗng chẳng nói gì.
+    totals_rows = out + ([unassigned] if unassigned["debt_invoices"] else [])
 
     return {
         "company": company,
@@ -313,18 +331,21 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
         "steps": list(STEPS),
         "chains": out,
         "orphan_advices": n_orphan,
-        "unassigned_debt": unassigned,
+        "unassigned_debt": unassigned if unassigned["debt_invoices"] else None,
         "totals": {
             "todo": sum(r["todo"] for r in out),
-            "debt": sum(r["debt"] for r in out),
-            "debt_overdue": sum(r["debt_overdue"] for r in out),
-            "debt_einv_known": einv_known,
-            "debt_einv": sum(r["debt_einv"] for r in out) if einv_known else None,
-            "debt_einv_count": sum(r["debt_einv_count"] for r in out) if einv_known else None,
-            "debt_no_einv": sum(r["debt_no_einv"] for r in out) if einv_known else None,
-            "debt_no_einv_count": sum(r["debt_no_einv_count"] for r in out) if einv_known else None,
+            # CỘNG TRÊN `totals_rows`, không phải `out` — xem chú thích ở trên.
+            "debt": sum(r["debt"] for r in totals_rows),
+            "debt_overdue": sum(r["debt_overdue"] for r in totals_rows),
+            "debt_einv_known": einv_field,
+            "debt_einv": sum(r["debt_einv"] for r in totals_rows) if einv_field else None,
+            "debt_einv_count": sum(r["debt_einv_count"] for r in totals_rows) if einv_field else None,
+            "debt_einv_dead": sum(r["debt_einv_dead"] for r in totals_rows) if einv_field else None,
+            "debt_einv_dead_count": sum(r["debt_einv_dead_count"] for r in totals_rows) if einv_field else None,
+            "debt_no_einv": sum(r["debt_no_einv"] for r in totals_rows) if einv_field else None,
+            "debt_no_einv_count": sum(r["debt_no_einv_count"] for r in totals_rows) if einv_field else None,
             "debt_no_einv_oldest": min(
-                (r["debt_no_einv_oldest"] for r in out if r["debt_no_einv_oldest"]),
+                (r["debt_no_einv_oldest"] for r in totals_rows if r["debt_no_einv_oldest"]),
                 default=None),
             "draft_je": sum(r["draft_je"] for r in out),
         },

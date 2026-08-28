@@ -282,8 +282,6 @@ function boardShell(state, board) {
 
     ${twoBooks(t, board)}
 
-    ${unassignedNote(board)}
-
     ${BASIS_NOTE}
 
     ${board.orphan_advices
@@ -452,6 +450,11 @@ function openDueEinv(container, state, chain, mode) {
   state.dueEinv = mode;
   state.dueBucket = "tat_ca";
   state.page = 1;
+  // Bảng chuỗi luôn tính đến HÔM NAY (`mt_hub.get_board` không nhận `as_of` từ
+  // portal). Màn công nợ thì nhớ ngày kế toán đã chọn lần trước. Không xóa nó
+  // ở đây là bấm vào một con số tính đến hôm nay rồi rơi vào danh sách tính đến
+  // một ngày nào đó trong quá khứ — lệch mà không chỗ nào nói.
+  state.dueAsOf = "";
   if (chain) {
     state.chain = chain;
     state.view = "chuoi";
@@ -814,8 +817,11 @@ function twoBooks(t, board) {
   // Chuỗi nào còn nợ chưa xuất HĐĐT nhiều nhất lên trước. Chuỗi hết sạch xếp
   // cuối nhưng VẪN hiện — biến mất khỏi bảng thì không phân biệt được với
   // "chuỗi này chưa bao giờ có dữ liệu".
+  //
+  // Nhóm "chưa gán chuỗi" là MỘT DÒNG NGANG HÀNG, vì `totals` đã cộng nó. Để nó
+  // ra ngoài bảng thì các dòng không cộng lại bằng con số ghi ngay trên đầu.
   const rows = (board.chains || [])
-    .filter((c) => c.debt_einv_known || c.debt)
+    .concat(board.unassigned_debt ? [board.unassigned_debt] : [])
     .sort((a, b) => (b.debt_no_einv || 0) - (a.debt_no_einv || 0)
                     || (b.debt || 0) - (a.debt || 0));
 
@@ -831,6 +837,14 @@ function twoBooks(t, board) {
           <div class="kt-stat-value pos">${formatVNDShort(roi)}</div>
           <div class="kt-stat-sub">${t.debt_einv_count || 0} hóa đơn · ${formatVND(roi)}
             · đây là cột kế toán theo dõi trên Excel</div>
+          ${t.debt_einv_dead_count
+            ? html`<div class="kt-stat-sub" style="color:var(--kt-warning);margin-top:4px">
+                <i class="fas fa-triangle-exclamation"></i>
+                trong đó <b>${t.debt_einv_dead_count} hóa đơn · ${formatVND(t.debt_einv_dead)}</b>
+                mang số HĐĐT đã <b>hủy/bị thay thế</b> trên MISA — siêu thị không trả theo số đã
+                chết, phải phát hành lại mới đòi được
+              </div>`
+            : ""}
         </div>
         <div class="kt-stat is-link" id="tb-open" style="cursor:pointer">
           <div class="kt-stat-label"><i class="fas fa-triangle-exclamation"></i> Chưa đòi được — CHƯA xuất HĐĐT</div>
@@ -870,52 +884,42 @@ function twoBooks(t, board) {
 function twoBooksRow(c) {
   const chua = c.debt_no_einv || 0;
   const roi = c.debt_einv || 0;
-  if (!c.debt_einv_known) {
+
+  // Chuỗi KHÔNG CÒN NỢ khác hẳn chuỗi KHÔNG BIẾT. Trước đây hai cái này dùng
+  // chung một nhánh nên site sạch nợ bị báo "chưa có ô số HĐĐT, chạy bench
+  // migrate" — đi bảo kế toán sửa một thứ không hỏng.
+  if (!c.debt) {
     return html`<tr>
-      <td class="kt-col-mid">${c.chain}</td>
-      <td class="num">${formatVND(c.debt)}</td>
-      <td class="num kt-sub" colspan="2">chưa có hóa đơn nào còn nợ để tách</td>
+      <td class="kt-col-mid">${c.chain || html`<span class="kt-sub">(chưa gán chuỗi)</span>`}</td>
+      <td class="num kt-sub" colspan="3">không còn nợ</td>
     </tr>`;
   }
   return html`<tr class="tb-chain" data-chain="${c.chain}" style="cursor:pointer"
-        title="bấm để mở danh sách hóa đơn chưa xuất HĐĐT của ${c.chain}">
-    <td class="kt-col-mid">${c.chain}</td>
+        title="${c.chain
+          ? `bấm để mở danh sách hóa đơn chưa xuất HĐĐT của ${c.chain}`
+          : "bấm để mở công nợ toàn kênh — nhóm này hiện thành dòng (chưa gán chuỗi)"}">
+    <td class="kt-col-mid">${c.chain
+      ? c.chain
+      : html`<span style="color:var(--kt-warning)">(chưa gán chuỗi)</span>
+          <div class="kt-sub">${c.debt_invoices} HĐ của khách chưa khai chuỗi —
+            bấm <b>Gán chuỗi cho khách</b> ở cuối trang</div>`}</td>
     <td class="num">${formatVND(c.debt)}</td>
-    <td class="num"><span style="color:var(--kt-success)">${formatVND(roi)}</span>
-      <div class="kt-sub">${c.debt_einv_count || 0} HĐ</div></td>
-    <td class="num">${chua
-      ? html`<b style="color:var(--kt-danger)">${formatVND(chua)}</b>
-          <div class="kt-sub">${c.debt_no_einv_count || 0} HĐ${
-            c.debt_no_einv_oldest ? html` · từ ${formatDate(c.debt_no_einv_oldest)}` : ""}</div>`
-      : html`<span class="kt-sub">—</span>`}</td>
+    <td class="num">${c.debt_einv_known
+      ? html`<span style="color:var(--kt-success)">${formatVND(roi)}</span>
+          <div class="kt-sub">${c.debt_einv_count || 0} HĐ${c.debt_einv_dead_count
+            ? html` · <span style="color:var(--kt-warning)"
+                title="số HĐĐT đã hủy hoặc bị thay thế trên MISA — phải phát hành lại mới đòi được"
+              >${c.debt_einv_dead_count} số đã chết</span>`
+            : ""}</div>`
+      : html`<span class="kt-sub">chưa biết</span>`}</td>
+    <td class="num">${!c.debt_einv_known
+      ? html`<span class="kt-sub">chưa biết</span>`
+      : chua
+        ? html`<b style="color:var(--kt-danger)">${formatVND(chua)}</b>
+            <div class="kt-sub">${c.debt_no_einv_count || 0} HĐ${
+              c.debt_no_einv_oldest ? html` · từ ${formatDate(c.debt_no_einv_oldest)}` : ""}</div>`
+        : html`<span class="kt-sub">—</span>`}</td>
   </tr>`;
-}
-
-// Nợ của khách MT chưa gán được chuỗi nào — KHÔNG nằm trong thẻ chuỗi nào.
-//
-// `mt_hub.get_board` chỉ chạy qua danh sách chuỗi khai sẵn, nên khách chưa khai
-// `custom_mt_chain` (hoặc bị gán hai chuỗi nên hệ cố ý không chọn bừa) rơi ra
-// ngoài mọi thẻ. Trước đây nó biến mất câm: màn Công nợ đến hạn có hiện dòng
-// "(chưa gán chuỗi)", màn này thì không — hai màn cộng ra hai tổng khác nhau mà
-// không chỗ nào nói vì sao.
-function unassignedNote(board) {
-  const u = board.unassigned_debt || {};
-  if (!u.count) return "";
-  return html`
-    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
-      <div class="kt-card-body">
-        <div style="font-weight:600;color:var(--kt-warning)">
-          <i class="fas fa-user-slash"></i>
-          ${u.count} hóa đơn · ${formatVND(u.amount)} thuộc khách CHƯA GÁN CHUỖI
-        </div>
-        <div class="kt-sub" style="margin-top:6px">
-          Số này <b>không</b> nằm trong bảng chuỗi bên dưới, cũng không nằm trong
-          ${formatVND((board.totals || {}).debt)} ở trên — vì hệ thống chưa biết xếp nó vào
-          chuỗi nào. Bấm <b>Gán chuỗi cho khách</b> ở cuối trang, hoặc mở
-          <a href="#/cong-no-mt?g=g-cong-no">Công nợ đến hạn toàn kênh</a> xem dòng
-          <i>(chưa gán chuỗi)</i>.
-        </div>
-      </div></div>`;
 }
 
 
