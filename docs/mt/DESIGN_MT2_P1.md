@@ -582,8 +582,9 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-Z** hai cuốn sổ tách CHI TIẾT TỪNG CHUỖI + vá lỗi bấm-ra-số-khác | `e2c7854` | `two_books_check` |
 | **MT2-Z2** năm lỗi bản soát đối kháng tìm ra ngay trong MT2-Z | `5c27310` | `two_books_check` |
 | **MT2-Z3** hạn xuất hóa đơn RIÊNG của chuỗi + vá bộ giả `add_months` | `179b676` | `two_books_check` |
-| **MT2-AA** màn soát hóa đơn BỎ SÓT số HĐĐT (mốc theo từng chuỗi) | *(commit này)* | `einv_gap_check` |
-| **MT2-AB** khởi tạo đợt giao Win từ SỐ DƯ ĐÃ CHỐT, không nạp lại file | *(commit này)* | `win_seed_check` |
+| **MT2-AA** màn soát hóa đơn BỎ SÓT số HĐĐT (mốc theo từng chuỗi) | `62f9c0c` | `einv_gap_check` |
+| **MT2-AB** khởi tạo đợt giao Win từ SỐ DƯ ĐÃ CHỐT, không nạp lại file | `62f9c0c` | `win_seed_check` |
+| **MT2-AC** hai cuốn sổ ngay trong trang chuỗi + màn trống nói đúng lý do | *(commit này)* | `two_books_check` · `win_seed_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -884,6 +885,36 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AC — hai cuốn sổ ngay trong trang chuỗi
+
+Kế toán nêu: vào trang chi tiết của chuỗi thì phải thấy **công nợ ERPNext và
+công nợ theo dõi theo hóa đơn cạnh nhau**, để theo dõi và xử lý ngay tại đó.
+Trước đó bàn làm việc của chuỗi chỉ có một mẩu chữ nhỏ trong dòng phụ — bắt
+người dùng quay về bảng tổng để đọc con số của chính chuỗi mình đang làm, tức
+bắt họ nhớ một con số qua hai màn hình.
+
+`twoBooksChain(c)` bày đúng phép chia đó, phạm vi một chuỗi, kèm:
+câu **"hai vế cộng lại đúng bằng X còn nợ"** in ngay trên đầu (không nói tổng
+thì hai con số cạnh nhau thành hai nguồn sự thật) · cảnh báo số HĐĐT đã
+hủy/bị thay thế nằm **trong** vế "đã xuất" · hạn riêng của chuỗi · và bấm vào
+mở đúng danh sách của **chính chuỗi đang xem**.
+
+### "0 đợt giao" — màn hình trả lời sai câu hỏi
+
+Kế toán hỏi *"sao vẫn không có hóa đơn nào"*. Truy ra: `MT Win Pending` **không
+tự sinh từ đâu cả** — không hook, không scheduler; `mt_win_grn` chỉ *cập nhật*
+bản ghi đã có. Nó chỉ có dữ liệu khi người nhập tay hoặc khởi tạo.
+
+Dữ liệu đúng, nhưng **câu chữ sai**: "Không có đợt giao nào đang chờ xuất hóa
+đơn" đọc thành *"xong rồi"*, trong khi sự thật là *"chưa ai nhập gì"*. Đúng lớp
+lỗi đã đi suốt đợt này — trống ≠ xong.
+
+`list_pending` nay trả thêm `n_all` (đếm cả bảng, không theo bộ lọc) để màn hình
+phân biệt được ba trạng thái: chưa nhập gì · có dữ liệu nhưng ngoài bộ lọc · hết
+việc thật. Màn trống nói thẳng danh sách không tự sinh và bày sẵn cả ba đường
+nhập. Bộ kiểm khóa luôn `hooks.py` — thêm đường tự sinh mà quên sửa câu chữ là
+để màn hình nói dối.
 
 ### MT2-AB — khởi tạo đợt giao Win từ số dư ĐÃ CHỐT
 

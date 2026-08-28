@@ -114,6 +114,17 @@ def list_pending(company=None, status=None, search=None, page=1, page_size=50):
         FROM `tab%s` p WHERE %s
     """ % (DOCTYPE, w), dict(p, recv=STATUS_RECEIVED), as_dict=True)[0]
 
+    # ĐẾM CẢ BẢNG, không theo bộ lọc nào.
+    #
+    # "Không có đợt giao nào đang chờ" và "chưa ai nhập đợt giao nào bao giờ" là
+    # HAI chuyện khác hẳn, mà màn hình trống thì trông y hệt nhau. Danh sách này
+    # KHÔNG tự sinh từ đâu cả — không hook, không scheduler; nó chỉ có dữ liệu
+    # khi người nhập tay hoặc khởi tạo từ số dư/file. Nên bảng rỗng đọc thành
+    # "hết việc" là câu trả lời sai cho câu hỏi "sao vẫn không có gì".
+    n_all = cint(frappe.db.sql(
+        "SELECT COUNT(*) FROM `tab%s` p WHERE p.company = %%(c)s" % DOCTYPE,
+        {"c": company})[0][0])
+
     return {
         "rows": rows,
         "total": cint(total),
@@ -122,6 +133,7 @@ def list_pending(company=None, status=None, search=None, page=1, page_size=50):
         "page_size": page_size,
         "amount": flt(agg.amount),
         "n_received": cint(agg.n_received),
+        "n_all": n_all,
         "statuses": [STATUS_DELIVERING, STATUS_RECEIVED, STATUS_INVOICED, STATUS_CANCELLED],
         "can_manage": is_chief(),
         "note": _(

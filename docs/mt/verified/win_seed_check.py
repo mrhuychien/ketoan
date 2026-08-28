@@ -237,6 +237,40 @@ def main():
           f"mỗi chuỗi, tên nằm TRONG `doc`, không ở cấp ngoài")
     bad += not ok
 
+    # ── 7. BẢNG RỖNG HOÀN TOÀN ≠ HẾT VIỆC ───────────────────────────────
+    #
+    # `MT Win Pending` KHÔNG tự sinh từ đâu cả: không hook, không scheduler.
+    # Nó chỉ có dữ liệu khi người nhập tay hoặc khởi tạo. Câu "không có đợt giao
+    # nào đang chờ" đọc thành "xong rồi", trong khi sự thật là chưa ai nhập gì —
+    # và đó chính là câu hỏi kế toán có khi nhìn màn hình trống.
+    print("-" * 82)
+    ok = '"n_all"' in src
+    print(f"  {'✅' if ok else '❌'} backend trả `n_all` — đếm CẢ BẢNG, không theo bộ lọc, để "
+          f"phân biệt 'chưa nhập gì' với 'không còn việc'")
+    bad += not ok
+
+    ok = "res.n_all" in js and "Chưa có đợt giao nào được nhập" in js
+    print(f"  {'✅' if ok else '❌'} màn trống nói ĐÚNG lý do thay vì 'không có đợt giao nào "
+          f"đang chờ' (câu đó đọc thành 'xong rồi')")
+    bad += not ok
+
+    ok = "không tự sinh" in js
+    print(f"  {'✅' if ok else '❌'} và nói thẳng danh sách KHÔNG tự sinh — không nói thì kế toán "
+          f"ngồi đợi một thứ không bao giờ tự đến")
+    bad += not ok
+
+    ok = 'id="wp-empty-open"' in js and 'id="wp-empty-file"' in js and 'id="wp-empty-new"' in js
+    print(f"  {'✅' if ok else '❌'} và bày sẵn cả ba đường nhập ngay tại màn trống")
+    bad += not ok
+
+    # Đảm bảo KHÔNG có đường nào tự sinh — nếu sau này thêm hook thì câu chữ
+    # "không tự sinh" trên màn hình thành nói dối, và phép kiểm này phải kêu.
+    hooks = open(os.path.join(rc.REPO, "ketoan/hooks.py"), encoding="utf-8").read()
+    ok = "mt_win_pending" not in hooks
+    print(f"  {'✅' if ok else '❌'} `hooks.py` KHÔNG có đường tự sinh — thêm hook mà quên sửa "
+          f"câu chữ trên màn hình là để màn hình nói dối")
+    bad += not ok
+
     print("=" * 82)
     if bad:
         print(f"KẾT QUẢ: HỎNG {bad} phép")

@@ -539,11 +539,7 @@ function chainShell(state, board) {
         </div>
         <div class="kt-sub">
           ${c.todo ? `${c.todo} việc đang chờ` : "Không còn việc nào trong khoảng đang xem"} ·
-          còn nợ ${formatVNDShort(c.debt)}${c.debt_overdue ? ` · quá hạn ${formatVNDShort(c.debt_overdue)}` : ""}${
-            c.debt_einv_known && c.debt_no_einv
-              ? html` · <span style="color:var(--kt-danger)">chưa xuất HĐĐT
-                  ${formatVNDShort(c.debt_no_einv)} / ${c.debt_no_einv_count} HĐ</span>`
-              : ""}
+          còn nợ ${formatVNDShort(c.debt)}${c.debt_overdue ? ` · quá hạn ${formatVNDShort(c.debt_overdue)}` : ""}
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -555,6 +551,8 @@ function chainShell(state, board) {
           : ""}
       </div>
     </div>
+
+    ${twoBooksChain(c)}
 
     ${!c.n_customers
       ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-danger)">
@@ -642,6 +640,15 @@ function globalShell(state, board) {
 // ── Ràng buộc dùng chung cho hai tầng có `#mt-body` ────────────────────────
 function bindShellCommon(container, state) {
   bindDates(container, state);
+
+  // Thẻ hai cuốn sổ của chuỗi — mở đúng danh sách của CHÍNH chuỗi đang xem.
+  // Ở tầng này `paint()` là đường đổi màn hợp lệ, `openDueEinv` lo việc đó.
+  const cbd = container.querySelector("#cb-open-da");
+  if (cbd) cbd.addEventListener("click",
+    () => openDueEinv(container, state, state.chain, "da"));
+  const cbc = container.querySelector("#cb-open");
+  if (cbc) cbc.addEventListener("click",
+    () => openDueEinv(container, state, state.chain, "chua"));
 
   const back = container.querySelector("#mt-back");
   if (back) back.addEventListener("click", () => {
@@ -941,6 +948,72 @@ function twoBooksRow(c) {
             ${deadlineNote(c)}`
         : html`<span class="kt-sub">—</span>`}</td>
   </tr>`;
+}
+
+// ── HAI CUỐN SỔ, ĐẶT CẠNH NHAU — BẢN CỦA MỘT CHUỖI ────────────────────────
+//
+// Cùng phép chia của thẻ toàn kênh, nhưng đứng ngay trong bàn làm việc của
+// chuỗi, vì việc đi đòi và việc xuất nốt hóa đơn đều làm THEO CHUỖI. Bắt kế
+// toán quay về bảng tổng để đọc con số của chuỗi mình đang làm là bắt họ nhớ
+// một con số qua hai màn hình.
+//
+// Hai vế LUÔN cộng lại bằng "còn nợ" của chính chuỗi này — đó là điều kiện để
+// hai con số cạnh nhau không biến thành hai nguồn sự thật. Câu tổng in ngay
+// trên đầu để kiểm được bằng mắt.
+function twoBooksChain(c) {
+  if (!c.debt_einv_known) {
+    // Không vẽ 0đ khi chưa biết. 0đ đọc thành "đã xuất hết".
+    if (!c.debt) return "";
+    return html`
+      <div class="kt-card kt-mb"><div class="kt-card-body kt-sub">
+        <i class="fas fa-circle-question"></i>
+        Chưa tách được công nợ theo <b>đầu hóa đơn điện tử</b> cho chuỗi này —
+        site chưa có ô số HĐĐT trên Sales Invoice. Chạy <code>bench migrate</code>
+        rồi con số sẽ tự hiện; đây <b>không</b> phải "đã xuất hết".
+      </div></div>`;
+  }
+
+  const chua = c.debt_no_einv || 0;
+  const roi = c.debt_einv || 0;
+  return html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px">
+        <b>Hai cách theo dõi công nợ của ${c.chain}</b>
+        <span class="kt-sub">hai vế cộng lại đúng bằng ${formatVND(c.debt)} còn nợ</span>
+      </div>
+      <div class="kt-grid-2">
+        <div class="kt-stat is-link" id="cb-open-da" style="cursor:pointer">
+          <div class="kt-stat-label"><i class="fas fa-file-invoice"></i>
+            Sổ kế toán theo dõi — ĐÃ xuất HĐĐT</div>
+          <div class="kt-stat-value pos">${formatVNDShort(roi)}</div>
+          <div class="kt-stat-sub">${c.debt_einv_count || 0} hóa đơn · ${formatVND(roi)}
+            · đây là cột kế toán theo dõi trên Excel${roi ? " — bấm để mở danh sách" : ""}</div>
+          ${c.debt_einv_dead_count
+            ? html`<div class="kt-stat-sub" style="color:var(--kt-warning);margin-top:4px">
+                <i class="fas fa-triangle-exclamation"></i>
+                trong đó <b>${c.debt_einv_dead_count} HĐ · ${formatVND(c.debt_einv_dead)}</b>
+                mang số đã <b>hủy/bị thay thế</b> trên MISA — phải phát hành lại mới đòi được
+              </div>`
+            : ""}
+        </div>
+        <div class="kt-stat is-link" id="cb-open" style="cursor:pointer">
+          <div class="kt-stat-label"><i class="fas fa-triangle-exclamation"></i>
+            Sổ ERPNext ghi thêm — CHƯA xuất HĐĐT</div>
+          <div class="kt-stat-value ${chua ? "neg" : ""}">${formatVNDShort(chua)}</div>
+          <div class="kt-stat-sub">${c.debt_no_einv_count || 0} hóa đơn · ${formatVND(chua)}${
+            c.debt_no_einv_oldest
+              ? html` · cũ nhất <b>${formatDate(c.debt_no_einv_oldest)}</b>`
+              : ""}${chua ? " — bấm để mở danh sách" : ""}</div>
+          ${deadlineNote(c)}
+        </div>
+      </div>
+      <div class="kt-sub" style="margin-top:10px">
+        ERPNext ghi nợ ngay khi hóa đơn được ghi sổ; ${c.chain} chỉ trả cho hóa đơn
+        <b>đã phát hành</b>. Nên vế phải là doanh thu đã có nhưng <b>chưa đòi được</b> —
+        không phải sai sót, mà là việc phải làm: xuất nốt hóa đơn.
+        ${chua ? html`Bấm vào vế phải để mở đúng danh sách của ${c.chain}.` : ""}
+      </div>
+    </div></div>`;
 }
 
 // Hạn xuất hóa đơn RIÊNG của chuỗi. Chỉ hiện cho chuỗi thật sự có hạn khai
@@ -4526,8 +4599,41 @@ async function loadWinPending(container, state) {
     </div></div>
 
     ${!rows.length
-      ? html`<div class="kt-empty"><i class="fas fa-truck"></i>
-          <p>Không có đợt giao nào đang chờ xuất hóa đơn.</p></div>`
+      ? (res.n_all
+          ? html`<div class="kt-empty"><i class="fas fa-truck"></i>
+              <p>Không có đợt giao nào đang chờ xuất hóa đơn.</p>
+              <p class="kt-sub">${res.n_all} đợt giao đã nhập trước đó không nằm trong bộ lọc
+                đang chọn — đổi ô trạng thái để xem.</p></div>`
+          // BẢNG RỖNG HOÀN TOÀN ≠ HẾT VIỆC.
+          //
+          // Danh sách này KHÔNG tự sinh từ đâu cả: không hook, không scheduler.
+          // Nó chỉ có dữ liệu khi người nhập tay hoặc khởi tạo từ số dư/file.
+          // Câu "không có đợt giao nào đang chờ" đọc thành "xong rồi", trong khi
+          // sự thật là chưa ai nhập gì — và đó chính là câu hỏi kế toán đang có
+          // khi nhìn màn hình này.
+          : html`<div class="kt-empty"><i class="fas fa-truck"></i>
+              <p><b>Chưa có đợt giao nào được nhập.</b></p>
+              <p class="kt-sub" style="max-width:640px;margin:0 auto">
+                Danh sách này <b>không tự sinh</b> từ ERPNext hay từ hệ Win — nó chỉ có dữ
+                liệu khi có người nhập. Ba đường:
+              </p>
+              <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px">
+                ${res.can_manage
+                  ? html`<button class="kt-btn kt-btn--primary kt-btn--sm" id="wp-empty-open">
+                        <i class="fas fa-file-circle-check"></i> Khởi tạo từ số dư đã chốt
+                      </button>
+                      <button class="kt-btn kt-btn--outline kt-btn--sm" id="wp-empty-file">
+                        <i class="fas fa-file-import"></i> Khởi tạo từ file công nợ
+                      </button>
+                      <button class="kt-btn kt-btn--outline kt-btn--sm" id="wp-empty-new">
+                        <i class="fas fa-plus"></i> Thêm từng đợt
+                      </button>`
+                  : html`<span class="kt-sub">Cần quyền trưởng phòng để khởi tạo.</span>`}
+              </div>
+              <p class="kt-sub" style="margin-top:12px">
+                Nút <b>Khởi tạo từ số dư đã chốt</b> chỉ chạy được khi bản số dư đầu kỳ
+                WinCommerce đã ở trạng thái <b>Đã chốt</b>.
+              </p></div>`)
       : html`<div class="kt-card"><div class="kt-card-body">
           <div class="kt-table-wrap"><table class="kt-table">
             <thead><tr>
@@ -4575,6 +4681,13 @@ async function loadWinPending(container, state) {
   if (sd) sd.addEventListener("click", () => pickWinPendingSeed(container, state));
   const so = container.querySelector("#wp-seed-open");
   if (so) so.addEventListener("click", () => pickWinPendingFromOpening(container, state));
+  // Nút trong màn trống — cùng handler, để không có hai đường làm hai việc khác nhau.
+  const eo = container.querySelector("#wp-empty-open");
+  if (eo) eo.addEventListener("click", () => pickWinPendingFromOpening(container, state));
+  const ef = container.querySelector("#wp-empty-file");
+  if (ef) ef.addEventListener("click", () => pickWinPendingSeed(container, state));
+  const en = container.querySelector("#wp-empty-new");
+  if (en) en.addEventListener("click", () => openWinPendingEdit(container, state, null));
   const gr = container.querySelector("#wp-grn");
   if (gr) gr.addEventListener("click", () => pickWinGrn(container, state));
   container.querySelectorAll(".wp-edit").forEach((b) => {

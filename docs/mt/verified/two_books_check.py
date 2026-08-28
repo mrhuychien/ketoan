@@ -546,6 +546,37 @@ def main():
           f"để nó ngoài bảng thì các dòng không cộng lại bằng con số ghi trên đầu")
     bad += not ok
 
+    # Bàn làm việc của MỘT chuỗi cũng phải bày hai con số CẠNH NHAU.
+    #
+    # Việc đi đòi và việc xuất nốt hóa đơn đều làm THEO CHUỖI. Bắt kế toán quay
+    # về bảng tổng để đọc con số của chuỗi mình đang làm là bắt họ nhớ một con
+    # số qua hai màn hình — và nhớ nhầm thì không chỗ nào bắt được.
+    # Soi TRONG `chainShell`, không soi cả file.
+    #
+    # Bản đầu khẳng định `"twoBooksChain(c)" in js` — và nó ĐẠT ngay cả khi đã
+    # gỡ chỗ gọi, vì chuỗi đó cũng nằm trong chính dòng `function
+    # twoBooksChain(c) {`. Phép kiểm dò chuỗi trên cả file luôn có nguy cơ này:
+    # nó thấy ĐỊNH NGHĨA và tưởng là CHỖ DÙNG.
+    shell_c = js.split("function chainShell")[1].split("\n// ═══")[0]
+    ok = "twoBooksChain(c)" in shell_c
+    print(f"  {'✅' if ok else '❌'} `chainShell` GỌI `twoBooksChain` — bàn làm việc của một chuỗi "
+          f"cũng bày hai cuốn sổ cạnh nhau")
+    bad += not ok
+
+    seg_cb = js.split("function twoBooksChain")[1].split("\n// Hạn xuất")[0]
+    ok = "formatVND(c.debt)" in seg_cb
+    print(f"  {'✅' if ok else '❌'} và in ra TỔNG mà hai vế cộng lại — không nói tổng thì hai "
+          f"con số cạnh nhau thành hai nguồn sự thật")
+    bad += not ok
+
+    ok = "!c.debt_einv_known" in seg_cb
+    print(f"  {'✅' if ok else '❌'} chuỗi chưa biết -> nói 'chưa tách được', KHÔNG vẽ 0đ")
+    bad += not ok
+
+    ok = ('#cb-open"' in js or "'#cb-open'" in js) and "openDueEinv(container, state, state.chain" in js
+    print(f"  {'✅' if ok else '❌'} bấm vào mở đúng danh sách của CHÍNH chuỗi đang xem")
+    bad += not ok
+
     ok = "deadlineNote" in js and "einv_deadline" in js
     print(f"  {'✅' if ok else '❌'} hạn riêng của chuỗi hiện ngay trên con số 'chưa đòi được'")
     bad += not ok
