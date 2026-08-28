@@ -584,7 +584,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-Z3** hạn xuất hóa đơn RIÊNG của chuỗi + vá bộ giả `add_months` | `179b676` | `two_books_check` |
 | **MT2-AA** màn soát hóa đơn BỎ SÓT số HĐĐT (mốc theo từng chuỗi) | `62f9c0c` | `einv_gap_check` |
 | **MT2-AB** khởi tạo đợt giao Win từ SỐ DƯ ĐÃ CHỐT, không nạp lại file | `62f9c0c` | `win_seed_check` |
-| **MT2-AC** hai cuốn sổ ngay trong trang chuỗi + màn trống nói đúng lý do | *(commit này)* | `two_books_check` · `win_seed_check` |
+| **MT2-AC** hai cuốn sổ ngay trong trang chuỗi + màn trống nói đúng lý do | `a03452b` | `two_books_check` · `win_seed_check` |
+| **MT2-AD** cuốn sổ THỨ BA: sổ cái TK 131 + cầu nối phân tích chỗ lệch | *(commit này)* | `gl_bridge_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -596,7 +597,8 @@ for t in regression_check crosscheck_mt2 mutation_check \
          chain_filter_check opening_check win_grn_check opening_store_check \
          mega_check refid_check replace_check opening_gl_check \
          table_width_check client_script_check win_pdf_check \
-         two_books_check portal_js_check einv_gap_check win_seed_check; do
+         two_books_check portal_js_check einv_gap_check win_seed_check \
+         gl_bridge_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -885,6 +887,49 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AD — cuốn sổ thứ ba: sổ cái TK 131
+
+Kế toán nêu: đặt **số dư 131 trên sổ cái** cạnh sổ theo dõi để thấy lệch bao
+nhiêu, và **phân tích nguyên nhân lệch**.
+
+Hai cột cũ đến từ **bảng kê chuỗi**; cột này đến từ **bút toán**. Kênh MT cố ý
+không tạo Payment Entry, nên sổ cái luôn tụt lại sau đúng bằng phần tiền đã
+khớp mà chưa ai ghi sổ. **Lệch là bình thường** — câu hỏi đúng không phải "có
+lệch không" mà là "lệch nằm ở đâu".
+
+**Không so hai số — dựng cầu nối.** In "lệch 386 triệu" là không dùng được: kế
+toán không biết nó nằm ở đâu nên hoặc bỏ qua, hoặc sửa bừa một bên cho khớp.
+Bốn khoản mục cộng lại **đúng** chỗ lệch:
+
+```
+Sổ cái 131 (C) − Rổ hóa đơn (B)
+  = (1) sổ cái lệch so với chính hóa đơn   C_hd − Σ(gộp − trả lại)
+  + (2) hóa đơn không còn trong rổ         Σ_tất cả − Σ_còn nợ
+  + (3) tiền bảng kê đã trừ khỏi rổ        Σ đã trả (trên HĐ còn nợ)
+  + (4) bút toán ghi thẳng vào 131         C_khác
+```
+
+Đẳng thức đúng **về đại số**, không nhờ làm tròn. Dư một đồng là **lỗi code**,
+và màn hình nói thẳng ra thế kèm câu "đừng dùng con số này". Bộ kiểm quét
+**16.807 tổ hợp** (âm · 0 · tỷ đồng · lẻ xu) — dư lớn nhất 0.
+
+**Nguyên nhân tách khỏi phân rã.** Danh sách nguyên nhân là *nghi can có số*,
+chồng lấn nhau, **không** cộng lại thành chỗ lệch — trộn vào cầu nối là mời
+người đọc cộng nhầm. Hai nguyên nhân đo được: tiền bảng kê đã khớp mà `je_state`
+chưa "Đã duyệt đủ", và phiếu trả hàng chưa khai hóa đơn gốc. Mỗi cái có nút
+**Đi xử lý** — nêu nguyên nhân mà không mở ra được chỗ xử lý thì chỉ là lời than.
+
+**Vì sao không quy về từng hóa đơn.** Cách tự nhiên nhất là so từng tờ. Không
+làm được, và lý do nằm ngay trong code: `mt_je` **cố ý không gắn**
+`reference_name` lên dòng Có 131 — bút toán MT ghi tổng. Nên `against_voucher`
+rỗng, và ép quy về từng hóa đơn thì phải đoán (FIFO hay khớp theo số tiền);
+đoán sai ở đây là chỉ tay vào một hóa đơn đã thu đủ mà bảo "còn nợ". Cầu nối ở
+mức tổng nói ít hơn nhưng không bao giờ nói sai. Bộ kiểm khóa cả tiền đề đó
+trong `mt_je` — nếu sau này bút toán có gắn reference thì cầu nối nên dựng lại.
+
+Ô sổ cái nạp **sau và không chặn**: nó quét bảng GL Entry, nặng hơn hẳn hai ô
+trên vốn đã có sẵn trong `get_board`.
 
 ### MT2-AC — hai cuốn sổ ngay trong trang chuỗi
 

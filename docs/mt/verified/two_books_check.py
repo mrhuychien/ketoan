@@ -191,24 +191,13 @@ def main():
         t = open(os.path.join(rc.REPO, "ketoan/api", f), encoding="utf-8").read()
         if "vn_einvoice_number" in t:
             stray.append(f)
-    # Đếm trong CODE, không đếm trong văn.
+    # Đếm trong CODE, không đếm trong văn — xem `regression_check.code_only`.
     #
-    # Bản đầu đếm bằng `src.count('"vn_einvoice_number"')` và nó báo hỏng vì
-    # chính cái docstring đang DẶN "đừng gõ lại tên ô" có nhắc tên ô. Phép kiểm
-    # đếm cả chú thích thì nó không còn đo cái nó định đo, và cách duy nhất để
-    # nó xanh lại là bớt giải thích — đúng chiều ngược với điều mong muốn.
-    mtsrc = open(os.path.join(rc.REPO, "ketoan/api/mt.py"), encoding="utf-8").read()
-    tree = ast.parse(mtsrc)
-    docs = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            b = getattr(node, "body", None)
-            if b and isinstance(b[0], ast.Expr) and isinstance(b[0].value, ast.Constant) \
-                    and isinstance(b[0].value.value, str):
-                docs.add(id(b[0].value))
-    n_mt = sum(1 for node in ast.walk(tree)
-               if isinstance(node, ast.Constant) and node.value == "vn_einvoice_number"
-               and id(node) not in docs)
+    # Bản đầu đếm bằng `src.count(...)` và nó báo hỏng vì chính cái docstring
+    # đang DẶN "đừng gõ lại tên ô" có nhắc tên ô. Phép kiểm đếm cả chú thích thì
+    # cách duy nhất để nó xanh lại là bớt giải thích — ngược chiều mong muốn.
+    n_mt = rc.code_only(os.path.join(rc.REPO, "ketoan/api/mt.py")).count(
+        '"vn_einvoice_number"')
     ok = not stray and n_mt == 1
     print(f"  {'✅' if ok else '❌'} ô cũ `vn_einvoice_number` chỉ xuất hiện ĐÚNG MỘT LẦN trong "
           f"`mt.py` (hằng số của `einvoice_issued_expr`), không rải sang module công nợ nào "

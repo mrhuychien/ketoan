@@ -86,6 +86,50 @@ EXPECTED = {
 }
 
 
+def code_only(path):
+    """Mã nguồn ĐÃ BỎ mọi docstring — để phép kiểm đếm CODE, không đếm văn.
+
+    ════════════════════════════════════════════════════════════════════════
+    VÌ SAO CÓ HÀM NÀY
+    ════════════════════════════════════════════════════════════════════════
+
+    Nhiều phép kiểm của bộ này khẳng định dạng "chuỗi X KHÔNG được xuất hiện
+    trong module Y" — ví dụ "không gộp theo `against_voucher`", "tên ô cũ chỉ
+    khai đúng một lần". Dò bằng `str.count` trên cả file thì nó đếm luôn CHÚ
+    THÍCH, và đã hai lần báo hỏng vì chính đoạn văn đang DẶN "đừng dùng thứ
+    này" có nhắc tên thứ đó.
+
+    Hậu quả không phải là phiền: cách duy nhất để phép kiểm xanh lại là BỚT
+    GIẢI THÍCH — đúng chiều ngược với điều dự án muốn. Nên chỗ sai là phép
+    kiểm, không phải chú thích.
+
+    Bỏ docstring bằng AST (không phải regex): regex trên dấu nháy ba sẽ cắt
+    nhầm ở bất kỳ chuỗi nào có chứa nháy.
+    """
+    import ast as _ast
+
+    src = open(path, encoding="utf-8").read()
+    tree = _ast.parse(src)
+    doc_ids = set()
+    for node in _ast.walk(tree):
+        body = getattr(node, "body", None)
+        if isinstance(node, (_ast.Module, _ast.FunctionDef, _ast.AsyncFunctionDef,
+                             _ast.ClassDef)) and body:
+            first = body[0]
+            if isinstance(first, _ast.Expr) and isinstance(first.value, _ast.Constant) \
+                    and isinstance(first.value.value, str):
+                doc_ids.add(id(first.value))
+
+    # Xóa theo DÒNG: giữ nguyên số dòng để thông báo lỗi còn chỉ đúng chỗ.
+    lines = src.splitlines()
+    drop = set()
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Constant) and id(node) in doc_ids:
+            for i in range(node.lineno - 1, node.end_lineno):
+                drop.add(i)
+    return "\n".join("" if i in drop else l for i, l in enumerate(lines))
+
+
 def _stub_frappe():
     """Bộ giả frappe tối thiểu — đủ để import module đọc file, không hơn."""
     fr = types.ModuleType("frappe")

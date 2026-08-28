@@ -218,6 +218,9 @@ async function paint(container, state) {
   setHTML(container, chainShell(state, board));
   bindShellCommon(container, state);
   await loadTab(container, state);
+  // Cuốn sổ thứ ba nạp SAU và KHÔNG chặn: nó quét `tabGL Entry`, nặng hơn hẳn
+  // phần còn lại. `await` nó trước `loadTab` là bắt cả bàn làm việc chờ theo.
+  loadChainGl(container, state);
 }
 
 function syncHash(state) {
@@ -960,6 +963,14 @@ function twoBooksRow(c) {
 // Hai vế LUÔN cộng lại bằng "còn nợ" của chính chuỗi này — đó là điều kiện để
 // hai con số cạnh nhau không biến thành hai nguồn sự thật. Câu tổng in ngay
 // trên đầu để kiểm được bằng mắt.
+// ⚠ CHÚ THÍCH GIẢI THÍCH ĐỂ NGOÀI TEMPLATE, KHÔNG ĐỂ TRONG `<!-- -->`.
+// Chú thích HTML nằm trong template literal vẫn là NỘI DUNG chuỗi: một dấu
+// backtick trong đó (ví dụ nhắc tên bảng `tabGL Entry`) ĐÓNG luôn template và
+// cả file gãy cú pháp — portal trắng màn hình. Đã dính đúng lỗi này khi viết ô
+// sổ cái bên dưới; `portal_js_check` bắt được trước khi đẩy.
+//
+// Ô `#cb-gl` (cuốn sổ thứ ba) để RỖNG ở đây và nạp riêng bằng `loadChainGl`:
+// nó quét bảng GL Entry, nặng hơn hẳn hai ô trên vốn đã có sẵn trong get_board.
 function twoBooksChain(c) {
   if (!c.debt_einv_known) {
     // Không vẽ 0đ khi chưa biết. 0đ đọc thành "đã xuất hết".
@@ -1013,7 +1024,121 @@ function twoBooksChain(c) {
         không phải sai sót, mà là việc phải làm: xuất nốt hóa đơn.
         ${chua ? html`Bấm vào vế phải để mở đúng danh sách của ${c.chain}.` : ""}
       </div>
+
+      <div id="cb-gl" style="margin-top:14px">
+        <div class="kt-sub"><i class="fas fa-circle-notch fa-spin"></i>
+          đang đọc sổ cái TK 131…</div>
+      </div>
     </div></div>`;
+}
+
+// ── CUỐN SỔ THỨ BA: SỔ CÁI TK 131 ─────────────────────────────────────────
+//
+// Hai ô trên đến từ BẢNG KÊ CHUỖI; ô này đến từ BÚT TOÁN. Kênh MT cố ý không
+// tạo Payment Entry, nên sổ cái luôn tụt lại sau đúng bằng phần tiền đã khớp
+// mà chưa ai ghi sổ. LỆCH LÀ BÌNH THƯỜNG — câu hỏi là lệch nằm ở đâu.
+//
+// Vì vậy không in mỗi con số lệch: in thẳng CẦU NỐI bốn khoản cộng lại đúng
+// chỗ lệch, cộng danh sách nguyên nhân đo được. "Lệch 412 triệu" mà không nói
+// nằm ở đâu thì kế toán hoặc bỏ qua, hoặc sửa bừa một bên cho khớp.
+async function loadChainGl(container, state) {
+  const box = container.querySelector("#cb-gl");
+  if (!box) return;
+  let d;
+  try {
+    d = await api.mtGlBridge({ chain: state.chain });
+  } catch (e) {
+    setHTML(box, html`<div class="kt-sub" style="color:var(--kt-danger)">
+      Không đọc được sổ cái: ${e.message}</div>`);
+    return;
+  }
+  const r = (d.chains || [])[0];
+  if (!r) { setHTML(box, ""); return; }
+  setHTML(box, glBridgeCard(r, d));
+  const t = box.querySelector("#cb-gl-toggle");
+  if (t) t.addEventListener("click", () => {
+    const p = box.querySelector("#cb-gl-detail");
+    const open = p.style.display !== "none";
+    p.style.display = open ? "none" : "";
+    t.textContent = open ? "Vì sao lệch ▾" : "Thu gọn ▴";
+  });
+  // "Đi xử lý" đưa thẳng tới bước làm được việc đó. Nêu nguyên nhân mà không
+  // mở ra được chỗ xử lý thì nó chỉ là một lời than.
+  box.querySelectorAll("button[data-step]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.step = b.dataset.step;
+      state.page = 1;
+      syncHash(state);
+      paint(container, state);
+    });
+  });
+}
+
+function glBridgeCard(r, d) {
+  const tone = Math.abs(r.diff) < 1 ? "" : (r.diff > 0 ? "warn" : "neg");
+  return html`
+    <div style="border-top:1px solid var(--kt-border);padding-top:12px">
+      <div style="display:flex;gap:12px;align-items:baseline;flex-wrap:wrap">
+        <div class="kt-stat-label" style="margin:0">
+          <i class="fas fa-book"></i> Sổ cái TK 131 — số dư thật trên sổ</div>
+        <b style="font-size:20px">${formatVND(r.gl_total)}</b>
+        <span class="kt-sub">so với rổ hóa đơn ${formatVND(r.basket_open)} →
+          <b class="${tone}">lệch ${r.diff >= 0 ? "+" : "−"}${formatVND(Math.abs(r.diff))}</b></span>
+        <button class="kt-btn kt-btn--outline kt-btn--sm" id="cb-gl-toggle"
+                style="margin-left:auto">Vì sao lệch ▾</button>
+      </div>
+
+      ${!r.balanced
+        ? html`<div class="kt-sub" style="color:var(--kt-danger);margin-top:6px">
+            <i class="fas fa-bug"></i> Cầu nối còn dư ${formatVND(r.residual)} — đây là
+            <b>lỗi code</b>, không phải sai số cho phép. Báo lại để sửa; đừng dùng con số này.
+          </div>`
+        : ""}
+
+      <div id="cb-gl-detail" style="display:none;margin-top:12px">
+        <div class="kt-sub" style="margin-bottom:8px">${d.note}</div>
+        <div class="kt-table-wrap"><table class="kt-table">
+          <thead><tr><th class="kt-col-wide">Khoản mục</th><th class="num">Số tiền</th></tr></thead>
+          <tbody>
+            ${r.items.map((i) => html`<tr>
+              <td class="kt-col-wide">${i.label}<div class="kt-sub">${i.why}</div></td>
+              <td class="num">${formatVND(i.amount)}</td>
+            </tr>`)}
+            <tr style="border-top:2px solid var(--kt-border)">
+              <td class="kt-col-wide"><b>Cộng lại = chỗ lệch</b>
+                <div class="kt-sub">bốn khoản trên lấy từ cùng một tập dữ liệu nên phải
+                  cộng đúng bằng chỗ lệch — dư một đồng là lỗi code</div></td>
+              <td class="num"><b>${formatVND(r.diff)}</b></td>
+            </tr>
+          </tbody>
+        </table></div>
+
+        ${(r.causes || []).length
+          ? html`<div style="margin-top:14px">
+              <div style="font-weight:600;margin-bottom:6px">Nguyên nhân đo được</div>
+              <div class="kt-sub" style="margin-bottom:8px">
+                Đây là <b>nghi can có số</b>, không phải phân rã của chỗ lệch — chúng chồng
+                lấn nhau và <b>không</b> cộng lại thành con số trên.
+              </div>
+              ${r.causes.map((x) => html`
+                <div class="kt-card" style="margin-bottom:8px"><div class="kt-card-body">
+                  <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+                    <b>${x.label}</b>
+                    <b style="color:var(--kt-danger)">${formatVND(x.amount)}</b>
+                    ${x.count ? html`<span class="kt-sub">${x.count} chứng từ</span>` : ""}
+                    <button class="kt-btn kt-btn--outline kt-btn--sm" data-step="${x.step}"
+                            style="margin-left:auto">Đi xử lý</button>
+                  </div>
+                  <div class="kt-sub" style="margin-top:6px">${x.why}</div>
+                  <div class="kt-sub" style="margin-top:4px"><b>Việc phải làm:</b> ${x.action}</div>
+                </div></div>`)}
+            </div>`
+          : html`<div class="kt-sub" style="margin-top:12px">
+              Không có nguyên nhân nào <b>đo được</b> đang mở. Phần lệch còn lại nằm ở các
+              khoản mục trong bảng trên.
+            </div>`}
+      </div>
+    </div>`;
 }
 
 // Hạn xuất hóa đơn RIÊNG của chuỗi. Chỉ hiện cho chuỗi thật sự có hạn khai
