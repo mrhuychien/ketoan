@@ -70,6 +70,11 @@ const GLOBAL_VIEWS = [
   // Một chuỗi có thể có NHIỀU pháp nhân (Central Retail 2 EB, Saigon Co.op ~8
   // đơn vị, LOTTE tách chi nhánh). Số gộp theo chuỗi không đi đòi được — phải
   // xuống tới từng pháp nhân mới biết gọi cho ai.
+  // Câu hỏi KHÁC câu hỏi của thẻ hai cuốn sổ: màn kia chỉ nhìn phần CÒN NỢ,
+  // màn này nhìn MỌI hóa đơn bán — hóa đơn đã thu đủ tiền mà trống ô số HĐĐT
+  // vẫn là lỗ hổng chứng từ. Hai con số không bao giờ bằng nhau, và đó là đúng.
+  { key: "g-soat-hddt", label: "Soát HĐ bỏ sót số HĐĐT", icon: "fa-magnifying-glass-dollar",
+    hint: "Hóa đơn CŨ HƠN tờ mới nhất đã điền số HĐĐT mà vẫn trống — tức đã đi qua rồi mà không xuất. Khác với hàng vừa giao chưa tới lượt." },
   { key: "g-khach", label: "Công nợ theo khách hàng", icon: "fa-building",
     hint: "Xuống từng pháp nhân của mỗi chuỗi. Một chuỗi thường có nhiều pháp nhân xuất hóa đơn riêng." },
   // Việc MỘT LẦN, làm trước tất cả: chuyển sổ theo dõi Excel sang phần mềm.
@@ -167,6 +172,10 @@ export async function render({ container, query }) {
     // Đọc lại được từ URL để cái link kế toán gửi cho nhau còn mở ra đúng
     // danh sách — bộ lọc chỉ sống trong bộ nhớ là bộ lọc không chia sẻ được.
     dueEinv: ["da", "chua"].includes(query?.due_einv) ? query.due_einv : "",
+    // Chuỗi đang lọc ở màn "Soát HĐ bỏ sót số HĐĐT" — ô RIÊNG, không dùng chung
+    // `state.chain` (thứ quyết định tầng điều hướng) cũng không dùng chung
+    // `dueChain` của màn công nợ.
+    gapChain: query?.gap_chain || "",
     // Trục HĐĐT trên danh sách hóa đơn (`mt.get_invoices`) — khác màn, khác ô.
     einvoice: "",
     board: null,
@@ -221,6 +230,7 @@ function syncHash(state) {
   // Bộ lọc HĐĐT vào URL: nó là thứ kế toán bấm rồi F5, hoặc gửi link cho nhau.
   // Không mang theo thì F5 ra một danh sách KHÁC mà đầu trang vẫn ghi cùng tiêu đề.
   if (state.dueEinv) p.push(`due_einv=${state.dueEinv}`);
+  if (state.global === "g-soat-hddt" && state.gapChain) p.push(`gap_chain=${q(state.gapChain)}`);
   history.replaceState(null, "", `#/cong-no-mt?${p.join("&")}`);
 }
 
@@ -691,6 +701,7 @@ async function loadTab(container, state) {
 
   if (state.view === "toan-kenh") {
     if (state.global === "g-cong-no") return loadDueDebt(container, state);
+    if (state.global === "g-soat-hddt") return loadEinvGaps(container, state);
     if (state.global === "g-khach") return loadChains(container, state);
     if (state.global === "g-so-du") {
       return state.openName
@@ -876,6 +887,11 @@ function twoBooks(t, board) {
         Sổ ERPNext ghi nợ ngay khi hóa đơn được ghi sổ. Siêu thị chỉ trả cho hóa đơn
         <b>đã phát hành</b>, nên phần chưa xuất HĐĐT tuy đã là doanh thu nhưng chưa đòi
         được. Chênh lệch này không phải sai sót — nó là <b>việc phải làm</b>: xuất nốt hóa đơn.
+      </div>
+      <div class="kt-sub" style="margin-top:8px">
+        Con số trên chỉ tính phần <b>còn nợ</b>. Hóa đơn đã thu đủ tiền mà vẫn trống ô số HĐĐT
+        thì không hiện ở đây — nó là lỗ hổng chứng từ, soi ở
+        <a href="#/cong-no-mt?g=g-soat-hddt">Soát HĐ bỏ sót số HĐĐT</a>.
       </div>
     </div></div>`;
 }
@@ -4218,6 +4234,149 @@ async function loadDueDebt(container, state) {
     .addEventListener("click", () => openCreditTerms(container, state));
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// MÀN — SOÁT HÓA ĐƠN BỎ SÓT SỐ HÓA ĐƠN ĐIỆN TỬ
+//
+// KHÔNG phải con số của thẻ "hai cuốn sổ". Thẻ kia chỉ nhìn phần CÒN NỢ; màn
+// này nhìn MỌI hóa đơn bán, vì hóa đơn đã thu đủ tiền mà trống ô số HĐĐT vẫn
+// là một lỗ hổng chứng từ. Hai con số không bao giờ bằng nhau — màn hình phải
+// nói ra điều đó, không thì có ngày ai đó đem hai màn đi đối chiếu.
+//
+// Cả màn xoay quanh MỘT phép chia: bỏ sót ≠ chưa tới lượt. Và vì phép chia đó
+// dựa trên một PHỎNG ĐOÁN (xuất hóa đơn theo thứ tự thời gian), cái mốc luôn
+// được in ra để người đọc tự thấy con số tin được tới đâu.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function frontierLine(f, chain) {
+  if (!f) {
+    return html`<span class="kt-sub">chưa hóa đơn nào của ${chain || "kênh"} có số HĐĐT —
+      không có mốc nên KHÔNG chấm bỏ sót cho ai</span>`;
+  }
+  return html`<span class="kt-sub">mốc: <a href="/app/sales-invoice/${f.name}"
+      target="_blank">${f.name}</a> ngày <b>${formatDate(f.posting_date)}</b>${
+      f.inv_no ? html` · số ${f.inv_series ? f.inv_series + " " : ""}${f.inv_no}` : ""}</span>`;
+}
+
+async function loadEinvGaps(container, state) {
+  const body = container.querySelector("#mt-body");
+  let d;
+  try {
+    d = await api.mtEinvGaps({ chain: state.gapChain || undefined,
+                               page: state.page, page_size: 50 });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+
+  if (!d.supported) {
+    setHTML(body, html`<div class="kt-empty"><i class="fas fa-plug-circle-xmark"></i>
+      <p>${d.note}</p></div>`);
+    return;
+  }
+
+  const rows = d.rows || [];
+  setHTML(body, html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+      <div class="kt-card-body kt-sub">
+        <b>Đây KHÔNG phải con số của thẻ "hai cuốn sổ".</b>
+        Thẻ kia chỉ nhìn phần <b>còn nợ</b>; màn này nhìn <b>mọi hóa đơn bán</b>, vì hóa đơn
+        đã thu đủ tiền mà trống ô số HĐĐT vẫn là lỗ hổng chứng từ. Hai con số không bao giờ
+        bằng nhau — đừng đem đối chiếu.
+      </div></div>
+
+    <div class="kt-stats kt-mb">
+      <div class="kt-stat">
+        <div class="kt-stat-label"><i class="fas fa-triangle-exclamation"></i> BỎ SÓT — đã đi qua mà không xuất</div>
+        <div class="kt-stat-value ${d.missed.count ? "neg" : "pos"}">${d.missed.count}</div>
+        <div class="kt-stat-sub">${formatVND(d.missed.amount)} · cũ hơn tờ mới nhất đã điền số</div>
+      </div>
+      <div class="kt-stat">
+        <div class="kt-stat-label"><i class="fas fa-hourglass-half"></i> Chưa tới lượt</div>
+        <div class="kt-stat-value">${d.backlog.count}</div>
+        <div class="kt-stat-sub">${formatVND(d.backlog.amount)} · mới hơn mốc — bình thường,
+          không phải việc phải soát</div>
+      </div>
+      ${d.returns_missing.count
+        ? html`<div class="kt-stat">
+            <div class="kt-stat-label"><i class="fas fa-rotate-left"></i> Phiếu trả hàng trống số</div>
+            <div class="kt-stat-value warn">${d.returns_missing.count}</div>
+            <div class="kt-stat-sub">${formatVND(d.returns_missing.amount)} · KHÔNG nằm trong hai
+              ô bên trái — hóa đơn điều chỉnh/thay thế MISA đi theo luật khác</div>
+          </div>`
+        : ""}
+    </div>
+
+    ${state.gapChain
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body"
+              style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <span>Đang xem <b>${state.gapChain}</b></span>
+          ${frontierLine(d.frontier, state.gapChain)}
+          <button class="kt-btn kt-btn--outline kt-btn--sm" id="gap-clear"
+                  style="margin-left:auto">Xem mọi chuỗi</button>
+        </div></div>`
+      : (d.chains || []).length
+        ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+            <div class="kt-sub" style="margin-bottom:8px">
+              <b>Mốc tính RIÊNG từng chuỗi.</b> Mỗi chuỗi có nhịp xuất hóa đơn riêng —
+              lấy một mốc chung thì chuỗi xuất chậm nhất bị chấm bỏ sót toàn bộ, còn chuỗi
+              xuất nhanh không bao giờ lộ lỗ hổng nào.
+            </div>
+            <div class="kt-table-wrap"><table class="kt-table">
+              <thead><tr><th class="kt-col-mid">Chuỗi</th>
+                <th class="num">Bỏ sót</th><th class="num">Chưa tới lượt</th>
+                <th class="kt-col-wide">Đã điền tới đâu</th></tr></thead>
+              <tbody>${d.chains.map((c) => html`<tr class="gap-chain" data-chain="${c.chain}"
+                    style="cursor:${c.chain ? "pointer" : "default"}">
+                <td class="kt-col-mid">${c.chain
+                  || html`<span style="color:var(--kt-warning)">(chưa gán chuỗi)</span>`}</td>
+                <td class="num">${c.missed.count
+                  ? html`<b style="color:var(--kt-danger)">${c.missed.count}</b>
+                      <div class="kt-sub">${formatVND(c.missed.amount)}</div>`
+                  : html`<span class="kt-sub">—</span>`}</td>
+                <td class="num">${c.backlog.count || html`<span class="kt-sub">—</span>`}
+                  ${c.backlog.count ? html`<div class="kt-sub">${formatVND(c.backlog.amount)}</div>` : ""}</td>
+                <td class="kt-col-wide">${frontierLine(c.frontier, c.chain)}</td>
+              </tr>`)}</tbody>
+            </table></div>
+          </div></div>`
+        : ""}
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i>
+          <p>Không có hóa đơn nào bị bỏ sót số HĐĐT${state.gapChain ? ` ở ${state.gapChain}` : ""}.</p></div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          <div class="kt-sub" style="margin-bottom:8px">Bỏ sót lâu nhất lên trước — đó là thứ tự đi soát.</div>
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Hóa đơn</th><th class="kt-col-wide">Khách hàng</th>
+              <th>Ngày HĐ</th><th class="num">Tổng HĐ</th></tr></thead>
+            <tbody>${rows.map((r) => html`<tr>
+              <td><a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a></td>
+              <td class="kt-col-wide">${r.customer_name || r.customer}
+                ${r.chain ? html`<div class="kt-sub">${r.chain}</div>`
+                          : html`<div class="kt-sub" style="color:var(--kt-warning)">chưa gán chuỗi</div>`}</td>
+              <td>${formatDate(r.posting_date)}</td>
+              <td class="num">${formatVND(r.grand_total)}</td>
+            </tr>`)}</tbody>
+          </table></div>
+          ${pager(d, "hóa đơn")}
+        </div></div>`}
+  `);
+
+  bindPager(container, state);
+  const gc = container.querySelector("#gap-clear");
+  if (gc) gc.addEventListener("click", () => {
+    state.gapChain = ""; state.page = 1; loadTab(container, state);
+  });
+  container.querySelectorAll("tr.gap-chain").forEach((tr) => {
+    tr.addEventListener("click", () => {
+      // Chuỗi rỗng = khách chưa gán chuỗi. Lọc theo nó thì backend bỏ qua bộ
+      // lọc và trả về TOÀN BỘ — im lặng sai. Chặn ngay ở đây.
+      if (!tr.dataset.chain) return;
+      state.gapChain = tr.dataset.chain; state.page = 1; loadTab(container, state);
+    });
+  });
+}
+
 // ── Khai hạn thanh toán từng khách ─────────────────────────────────────────
 //
 // KHÔNG có nút "áp hạn theo chuỗi cho tất cả". Central Retail có hai pháp nhân
@@ -4353,6 +4512,9 @@ async function loadWinPending(container, state) {
       </span>
       ${res.can_manage
         ? html`<span style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="kt-btn kt-btn--outline kt-btn--sm" id="wp-seed-open">
+              <i class="fas fa-file-circle-check"></i> Khởi tạo từ số dư đã chốt
+            </button>
             <button class="kt-btn kt-btn--outline kt-btn--sm" id="wp-seed">
               <i class="fas fa-file-import"></i> Khởi tạo từ file công nợ
             </button>
@@ -4411,6 +4573,8 @@ async function loadWinPending(container, state) {
   if (nw) nw.addEventListener("click", () => openWinPendingEdit(container, state, null));
   const sd = container.querySelector("#wp-seed");
   if (sd) sd.addEventListener("click", () => pickWinPendingSeed(container, state));
+  const so = container.querySelector("#wp-seed-open");
+  if (so) so.addEventListener("click", () => pickWinPendingFromOpening(container, state));
   const gr = container.querySelector("#wp-grn");
   if (gr) gr.addEventListener("click", () => pickWinGrn(container, state));
   container.querySelectorAll(".wp-edit").forEach((b) => {
@@ -4535,15 +4699,65 @@ function pickWinPendingSeed(container, state) {
 }
 
 async function openWinPendingSeed(container, state, content) {
-  const modal = openModal({
+  return runWinPendingSeed(container, state, {
     title: "Khởi tạo đợt giao từ file công nợ WinCommerce",
     icon: "fa-file-import",
+    preview: () => api.mtWinPendingSeedPreview(content),
+    commit: (h) => api.mtWinPendingSeedCommit({ content, expected_hash: h }),
+  });
+}
+
+// Khởi tạo từ SỐ DƯ ĐẦU KỲ ĐÃ CHỐT — không phải nạp lại file.
+//
+// Bản số dư Win đã nạp và chốt một lần rồi. Bắt kế toán đi tìm lại đúng file
+// Excel cũ là mời một lỗi rất khó thấy: nạp nhầm bản sửa sau, hoặc nhầm kỳ —
+// và `MT Win Pending` không giữ liên kết ngược về file nên không chỗ nào đối
+// chiếu được. Bản đã chốt là nguồn đã qua kiểm.
+async function pickWinPendingFromOpening(container, state) {
+  let list;
+  try {
+    list = await api.mtOpenings();
+  } catch (e) {
+    return toast(e.message, "error");
+  }
+  // `list_openings` trả MỘT dòng cho mỗi chuỗi, và tên bản ghi nằm trong `doc`
+  // (null khi chuỗi chưa nạp lần nào) — không phải ở cấp ngoài.
+  const win = (list.rows || []).find((r) => r.chain === "WinCommerce");
+  if (!win || !win.doc) {
+    return toast("Chưa nạp số dư đầu kỳ WinCommerce lần nào. Làm ở màn "
+      + "Số dư đầu kỳ trước, hoặc dùng nút khởi tạo từ file.", "error");
+  }
+  if (win.status !== "Đã chốt") {
+    // Chặn ở đây CHỨ KHÔNG chỉ dựa vào backend: báo ngay tại chỗ bấm thì kế
+    // toán biết phải đi chốt, thay vì nhận một lỗi giữa hộp thoại xem trước.
+    return toast(`Bản số dư WinCommerce đang ở trạng thái "${win.status || "Nháp"}". `
+      + "Chỉ dựng đợt giao từ bản ĐÃ CHỐT — bản nháp còn sửa được, chốt lại khác đi "
+      + "thì các PO vừa tạo không còn căn cứ nào.", "error");
+  }
+  return openWinPendingFromOpening(container, state, win.doc.name);
+}
+
+async function openWinPendingFromOpening(container, state, opening) {
+  return runWinPendingSeed(container, state, {
+    title: `Khởi tạo đợt giao từ số dư đã chốt ${opening}`,
+    icon: "fa-file-circle-check",
+    preview: () => api.mtWinPendingSeedFromOpeningPreview(opening),
+    commit: (h) => api.mtWinPendingSeedFromOpeningCommit({ opening, expected_hash: h }),
+  });
+}
+
+// Khung chung cho CẢ HAI đường khởi tạo. Vẽ hai lần là sớm muộn một bên quên
+// hiện phần "dòng bị chặn" — tức là ghi ít hơn người duyệt tưởng, im lặng.
+async function runWinPendingSeed(container, state, opt) {
+  const modal = openModal({
+    title: opt.title,
+    icon: opt.icon,
     maxWidth: 860,
     body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
   });
   let res;
   try {
-    res = await api.mtWinPendingSeedPreview(content);
+    res = await opt.preview();
   } catch (e) {
     setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
     return;
@@ -4583,7 +4797,7 @@ async function openWinPendingSeed(container, state, content) {
   if (go) go.addEventListener("click", async () => {
     go.disabled = true;
     try {
-      const out = await api.mtWinPendingSeedCommit({ content, expected_hash: res.plan_hash });
+      const out = await opt.commit(res.plan_hash);
       toast(out.message, (out.failed || []).length ? "error" : "success");
       if (out.warning) toast(out.warning, "error");
       modal.close();

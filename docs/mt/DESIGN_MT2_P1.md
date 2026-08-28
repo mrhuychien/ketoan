@@ -581,7 +581,9 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-Y** vá lỗi cú pháp làm TRẮNG portal + bịt vùng mù của bước kiểm | `4c5299d` | `portal_js_check` |
 | **MT2-Z** hai cuốn sổ tách CHI TIẾT TỪNG CHUỖI + vá lỗi bấm-ra-số-khác | `e2c7854` | `two_books_check` |
 | **MT2-Z2** năm lỗi bản soát đối kháng tìm ra ngay trong MT2-Z | `5c27310` | `two_books_check` |
-| **MT2-Z3** hạn xuất hóa đơn RIÊNG của chuỗi + vá bộ giả `add_months` | *(commit này)* | `two_books_check` |
+| **MT2-Z3** hạn xuất hóa đơn RIÊNG của chuỗi + vá bộ giả `add_months` | `179b676` | `two_books_check` |
+| **MT2-AA** màn soát hóa đơn BỎ SÓT số HĐĐT (mốc theo từng chuỗi) | *(commit này)* | `einv_gap_check` |
+| **MT2-AB** khởi tạo đợt giao Win từ SỐ DƯ ĐÃ CHỐT, không nạp lại file | *(commit này)* | `win_seed_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -593,7 +595,7 @@ for t in regression_check crosscheck_mt2 mutation_check \
          chain_filter_check opening_check win_grn_check opening_store_check \
          mega_check refid_check replace_check opening_gl_check \
          table_width_check client_script_check win_pdf_check \
-         two_books_check portal_js_check; do
+         two_books_check portal_js_check einv_gap_check win_seed_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -882,6 +884,56 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AB — khởi tạo đợt giao Win từ số dư ĐÃ CHỐT
+
+Số dư đầu kỳ Win đã nạp và chốt một lần. Bắt kế toán tìm lại đúng file Excel cũ
+để nạp lần nữa là mời một lỗi rất khó thấy — nạp nhầm bản sửa sau, hoặc nhầm kỳ
+— và `MT Win Pending` không giữ liên kết ngược về file nên không chỗ nào đối
+chiếu được hai lần đọc. Bản đã chốt là nguồn đã qua kiểm.
+
+**Chỉ nhận bản "Đã chốt".** Bản nháp còn sửa được; dựng đợt giao từ nó rồi chốt
+lại khác đi là các PO đứng đó không còn căn cứ nào. Chặn ở cả backend lẫn ngay
+tại chỗ bấm — báo tại nút thì kế toán biết phải đi chốt, thay vì nhận một lỗi
+giữa hộp thoại xem trước.
+
+**Hai đường vào, một luật.** `_plan()` (chặn) và `_write_plan()` (ghi + kiểm vân
+tay) dùng chung cho cả đường đọc file lẫn đường đọc bản đã chốt. Chặn theo hai
+luật khác nhau là tạo hai bản ghi cho cùng một đợt giao; kiểm vân tay ở hai chỗ
+là sớm muộn một chỗ quên. Nhóm dòng lấy là `KIND_NO_INVOICE` — đúng định nghĩa
+mà đường đọc file dùng.
+
+Nhân tiện bịt thêm một lỗ có sẵn: PO **trùng ngay trong chính lần nạp** trước
+đây không bị chặn (chỉ chặn PO đã có trong hệ).
+
+### MT2-AA — soát hóa đơn BỎ SÓT số HĐĐT
+
+Câu hỏi khác hẳn thẻ hai cuốn sổ: thẻ kia chỉ nhìn phần **còn nợ**; màn này nhìn
+**mọi hóa đơn bán**, vì hóa đơn đã thu đủ tiền mà trống ô số HĐĐT vẫn là lỗ hổng
+chứng từ. Hai con số không bao giờ bằng nhau — màn hình nói thẳng điều đó.
+
+Danh sách phẳng "mọi hóa đơn trống ô số HĐĐT" gần như vô dụng: phần lớn là hàng
+vừa giao, chưa tới lượt. Cả màn xoay quanh một phép chia, quanh **MỐC** = hóa
+đơn mới nhất đã điền số:
+
+```
+cũ hơn mốc mà trống   ->  BỎ SÓT        (đã đi qua rồi mà không xuất)
+mới hơn mốc mà trống  ->  CHƯA TỚI LƯỢT (bình thường)
+```
+
+Đó chính là "gần nhất tính từ hóa đơn được điền".
+
+**Mốc tính riêng từng chuỗi.** Mỗi chuỗi có nhịp xuất riêng — mốc chung thì chuỗi
+chậm nhất bị chấm bỏ sót toàn bộ, chuỗi nhanh không bao giờ lộ lỗ hổng nào.
+
+**Mốc là một phỏng đoán, nên nó được in ra.** Giả định "xuất theo thứ tự thời
+gian" đúng với quy trình nhưng không phải định luật. Màn hình luôn nói mốc đang
+là hóa đơn nào, ngày nào, và đếm cả hai phía — người đọc nhìn mốc là biết con số
+tin được tới đâu. Chưa hóa đơn nào có số thì **không chấm bỏ sót cho ai**: đó là
+"chưa bắt đầu", không phải "sai sót hàng loạt".
+
+Phiếu trả hàng bị loại khỏi danh sách và **đếm riêng** — hóa đơn điều chỉnh/thay
+thế MISA đi theo luật khác, trộn vào là chấm nhầm cả một loại chứng từ.
 
 ### MT2-Z3 — "chưa xuất HĐĐT" ở mỗi chuỗi nghĩa khác nhau
 

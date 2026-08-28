@@ -228,6 +228,12 @@ export const api = {
   mtWinPendingDelete: (name) => callMethod(NS + "mt_win_pending.delete_pending", withCompany({ name })),
   mtWinPendingSeedPreview: (content) => callMethod(NS + "mt_win_pending.preview_seed", withCompany({ content })),
   mtWinPendingSeedCommit: (a) => callMethod(NS + "mt_win_pending.commit_seed", withCompany(a)),
+  // Nạp từ SỐ DƯ ĐẦU KỲ ĐÃ CHỐT — không phải nạp lại file. Bản đã chốt là nguồn
+  // đã qua kiểm; đi tìm lại đúng file Excel cũ là mời nhầm bản sửa sau/nhầm kỳ.
+  mtWinPendingSeedFromOpeningPreview: (opening) =>
+    callMethod(NS + "mt_win_pending.preview_seed_from_opening", withCompany({ opening })),
+  mtWinPendingSeedFromOpeningCommit: (a) =>
+    callMethod(NS + "mt_win_pending.commit_seed_from_opening", withCompany(a)),
   mtWinCustomers: () => callMethod(NS + "mt_win_pending.search_win_customers", withCompany({})),
   mtWinGrnPreview: (content) => callMethod(NS + "mt_win_grn.preview", withCompany({ content })),
   mtWinGrnAttach: (a) => callMethod(NS + "mt_win_grn.attach_grn", withCompany(a)),
@@ -257,6 +263,10 @@ export const api = {
   mtDueSummary: (a) => callMethod(NS + "mt_debt.get_due_summary", withCompany(a)),
   mtDueInvoices: (a) => callMethod(NS + "mt_debt.get_due_invoices", withCompany(a)),
   mtCreditTerms: () => callMethod(NS + "mt_debt.get_credit_terms", withCompany({})),
+
+  // Soát hóa đơn BỊ BỎ SÓT số hóa đơn điện tử. KHÔNG phải con số của thẻ hai
+  // cuốn sổ: màn kia chỉ nhìn phần còn nợ, màn này nhìn MỌI hóa đơn bán.
+  mtEinvGaps: (a) => callMethod(NS + "mt_einv.get_gaps", withCompany(a)),
   mtSaveCreditDays: (customer, credit_days) =>
     callMethod(NS + "mt_debt.save_credit_days", withCompany({ customer, credit_days })),
 

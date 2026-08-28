@@ -246,6 +246,142 @@ def _plan_hash(rows):
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
 
+def _seed_rows_from_opening(opening, company):
+    """Cùng danh sách đó, nhưng đọc từ SỐ DƯ ĐẦU KỲ ĐÃ CHỐT thay vì file.
+
+    ════════════════════════════════════════════════════════════════════════
+    VÌ SAO CÓ ĐƯỜNG THỨ HAI
+    ════════════════════════════════════════════════════════════════════════
+
+    Số dư đầu kỳ Win đã được nạp và CHỐT một lần rồi. Bắt kế toán đi tìm lại
+    đúng file Excel cũ để nạp lần nữa là mời một lỗi rất khó thấy: nạp nhầm bản
+    sửa sau, hoặc nhầm kỳ. Hai lần đọc ra hai danh sách mà không chỗ nào đối
+    chiếu, vì `MT Win Pending` không giữ liên kết ngược về file.
+
+    Bản đã chốt là NGUỒN đã qua kiểm — đọc thẳng từ đó thì không có cơ hội lệch.
+
+    ⚠ CHỈ NHẬN BẢN "ĐÃ CHỐT". Bản nháp còn sửa được; dựng đợt giao từ nó rồi
+    chốt lại khác đi là các PO đứng đó không còn căn cứ nào.
+
+    Nhóm dòng lấy là `KIND_NO_INVOICE` — đúng định nghĩa "còn nợ mà KHÔNG có số
+    hóa đơn" mà đường đọc file dùng (`mt_opening._kind_of`: không có `inv_no`
+    thì là nhóm này). Một định nghĩa, hai đường vào.
+    """
+    from ketoan.api.mt_opening import KIND_NO_INVOICE
+
+    if not opening or not frappe.db.exists("MT Opening Balance", opening):
+        frappe.throw(_("Không có bản số dư đầu kỳ {0}").format(opening or "(trống)"))
+
+    doc = frappe.get_doc("MT Opening Balance", opening)
+    if doc.company != company:
+        frappe.throw(_("Bản số dư {0} thuộc công ty khác ({1})").format(opening, doc.company))
+    if doc.chain != WIN_CHAIN:
+        frappe.throw(_("Bản số dư {0} là của chuỗi {1}, không phải {2} — danh sách đợt "
+                       "giao chỉ có ở {2}.").format(opening, doc.chain, WIN_CHAIN))
+    if doc.status != "Đã chốt":
+        frappe.throw(_(
+            "Bản số dư {0} đang ở trạng thái '{1}'. Chỉ dựng đợt giao từ bản ĐÃ CHỐT — "
+            "bản nháp còn sửa được, chốt lại khác đi thì các PO vừa tạo không còn căn "
+            "cứ nào.").format(opening, doc.status or "Nháp"))
+
+    rows = []
+    for l in doc.lines:
+        if l.kind != KIND_NO_INVOICE:
+            continue
+        # Cột `Ghi chú` của file Win giữ số PO; `mt_opening_store` đã cất nguyên
+        # văn vào `note` của từng dòng.
+        rows.append({
+            "po_no": cstr(l.note or "").strip() or None,
+            "party": l.party,
+            "amount_before_vat": flt(l.net),
+            "vat_amount": flt(l.vat),
+            "total_amount": flt(l.gross) or flt(l.remaining),
+            "source_row": cint(l.source_row),
+        })
+    return doc, rows
+
+
+def _plan(rows, company):
+    """Chia danh sách thành PHẦN GHI ĐƯỢC và PHẦN BỊ CHẶN, kèm vân tay kế hoạch.
+
+    Dùng chung cho CẢ HAI đường vào (file và số dư đã chốt). Tách ra để hai
+    đường không bao giờ chặn theo hai luật khác nhau — trùng PO ở đường này mà
+    lọt ở đường kia là tạo hai bản ghi cho cùng một đợt giao.
+    """
+    if len(rows) > MAX_SEED:
+        frappe.throw(_("Dựng ra {0} đợt giao — vượt trần {1}. Gần như chắc chắn đọc nhầm "
+                       "cột. KHÔNG ghi gì.").format(len(rows), MAX_SEED))
+
+    existing = set()
+    if rows:
+        pos = [r["po_no"] for r in rows if r["po_no"]]
+        if pos:
+            keys = {"p%d" % i: po for i, po in enumerate(pos)}
+            got = frappe.db.sql(
+                "SELECT po_no FROM `tab%s` WHERE company = %%(company)s AND po_no IN (%s)"
+                % (DOCTYPE, ", ".join("%%(p%d)s" % i for i in range(len(pos)))),
+                dict(keys, company=company))
+            existing = {r[0] for r in got}
+
+    # Trùng PO NGAY TRONG chính danh sách đang dựng cũng phải chặn: hai dòng
+    # cùng PO thì cái thứ hai không thêm thông tin gì, chỉ tạo bản ghi đôi.
+    seen = set()
+    blocked, plan = [], []
+    for r in rows:
+        if not r["po_no"]:
+            blocked.append(dict(r, reason="Không có số PO — không có khóa nào để theo dõi"))
+        elif r["po_no"] in existing:
+            blocked.append(dict(r, reason="PO đã được theo dõi rồi"))
+        elif r["po_no"] in seen:
+            blocked.append(dict(r, reason="PO trùng với một dòng khác ngay trong lần nạp này"))
+        else:
+            seen.add(r["po_no"])
+            plan.append(r)
+    return plan, blocked
+
+
+@frappe.whitelist()
+def preview_seed_from_opening(opening, company=None):
+    """Xem trước đợt giao dựng từ SỐ DƯ ĐẦU KỲ ĐÃ CHỐT. KHÔNG ghi gì."""
+    guard_mt()
+    _require_tables()
+    _tables()
+    company = _company(company)
+
+    doc, rows = _seed_rows_from_opening(opening, company)
+    plan, blocked = _plan(rows, company)
+    return {
+        "source": "opening",
+        "opening": doc.name,
+        "cutover_date": cstr(doc.cutover_date or ""),
+        "chain": doc.chain,
+        "rows": plan,
+        "blocked": blocked,
+        "plan_hash": _plan_hash(plan),
+        "total_amount": round(sum(flt(r["total_amount"]) for r in plan), 2),
+        "n": len(plan),
+        "note": _(
+            "Dựng từ bản số dư đầu kỳ {0} (đã chốt ngày {1}) — không phải nạp lại file. "
+            "Đây là các dòng CÓ tiền nhưng KHÔNG có số hóa đơn: hàng đã giao, chưa xuất "
+            "hóa đơn. File Excel đang cộng chúng vào `Số còn nợ`; chúng KHÔNG phải công "
+            "nợ và sẽ được theo dõi riêng ở đây."
+        ).format(doc.name, cstr(doc.cutover_date or "?")),
+    }
+
+
+@frappe.whitelist()
+def commit_seed_from_opening(opening, expected_hash, company=None):
+    """Tạo đợt giao từ SỐ DƯ ĐẦU KỲ ĐÃ CHỐT."""
+    guard_manager()
+    _require_tables()
+    _tables()
+    company = _company(company)
+
+    pre = preview_seed_from_opening(opening, company=company)
+    return _write_plan(pre, company, source_note=_(
+        "Khởi tạo từ bản số dư đầu kỳ {0}").format(pre["opening"]), expected_hash=expected_hash)
+
+
 @frappe.whitelist()
 def preview_seed(content, company=None):
     """Xem trước danh sách đợt giao dựng từ file công nợ Win. KHÔNG ghi gì."""
@@ -255,34 +391,12 @@ def preview_seed(content, company=None):
     company = _company(company)
 
     res, rows = _seed_rows(content, company)
-    if len(rows) > MAX_SEED:
-        frappe.throw(_("Dựng ra {0} đợt giao — vượt trần {1}. Gần như chắc chắn đọc nhầm "
-                       "cột. KHÔNG ghi gì.").format(len(rows), MAX_SEED))
-
-    existing = set()
-    if rows:
-        pos = [r["po_no"] for r in rows if r["po_no"]]
-        if pos:
-            keys = {}
-            for i, po in enumerate(pos):
-                keys["p%d" % i] = po
-            got = frappe.db.sql(
-                "SELECT po_no FROM `tab%s` WHERE company = %%(company)s AND po_no IN (%s)"
-                % (DOCTYPE, ", ".join("%%(p%d)s" % i for i in range(len(pos)))),
-                dict(keys, company=company))
-            existing = {r[0] for r in got}
-
-    blocked = []
-    plan = []
-    for r in rows:
-        if not r["po_no"]:
-            blocked.append(dict(r, reason="Không có số PO — không có khóa nào để theo dõi"))
-        elif r["po_no"] in existing:
-            blocked.append(dict(r, reason="PO đã được theo dõi rồi"))
-        else:
-            plan.append(r)
+    # CÙNG `_plan` với đường đọc từ số dư đã chốt: hai đường chặn theo hai luật
+    # khác nhau là tạo hai bản ghi cho cùng một đợt giao.
+    plan, blocked = _plan(rows, company)
 
     return {
+        "source": "file",
         "chain": res["chain"],
         "rows": plan,
         "blocked": blocked,
@@ -296,18 +410,15 @@ def preview_seed(content, company=None):
     }
 
 
-@frappe.whitelist()
-def commit_seed(content, expected_hash, company=None):
-    """Tạo danh sách đợt giao từ file công nợ Win."""
-    guard_manager()
-    _require_tables()
-    _tables()
-    company = _company(company)
+def _write_plan(pre, company, source_note, expected_hash):
+    """Ghi kế hoạch đã xem trước thành `MT Win Pending`. Dùng chung hai đường vào.
 
-    pre = preview_seed(content, company=company)
+    Vân tay kế hoạch kiểm Ở ĐÂY, một chỗ. Để mỗi đường tự kiểm là sớm muộn có
+    một đường quên, và đường đó ghi một thứ khác với thứ người duyệt đã xem.
+    """
     if not expected_hash or expected_hash != pre["plan_hash"]:
         frappe.throw(_(
-            "Nội dung file đã đổi so với lúc xem trước. Xem lại rồi mới ghi — vân tay "
+            "Nội dung đã đổi so với lúc xem trước. Xem lại rồi mới ghi — vân tay "
             "kế hoạch là chốt duy nhất chống việc ghi một thứ khác với thứ đã duyệt."))
 
     created, failed = [], []
@@ -325,9 +436,9 @@ def commit_seed(content, expected_hash, company=None):
             # KHÔNG đoán Customer từ tên chi nhánh trong file. Tên đó là chuỗi tự
             # do ('CHI NHÁNH BÌNH DƯƠNG - CÔNG TY...'), khớp mờ sang Customer là
             # gán sai pháp nhân cho một đợt hàng sắp xuất hóa đơn.
-            doc.note = _("Khởi tạo từ số dư đầu kỳ, dòng {0} của file công nợ. "
-                         "Bên mua ghi trong file: {1}. Chọn lại Customer trước khi "
-                         "xuất hóa đơn.").format(r["source_row"], r["party"] or "(trống)")
+            doc.note = _("{0}, dòng {1}. Bên mua ghi trong file: {2}. Chọn lại Customer "
+                         "trước khi xuất hóa đơn.").format(
+                source_note, r["source_row"], r["party"] or "(trống)")
             doc.flags.ignore_mandatory = True     # `customer` để người chọn
             doc.insert(ignore_permissions=False)
             created.append({"name": doc.name, "po_no": doc.po_no,
@@ -351,6 +462,19 @@ def commit_seed(content, expected_hash, company=None):
             "do, khớp mờ sang Customer là gán sai pháp nhân cho đơn sắp xuất hóa đơn. "
             "Chọn Customer cho từng đợt trước khi xuất."),
     }
+
+
+@frappe.whitelist()
+def commit_seed(content, expected_hash, company=None):
+    """Tạo danh sách đợt giao từ file công nợ Win."""
+    guard_manager()
+    _require_tables()
+    _tables()
+    company = _company(company)
+
+    pre = preview_seed(content, company=company)
+    return _write_plan(pre, company, source_note=_("Khởi tạo từ số dư đầu kỳ, file công nợ"),
+                       expected_hash=expected_hash)
 
 
 @frappe.whitelist()

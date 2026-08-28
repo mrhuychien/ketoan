@@ -448,6 +448,21 @@ def misa_dead_expr():
     return f"(IFNULL(si.custom_misa_status, '') IN ({vals}))"
 
 
+def einvoice_fields():
+    """Tên các ô mà luật "đã xuất HĐĐT" HIỆN ĐANG hỏi trên site này.
+
+    Chỉ để màn hình báo lỗi nói đúng tên ô cần tạo. Có hàm này thì không tầng
+    nào phải gõ lại `"custom_misa_inv_no"` / `"vn_einvoice_number"` vào một câu
+    thông báo — mà mỗi lần gõ lại là một bản sao của luật chờ ngày lệch.
+    """
+    return tuple(f for f in (SI_NO_FIELD, LEGACY_NO_FIELD) if _has_si_field(f))
+
+
+def einvoice_all_fields():
+    """Mọi ô mà luật CÓ THỂ hỏi, kể cả ô site chưa có — để báo 'cần tạo ô nào'."""
+    return (SI_NO_FIELD, LEGACY_NO_FIELD)
+
+
 def einvoice_issued_expr():
     """Mệnh đề SQL: hóa đơn này ĐÃ có số hóa đơn điện tử chưa.
 
