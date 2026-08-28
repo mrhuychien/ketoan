@@ -688,7 +688,7 @@ async function loadTab(container, state) {
             <button class="kt-btn kt-btn--outline kt-btn--sm" id="einv-clear"
                     style="margin-left:auto">Bỏ lọc</button>
           </div></div>`
-      : ""}
+      : ""}`;
 
   if (bucket === "chiet_khau") {
     setHTML(body, html`${head}${customerFilterBar(state)}${deductionTable(state, res)}`);

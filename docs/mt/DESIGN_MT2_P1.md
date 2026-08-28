@@ -577,7 +577,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-U** bảng không cuộn ngang — đo bằng Chromium, không đoán | `a5083b1` | `table_width_check` |
 | **MT2-V** Client Script làm mất nhóm nút Create của ERPNext | `080f585` `4c18a50` `4ae5e6c` | `client_script_check` |
 | **MT2-W** đọc THẲNG bảng kê thanh toán PDF của WinCommerce | `8a78341` | `win_pdf_check` · `regression_check` |
-| **MT2-X** hai cuốn sổ công nợ đặt cạnh nhau (sổ ERPNext ↔ đầu HĐĐT) | *(commit này)* | `two_books_check` |
+| **MT2-X** hai cuốn sổ công nợ đặt cạnh nhau (sổ ERPNext ↔ đầu HĐĐT) | `8f4dee3` | `two_books_check` |
+| **MT2-Y** vá lỗi cú pháp làm TRẮNG portal + bịt vùng mù của bước kiểm | *(commit này)* | `portal_js_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -589,7 +590,7 @@ for t in regression_check crosscheck_mt2 mutation_check \
          chain_filter_check opening_check win_grn_check opening_store_check \
          mega_check refid_check replace_check opening_gl_check \
          table_width_check client_script_check win_pdf_check \
-         two_books_check; do
+         two_books_check portal_js_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -878,6 +879,38 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-Y — lỗi cú pháp làm TRẮNG portal, và bước kiểm đã bỏ sót nó
+
+Kế toán mở portal và nhận đúng một dòng: **`Lỗi tải màn hình: Unexpected
+identifier '`**. Cả màn hình trắng — không phải một nút hỏng, mà không có gì
+chạy được, vì một module ES gãy cú pháp thì trình duyệt bỏ nguyên file.
+
+**Lỗi:** khi chèn dải lọc "chưa xuất HĐĐT" vào `views/mt.js`, phép thay chuỗi
+làm rơi mất dấu backtick đóng của `const head = html\`…\``.
+
+**Điều đáng nói hơn cái lỗi:** nó lọt qua vì **bước kiểm sai**, không phải vì
+thiếu bước kiểm.
+
+```
+node --check ketoan/public/ketoan/views/mt.js        →  ĐẠT          (SAI)
+cp views/mt.js x.mjs && node --check x.mjs           →  BÁO LỖI dòng 694
+```
+
+`node --check` trên đuôi `.js` phân tích file như **CommonJS**. Trình duyệt nạp
+portal bằng `<script type="module">`, tức **ES module**. Hai bộ phân tích cú
+pháp khác nhau, và khác biệt đó đủ để nuốt một template literal không đóng.
+
+`docs/mt/verified/portal_js_check.py` ép đuôi `.mjs` — kiểm ĐÚNG cách trình
+duyệt nạp — trên cả 28 file JS của portal, và kiểm thêm hai đường trắng màn
+hình khác mà Console **không** báo (lỗi chỉ hiện ở tab Network):
+
+- mọi `import` tương đối trỏ tới file có thật;
+- 10 module khai trong **import map** của `ketoan/www/ketoan.html` đều có thật —
+  đổi tên hay dời một file mà quên sửa map thì portal trắng y hệt.
+
+Bộ kiểm đã được **thử lại bằng chính lỗi đó**: khôi phục dấu backtick thiếu →
+`node --check *.js` vẫn nói ĐẠT, `portal_js_check` bắt đúng dòng 694.
 
 ### MT2-X — hai cuốn sổ công nợ, đặt cạnh nhau
 
