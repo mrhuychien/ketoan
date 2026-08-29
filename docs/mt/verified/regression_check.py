@@ -130,6 +130,38 @@ def code_only(path):
     return "\n".join("" if i in drop else l for i, l in enumerate(lines))
 
 
+def js_body(js, fn_name):
+    """Thân của một hàm JS, cắt tới khai báo cấp cao nhất kế tiếp.
+
+    Để phép kiểm soi được CHỖ GỌI chứ không phải CHỖ ĐỊNH NGHĨA.
+
+    ════════════════════════════════════════════════════════════════════════
+    VÌ SAO CÓ HÀM NÀY
+    ════════════════════════════════════════════════════════════════════════
+
+    Phép kiểm dạng `"foo(c)" in js` luôn ĐẠT ngay cả khi chỗ gọi đã bị gỡ —
+    vì chính dòng `function foo(c) {` cũng chứa chuỗi đó. Đã dính ba lần trong
+    bộ này (`twoBooksChain`, `loadChainGl`, `loadWinEinv`): phép kiểm thấy
+    ĐỊNH NGHĨA rồi tưởng là CHỖ DÙNG, và cấp ✅ cho một tính năng đã bị gỡ.
+
+    Trả về "" khi không tìm thấy hàm — người gọi tự quyết đó là hỏng hay không.
+    """
+    for kw in ("async function %s(" % fn_name, "function %s(" % fn_name):
+        i = js.find(kw)
+        if i < 0:
+            continue
+        rest = js[i + len(kw):]
+        cuts = [c for c in (rest.find("\nfunction "), rest.find("\nasync function "),
+                            rest.find("\nconst "), rest.find("\nexport ")) if c >= 0]
+        return rest[:min(cuts)] if cuts else rest
+    return ""
+
+
+def js_calls(js, caller, callee):
+    """Hàm `caller` có GỌI `callee` không — soi trong thân, không soi cả file."""
+    return ("%s(" % callee) in js_body(js, caller)
+
+
 def _stub_frappe():
     """Bộ giả frappe tối thiểu — đủ để import module đọc file, không hơn."""
     fr = types.ModuleType("frappe")

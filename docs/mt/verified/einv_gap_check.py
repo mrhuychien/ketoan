@@ -166,6 +166,48 @@ def main():
           f"(đúng: LOTTE chỉ đang chậm nhịp)")
     bad += not ok
 
+    # ── 5b. `scope` — LIỆT KÊ tập nào, nhưng ĐẾM thì luôn đủ cả ba ──────
+    #
+    # Bước "Chờ xuất hóa đơn" của Win cần đúng tập `chua_toi_luot`: hàng đã ghi
+    # sổ, chưa phát hành HĐĐT. Nó có sẵn trong ERPNext — không phải nhập tay như
+    # `MT Win Pending` (thứ theo dõi đợt giao CHƯA có hóa đơn, tập khác hẳn).
+    print("-" * 82)
+    me._scan = lambda company, chain=None: ("EXPR", [dict(r) for r in FIX])
+    got = {}
+    for sc in ("bo_sot", "chua_toi_luot", "tat_ca"):
+        d3 = me.get_gaps(scope=sc)
+        got[sc] = sorted(r["name"] for r in d3["rows"])
+    ok = (got["bo_sot"] == ["W-2"] and got["chua_toi_luot"] == ["L-2", "W-4"]
+          and got["tat_ca"] == ["L-2", "W-2", "W-4"])
+    print(f"  {'✅' if ok else '❌'} ba phạm vi liệt kê đúng tập của nó: {got}")
+    bad += not ok
+
+    d3 = me.get_gaps(scope="chua_toi_luot")
+    ok = d3["missed"]["count"] == 1 and d3["backlog"]["count"] == 2
+    print(f"  {'✅' if ok else '❌'} đổi phạm vi KHÔNG làm biến mất con số tổng — vẫn đếm đủ cả "
+          f"hai nhóm ({d3['missed']['count']} bỏ sót / {d3['backlog']['count']} chưa tới lượt)")
+    bad += not ok
+
+    ok = sorted(got["tat_ca"]) == sorted(got["bo_sot"] + got["chua_toi_luot"])
+    print(f"  {'✅' if ok else '❌'} `tat_ca` đúng bằng hai tập kia cộng lại, không trùng không sót")
+    bad += not ok
+
+    # Phải chặn bằng THÔNG BÁO RÕ, không phải bằng một `KeyError` tình cờ.
+    # Gỡ mệnh đề kiểm mà vẫn "nổ" thì phép kiểm cũ vẫn xanh, còn người dùng
+    # nhận một lỗi 500 không đọc được.
+    try:
+        me.get_gaps(scope="bịa")
+        ok, msg = False, "(không chặn)"
+    except Exception as e:
+        msg = str(e)
+        # Phải là THÔNG BÁO ĐỌC ĐƯỢC, không phải một `KeyError` tình cờ.
+        # `KeyError("bịa")` cũng chứa chữ "bịa" — dò tên giá trị là chưa đủ.
+        ok = "Phạm vi không hợp lệ" in msg and "bịa" in msg
+    print(f"  {'✅' if ok else '❌'} phạm vi lạ -> CHẶN kèm thông báo nói RA giá trị sai "
+          f"({msg[:60]!r}). Im lặng lấy mặc định là màn hình tưởng đang xem một tập, "
+          f"thật ra xem tập khác")
+    bad += not ok
+
     # ── 6. Site chưa có ô số HĐĐT -> nói ra, KHÔNG trả danh sách rỗng ───
     print("-" * 82)
     me._scan = lambda company, chain=None: (None, [])
@@ -202,6 +244,32 @@ def main():
 
     ok = "frontierLine" in js
     print(f"  {'✅' if ok else '❌'} và in ra MỐC, để người đọc tự thấy con số tin được tới đâu")
+    bad += not ok
+
+    # Bước "Chờ xuất hóa đơn" của Win phải bày CẢ HAI nghĩa, và nghĩa có sẵn
+    # dữ liệu phải đứng TRƯỚC — bản đầu chỉ dựng nghĩa phải nhập tay nên màn
+    # hình trống trong khi câu trả lời đã nằm sẵn trong ERPNext.
+    print("-" * 82)
+    ok = rc.js_calls(js, "loadWinPending", "loadWinEinv") and 'id="wp-einv"' in js
+    print(f"  {'✅' if ok else '❌'} bước 'Chờ xuất hóa đơn' của Win có liệt kê hóa đơn ERPNext "
+          f"chưa điền số HĐĐT")
+    bad += not ok
+
+    seg = js.split("async function loadWinPending")[1].split("\nasync function ")[0]
+    i_einv = seg.find('id="wp-einv"')
+    i_pend = seg.find("Đợt giao CHƯA có hóa đơn")
+    ok = 0 <= i_einv < i_pend
+    print(f"  {'✅' if ok else '❌'} và nó đứng TRƯỚC danh sách đợt giao nhập tay — cái có sẵn dữ "
+          f"liệu phải hiện trước cái phải nhập")
+    bad += not ok
+
+    ok = "state.wpEinvPage" in js and "state.wpEinvScope" in js
+    print(f"  {'✅' if ok else '❌'} phân trang và phạm vi dùng ô RIÊNG, không chung `state.page` "
+          f"với danh sách đợt giao (chung là bấm bên này bảng kia nhảy theo)")
+    bad += not ok
+
+    ok = "Hai tập không giao nhau" in js
+    print(f"  {'✅' if ok else '❌'} và màn hình nói rõ hai danh sách KHÁC nhau ở chỗ nào")
     bad += not ok
 
     print("=" * 82)

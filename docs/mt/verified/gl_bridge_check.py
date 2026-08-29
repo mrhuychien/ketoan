@@ -233,8 +233,7 @@ def main():
     #
     # Soi TRONG hàm `paint` — bản đầu cắt theo lần `await loadTab(...)` CUỐI
     # CÙNG của cả file và rơi trúng một modal ở tận cuối, tức đo nhầm chỗ.
-    seg = js.split("async function paint(")[1].split("\nfunction ")[0]
-    ok = "loadChainGl(container, state);" in seg and "await loadChainGl" not in js
+    ok = rc.js_calls(js, "paint", "loadChainGl") and "await loadChainGl" not in js
     print(f"  {'✅' if ok else '❌'} và nạp SAU, KHÔNG `await` — `await` nó là bắt cả bàn làm "
           f"việc chờ một truy vấn sổ cái")
     bad += not ok

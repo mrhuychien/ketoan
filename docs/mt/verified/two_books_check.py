@@ -546,8 +546,7 @@ def main():
     # gỡ chỗ gọi, vì chuỗi đó cũng nằm trong chính dòng `function
     # twoBooksChain(c) {`. Phép kiểm dò chuỗi trên cả file luôn có nguy cơ này:
     # nó thấy ĐỊNH NGHĨA và tưởng là CHỖ DÙNG.
-    shell_c = js.split("function chainShell")[1].split("\n// ═══")[0]
-    ok = "twoBooksChain(c)" in shell_c
+    ok = rc.js_calls(js, "chainShell", "twoBooksChain")
     print(f"  {'✅' if ok else '❌'} `chainShell` GỌI `twoBooksChain` — bàn làm việc của một chuỗi "
           f"cũng bày hai cuốn sổ cạnh nhau")
     bad += not ok

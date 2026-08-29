@@ -172,23 +172,44 @@ def _sum(rows):
     return {"count": len(rows), "amount": round(sum(flt(r["grand_total"]) for r in rows), 2)}
 
 
+# Ba tập LIỆT KÊ ĐƯỢC. Cùng một phép chia quanh MỐC, chỉ khác chỗ đứng nhìn.
+SCOPES = ("bo_sot", "chua_toi_luot", "tat_ca")
+
+
 @frappe.whitelist()
-def get_gaps(company=None, chain=None, page=1, page_size=50):
-    """Hóa đơn MT bị bỏ sót số HĐĐT, tách khỏi phần chưa tới lượt.
+def get_gaps(company=None, chain=None, page=1, page_size=50, scope="bo_sot"):
+    """Hóa đơn MT chưa điền số HĐĐT, tách 'bỏ sót' khỏi 'chưa tới lượt'.
 
     Không truyền `chain` -> soát toàn kênh, kèm bảng gộp theo từng chuỗi (MỐC
     của mỗi chuỗi tính riêng, xem chú thích đầu module).
+
+    `scope` chọn tập nào được LIỆT KÊ — cả ba đều được ĐẾM trong mọi trường hợp:
+
+      · `bo_sot`        — cũ hơn mốc mà vẫn trống. Màn soát dùng cái này.
+      · `chua_toi_luot` — mới hơn mốc. Đây chính là "CHỜ XUẤT HÓA ĐƠN": hàng đã
+                          ghi sổ, chưa phát hành HĐĐT, và chưa có gì bất thường.
+      · `tat_ca`        — cả hai.
+
+    Vì sao có `chua_toi_luot`: bước "Chờ xuất hóa đơn" của WinCommerce cần đúng
+    danh sách này, và nó có sẵn trong ERPNext — không phải nhập tay như
+    `MT Win Pending` (thứ theo dõi đợt giao CHƯA có hóa đơn, một tập khác hẳn).
     """
     guard_mt()
     _require_tables()
     company = _company(company)
     page = max(1, cint(page))
     page_size = min(200, max(10, cint(page_size) or 50))
+    scope = cstr(scope or "bo_sot").strip() or "bo_sot"
+    if scope not in SCOPES:
+        # Im lặng lấy mặc định là màn hình tưởng đang xem một tập, thật ra xem
+        # tập khác — con số đọc ra sai mà không chỗ nào báo.
+        frappe.throw(_("Phạm vi không hợp lệ: {0}").format(scope))
 
     einv, rows = _scan(company, chain=chain)
     if not einv:
         return {
             "supported": False, "rows": [], "total": 0, "pages": 1, "page": 1,
+            "scope": scope,
             "chains": [], "frontier": None,
             "missed": {"count": 0, "amount": 0.0},
             "backlog": {"count": 0, "amount": 0.0},
@@ -235,15 +256,23 @@ def get_gaps(company=None, chain=None, page=1, page_size=50):
             })
         by_chain.sort(key=lambda x: -x["missed"]["amount"])
 
-    # Bỏ sót LÂU NHẤT lên trước — đó là thứ tự đi soát.
-    missed.sort(key=lambda r: (r["posting_date"], r["name"]))
-    total = len(missed)
+    # Tập ĐEM LIỆT KÊ. Cả ba tập vẫn được đếm ở `missed`/`backlog` bên dưới,
+    # nên đổi `scope` không bao giờ làm biến mất một con số tổng.
+    listed = {"bo_sot": missed,
+              "chua_toi_luot": backlog,
+              "tat_ca": missed + backlog}[scope]
+
+    # CŨ NHẤT LÊN TRƯỚC cho cả ba tập — đó là thứ tự làm việc: tờ đọng lâu nhất
+    # là tờ phải xử trước, dù nó thuộc nhóm nào.
+    listed = sorted(listed, key=lambda r: (r["posting_date"], r["name"]))
+    total = len(listed)
     start = (page - 1) * page_size
     return {
         "supported": True,
         "company": company,
         "chain": chain or "",
-        "rows": missed[start:start + page_size],
+        "scope": scope,
+        "rows": listed[start:start + page_size],
         "total": total,
         "pages": max(1, -(-total // page_size)),
         "page": page,

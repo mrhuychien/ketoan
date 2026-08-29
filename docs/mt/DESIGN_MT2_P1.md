@@ -585,7 +585,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AA** màn soát hóa đơn BỎ SÓT số HĐĐT (mốc theo từng chuỗi) | `62f9c0c` | `einv_gap_check` |
 | **MT2-AB** khởi tạo đợt giao Win từ SỐ DƯ ĐÃ CHỐT, không nạp lại file | `62f9c0c` | `win_seed_check` |
 | **MT2-AC** hai cuốn sổ ngay trong trang chuỗi + màn trống nói đúng lý do | `a03452b` | `two_books_check` · `win_seed_check` |
-| **MT2-AD** cuốn sổ THỨ BA: sổ cái TK 131 + cầu nối phân tích chỗ lệch | *(commit này)* | `gl_bridge_check` |
+| **MT2-AD** cuốn sổ THỨ BA: sổ cái TK 131 + cầu nối phân tích chỗ lệch | `a892c6b` | `gl_bridge_check` |
+| **MT2-AE** "Chờ xuất hóa đơn" Win: liệt kê HĐ ERPNext thiếu số MISA | *(commit này)* | `einv_gap_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -887,6 +888,38 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AE — "Chờ xuất hóa đơn" có HAI nghĩa, và em dựng nhầm cái
+
+Kế toán hỏi: *"chỉ cần liệt kê hóa đơn trên ERPNext chưa điền số MISA là được
+mà? sao giờ vẫn chưa hiển thị?"* — đúng, và đó là nghĩa em bỏ qua.
+
+| | nguồn | có dữ liệu ngay? |
+|---|---|---|
+| **A.** Hóa đơn đã ghi sổ, **chưa có số HĐĐT** | ERPNext | **có** |
+| **B.** Đợt giao **chưa có hóa đơn** (PO/phiếu nhập kho) | `MT Win Pending`, nhập tay | trống tới khi nhập |
+
+Hai tập **không giao nhau**: A đã có Sales Invoice, B thì chưa. Cả hai đều thật.
+Nhưng bản đầu chỉ dựng **B** — thứ phải nhập tay — nên màn hình trống trong khi
+câu trả lời đã nằm sẵn trong ERPNext. A nay đứng **trước**, vì nó có dữ liệu
+ngay và là việc hằng ngày.
+
+Máy tính A đã có sẵn từ MT2-AA; chỉ thiếu chỗ đứng. Thêm `scope` cho
+`mt_einv.get_gaps` để liệt kê được cả `chua_toi_luot` (chính là "chờ xuất hóa
+đơn"), giữ nguyên phép chia quanh MỐC — vì nó có ích ngay tại đây: tờ **cũ hơn
+mốc** là bất thường, tờ mới hơn là hàng đang chờ tới lượt. Đổi `scope` không
+bao giờ làm biến mất con số tổng: cả ba tập vẫn được đếm đủ.
+
+**Ba lỗ trong bộ kiểm, lộ ra nhờ phép thử phá hoại**, và cái thứ ba là lần thứ
+**ba** cùng một kiểu:
+
+- `scope` lạ chặn bằng `KeyError` tình cờ thay vì thông báo đọc được — phép kiểm
+  cũ bắt "có exception" nên vẫn xanh. Nay đòi đúng câu tiếng Việt.
+- `"loadWinEinv" in js` vẫn ĐẠT khi chỗ gọi đã bị gỡ, vì dòng `function
+  loadWinEinv(` cũng chứa chuỗi đó — phép kiểm thấy **định nghĩa** rồi tưởng là
+  **chỗ dùng**. Đã dính đúng kiểu này ở `twoBooksChain` và `loadChainGl`.
+- Nên đưa thành `regression_check.js_calls(js, caller, callee)` — soi trong
+  **thân hàm gọi**. Cả ba bộ kiểm chuyển sang dùng chung.
 
 ### MT2-AD — cuốn sổ thứ ba: sổ cái TK 131
 

@@ -4675,6 +4675,18 @@ const WP_TONE = {
   "Hủy": "gray",
 };
 
+// ── HAI NGHĨA CỦA "CHỜ XUẤT HÓA ĐƠN" ──────────────────────────────────────
+//
+// Kế toán hỏi: "chỉ cần liệt kê hóa đơn trên ERPNext chưa điền số MISA là được
+// mà?" — đúng, và đó là NGHĨA THỨ NHẤT. Bản đầu của bước này chỉ dựng nghĩa thứ
+// hai, thứ phải nhập tay, nên màn hình trống trong khi câu trả lời đã nằm sẵn
+// trong ERPNext.
+//
+//   A. Hóa đơn ĐÃ ghi sổ, CHƯA có số HĐĐT   — nguồn: ERPNext. Không cần nhập gì.
+//   B. Đợt giao CHƯA có hóa đơn (PO/phiếu nhập kho) — nguồn: `MT Win Pending`.
+//
+// Hai tập KHÔNG giao nhau: A đã có Sales Invoice, B thì chưa. Cả hai đều thật,
+// nhưng A phải đứng TRƯỚC vì nó có dữ liệu ngay và là việc hằng ngày.
 async function loadWinPending(container, state) {
   const body = container.querySelector("#mt-body");
   let res;
@@ -4691,8 +4703,22 @@ async function loadWinPending(container, state) {
   const rows = res.rows || [];
 
   setHTML(body, html`
+    <div id="wp-einv" class="kt-mb">
+      <div class="kt-sub"><i class="fas fa-circle-notch fa-spin"></i>
+        đang đọc hóa đơn chưa có số HĐĐT…</div>
+    </div>
+
     <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-primary)">
-      <div class="kt-card-body kt-sub">${res.note}</div>
+      <div class="kt-card-body">
+        <div style="font-weight:600;margin-bottom:4px">
+          <i class="fas fa-truck"></i> Đợt giao CHƯA có hóa đơn trên ERPNext
+        </div>
+        <div class="kt-sub">${res.note}</div>
+        <div class="kt-sub" style="margin-top:6px">
+          Khác hẳn danh sách trên: ở trên là hóa đơn <b>đã ghi sổ</b> mà chưa phát hành HĐĐT;
+          ở đây là đợt giao <b>chưa có hóa đơn nào</b>. Hai tập không giao nhau.
+        </div>
+      </div>
     </div>
 
     <div class="kt-card kt-mb"><div class="kt-card-body"
@@ -4815,6 +4841,105 @@ async function loadWinPending(container, state) {
   if (en) en.addEventListener("click", () => openWinPendingEdit(container, state, null));
   const gr = container.querySelector("#wp-grn");
   if (gr) gr.addEventListener("click", () => pickWinGrn(container, state));
+  // Nạp SAU và KHÔNG chặn: quét toàn bộ hóa đơn của chuỗi, nặng hơn danh sách
+  // đợt giao vốn chỉ đọc một bảng nhỏ.
+  loadWinEinv(container, state);
+}
+
+// Danh sách A: hóa đơn ĐÃ ghi sổ trên ERPNext mà CHƯA điền số HĐĐT.
+//
+// Không cần nhập tay gì — dữ liệu có sẵn. Vẫn giữ phép chia quanh MỐC của
+// `mt_einv` vì nó có ích ngay ở đây: tờ CŨ HƠN mốc là bất thường (đã đi qua mà
+// không xuất), tờ mới hơn là hàng đang chờ tới lượt. Trộn hai loại vào một danh
+// sách là chôn việc thật giữa việc bình thường.
+async function loadWinEinv(container, state) {
+  const box = container.querySelector("#wp-einv");
+  if (!box) return;
+  const chain = state.chain || "WinCommerce";
+  let d;
+  try {
+    d = await api.mtEinvGaps({ chain, scope: state.wpEinvScope || "tat_ca",
+                               page: state.wpEinvPage || 1, page_size: 50 });
+  } catch (e) {
+    setHTML(box, html`<div class="kt-card"><div class="kt-card-body kt-sub"
+      style="color:var(--kt-danger)">Không đọc được danh sách hóa đơn: ${e.message}</div></div>`);
+    return;
+  }
+  if (!d.supported) {
+    setHTML(box, html`<div class="kt-card"><div class="kt-card-body kt-sub">${d.note}</div></div>`);
+    return;
+  }
+
+  const scope = state.wpEinvScope || "tat_ca";
+  const rows = d.rows || [];
+  setHTML(box, html`
+    <div class="kt-card"><div class="kt-card-body">
+      <div style="font-weight:600;margin-bottom:4px">
+        <i class="fas fa-file-invoice"></i> Hóa đơn ĐÃ ghi sổ, CHƯA có số hóa đơn điện tử
+      </div>
+      <div class="kt-sub" style="margin-bottom:10px">
+        Lấy thẳng từ ERPNext — không phải nhập tay. Đây là phần đã là doanh thu và đã vào
+        công nợ, nhưng ${chain} chưa trả được vì hóa đơn chưa phát hành.
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <button class="kt-btn kt-btn--sm ${scope === "tat_ca" ? "" : "kt-btn--outline"}"
+                data-wpe="tat_ca">Tất cả · ${d.missed.count + d.backlog.count}</button>
+        <button class="kt-btn kt-btn--sm ${scope === "bo_sot" ? "" : "kt-btn--outline"}"
+                data-wpe="bo_sot">Bỏ sót · ${d.missed.count}</button>
+        <button class="kt-btn kt-btn--sm ${scope === "chua_toi_luot" ? "" : "kt-btn--outline"}"
+                data-wpe="chua_toi_luot">Chưa tới lượt · ${d.backlog.count}</button>
+        <span class="kt-sub" style="margin-left:auto">${frontierLine(d.frontier, chain)}</span>
+      </div>
+
+      ${d.missed.count
+        ? html`<div class="kt-sub" style="color:var(--kt-danger);margin-bottom:8px">
+            <i class="fas fa-triangle-exclamation"></i>
+            <b>${d.missed.count} tờ (${formatVND(d.missed.amount)}) CŨ HƠN mốc</b> — đã đi qua
+            rồi mà không xuất. Đó là phần bất thường, không phải hàng đang chờ tới lượt.
+          </div>`
+        : ""}
+
+      ${!rows.length
+        ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i>
+            <p>Không có hóa đơn nào của ${chain} thiếu số HĐĐT trong nhóm đang chọn.</p></div>`
+        : html`<div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Hóa đơn</th><th class="kt-col-wide">Bên mua</th>
+              <th>Ngày HĐ</th><th class="num">Tổng HĐ</th></tr></thead>
+            <tbody>${rows.map((r) => html`<tr>
+              <td><a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a></td>
+              <td class="kt-col-wide">${r.customer_name || r.customer}</td>
+              <td>${formatDate(r.posting_date)}</td>
+              <td class="num">${formatVND(r.grand_total)}</td>
+            </tr>`)}</tbody>
+          </table></div>
+          ${pager(d, "hóa đơn")}`}
+
+      ${d.returns_missing.count
+        ? html`<div class="kt-sub" style="margin-top:10px;color:var(--kt-warning)">
+            <i class="fas fa-rotate-left"></i>
+            ${d.returns_missing.count} phiếu trả hàng (${formatVND(d.returns_missing.amount)})
+            cũng trống số HĐĐT — KHÔNG nằm trong danh sách trên, vì hóa đơn điều chỉnh/thay thế
+            trên MISA đi theo luật khác.
+          </div>`
+        : ""}
+    </div></div>`);
+
+  box.querySelectorAll("button[data-wpe]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.wpEinvScope = b.dataset.wpe;
+      state.wpEinvPage = 1;
+      loadWinEinv(container, state);
+    });
+  });
+  // Phân trang RIÊNG của danh sách này — dùng chung `state.page` với danh sách
+  // đợt giao bên dưới là bấm sang trang 2 ở đây thì bảng kia cũng nhảy theo.
+  box.querySelectorAll("button[data-page]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.wpEinvPage = parseInt(b.dataset.page, 10) || 1;
+      loadWinEinv(container, state);
+    });
+  });
   container.querySelectorAll(".wp-edit").forEach((b) => {
     const row = rows.find((r) => r.name === b.dataset.name);
     b.addEventListener("click", () => openWinPendingEdit(container, state, row));
