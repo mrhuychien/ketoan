@@ -589,7 +589,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AE** "Chờ xuất hóa đơn" Win: liệt kê HĐ ERPNext thiếu số MISA | `4252bd6` | `einv_gap_check` |
 | **MT2-AF** BỎ QUA hóa đơn khỏi danh sách soát HĐĐT (patch v0_0_18) | `159fc64` | `einv_gap_check` |
 | **MT2-AG** danh sách soát: cột PO · điểm giao · bộ lọc | `208a735` | `einv_gap_check` · `table_width_check` |
-| **MT2-AH** SỔ THEO DÕI HÓA ĐƠN — dựng lại cuốn Excel kế toán vẫn giữ | *(commit này)* | `ledger_check` |
+| **MT2-AH** SỔ THEO DÕI HÓA ĐƠN — dựng lại cuốn Excel kế toán vẫn giữ | `115eb8c` | `ledger_check` |
+| **MT2-AI** tick chiết khấu 4 trạng thái · phiếu trả kèm chứng từ MISA | *(commit này)* | `ledger_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -891,6 +892,48 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AI — tick chiết khấu, và phiếu trả hàng phải đi kèm chứng từ MISA
+
+**Tick chiết khấu có BỐN trạng thái, không phải hai.** Câu hỏi của kế toán là
+"tờ này xử chiết khấu chưa", nên câu trả lời tự nhiên là ✓ / trống. Nhưng dựng
+hai trạng thái là nói dối ở một chỗ: tờ **chưa đợt nào trả** thì không có gì để
+mà trừ — chấm nó là "không có chiết khấu" là kết luận về một việc chưa xảy ra.
+
+```
+co        ✓ (xanh)   có khoản trừ, và khoản đó gắn ĐÍCH DANH tờ này
+theo_dot  ⊟ (vàng)   đợt trả tờ này CÓ khoản trừ, nhưng của cả đợt
+khong     ☐ (xám)    đợt trả tờ này KHÔNG có khoản trừ nào  → đã biết, và là không
+chua      —          chưa đợt nào trả tờ này               → CHƯA BIẾT
+```
+
+`khong` và `chua` trông giống nhau trên màn hình nhưng ngược nhau về nghĩa, và
+đó đúng là chỗ kế toán sẽ nhìn để quyết định có phải đi đòi hay không.
+
+Tick **không mang số tiền**. Lý do y hệt MT2-AH: chiết khấu thuộc về đợt. Cái
+mới ở đây là `co` — khi bảng kê có dòng ghi *đích danh* số hóa đơn, thì khoản
+đó thật sự thuộc tờ đó, không phải chia. Bộ kiểm vẫn chặn mọi phép chia.
+
+**Hai kịch bản trả hàng là HAI việc khác nhau, và app không được đoán.**
+
+```
+a) hàng date / thời vụ siêu thị trả lại
+   → giao dịch MỚI. Siêu thị xuất HĐ trả cho mình, HOẶC mình xuất HĐ
+     ĐIỀU CHỈNH GIẢM. Hàng đã giao đúng, hóa đơn gốc KHÔNG sai.
+
+b) hàng móp/lỗi trên đường vận chuyển
+   → siêu thị chỉ nhận theo thực nhận. Hóa đơn gốc SAI ngay từ đầu
+     → MISA xuất hóa đơn THAY THẾ.
+```
+
+Trên ERPNext cả hai đều là một phiếu trả hàng — **cùng một hình dạng dữ liệu,
+khác nhau ở nguyên nhân**. Không có trường nào trong ERPNext phân biệt được, và
+suy từ ngày tháng hay từ tỉ lệ trả là đoán. Nên sổ **không phân loại**: nó chỉ
+hỏi *phiếu trả này đã có chứng từ MISA đi kèm chưa*, và khi chưa có thì kêu lên
+`N chưa có HĐ` ngay trên dòng. Người chọn loại chứng từ; app đếm tờ còn thiếu.
+
+Cột quan hệ MISA (`Hóa đơn thay thế` / `Hóa đơn điều chỉnh` / …) đã có sẵn từ
+MT2-AD, nên phần này chỉ **đọc** — không thêm field, không thêm patch.
 
 ### MT2-AH — sổ theo dõi hóa đơn: dựng lại cuốn Excel
 

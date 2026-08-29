@@ -4638,6 +4638,24 @@ async function ensureEinvOpts(state, chain) {
 // con số gần giống nhau mà khác nghĩa là chỗ dễ chép nhầm vào báo cáo nhất.
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Tick CHIẾT KHẤU — bốn trạng thái, bốn nghĩa khác nhau.
+//
+// "Chưa biết" (chưa đợt nào trả tờ này) KHÁC "Không" (đợt đã trả, không có
+// khoản trừ nào). Gộp lại thì hóa đơn chưa thanh toán hiện dấu "không có chiết
+// khấu", và kế toán đọc thành đã kiểm rồi.
+//
+// Không hiện SỐ TIỀN ở đây: khoản trừ bị trừ trên TỔNG ĐỢT, chia cho từng tờ là
+// bịa. Muốn xem số thì bấm Chi tiết — nó bày ở đúng tầng đợt.
+const DISCOUNT_MARK = {
+  co: html`<span style="color:var(--kt-success)" title="có khoản trừ gắn đích danh tờ này">
+      <i class="fas fa-square-check"></i></span>`,
+  theo_dot: html`<span style="color:var(--kt-warning)" title="đợt trả tờ này có khoản trừ, nhưng của cả đợt">
+      <i class="fas fa-square-minus"></i></span>`,
+  khong: html`<span class="kt-sub" title="đợt trả tờ này không có khoản trừ nào">
+      <i class="far fa-square"></i></span>`,
+  chua: html`<span class="kt-sub" title="chưa đợt nào trả tờ này — chưa biết">—</span>`,
+};
+
 const LED_TONE = {
   chua_xuat_hddt: "red",
   chua_thu: "yellow",
@@ -4725,6 +4743,7 @@ async function loadLedger(container, state) {
               <th class="num">Phải thu</th>
               <th class="num">Đã nhận</th>
               <th class="num">Còn lại</th>
+              <th>CK</th>
               <th>Đợt thanh toán</th>
               <th>Trạng thái</th>
             </tr></thead>
@@ -4781,7 +4800,12 @@ function ledgerRow(r, state) {
     <td class="num">${formatVND(r.grand_total)}</td>
     <td class="num">${r.returned
       ? html`<span style="color:var(--kt-warning)">−${formatVND(r.returned)}</span>
-          <div class="kt-sub">${r.n_returns} phiếu</div>`
+          <div class="kt-sub">${r.n_returns} phiếu</div>
+          ${r.returns_no_misa
+            ? html`<div class="kt-sub" style="color:var(--kt-danger)"
+                     title="Phiếu trả đã ghi trên ERPNext nhưng chưa có hóa đơn thay thế / điều chỉnh nào trên MISA. Bấm Chi tiết để xem.">
+                <i class="fas fa-triangle-exclamation"></i> ${r.returns_no_misa} chưa có HĐ</div>`
+            : ""}`
       : html`<span class="kt-sub">—</span>`}</td>
     <td class="num"><b>${formatVND(r.net_due)}</b></td>
     <td class="num">${r.paid_net
@@ -4795,6 +4819,7 @@ function ledgerRow(r, state) {
     <td class="num">${r.remaining
       ? html`<b style="color:var(--kt-danger)">${formatVND(r.remaining)}</b>`
       : html`<span class="kt-sub">—</span>`}</td>
+    <td class="kt-col-role" title="${r.discount_note || ""}">${DISCOUNT_MARK[r.discount] || ""}</td>
     <td>${adv.length
       ? adv.map((a) => html`<div class="kt-sub">
           <a href="/app/mt-payment-advice/${a.advice}" target="_blank">${a.advice_no || a.advice}</a>
@@ -4827,9 +4852,24 @@ async function openTrace(name) {
           <div style="font-weight:600;margin-bottom:6px">
             <i class="fas fa-rotate-left"></i> Hóa đơn xuất trả —
             ${formatVND(d.returned_total)}</div>
-          ${d.returns.map((r) => html`<div class="kt-sub">
-            <a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a>
-            · ${formatDate(r.posting_date)} · ${formatVND(r.amount)}</div>`)}
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Phiếu trả</th><th>Ngày</th><th class="num">Số tiền</th>
+              <th class="kt-col-wide">Chứng từ MISA đi kèm</th></tr></thead>
+            <tbody>${d.returns.map((r) => html`<tr>
+              <td><a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a></td>
+              <td>${formatDate(r.posting_date)}</td>
+              <td class="num">${formatVND(r.amount)}</td>
+              <td class="kt-col-wide">${r.misa_missing
+                ? html`<b style="color:var(--kt-danger)">CHƯA CÓ</b>
+                    <div class="kt-sub">phiếu trả đã ghi trên ERPNext nhưng phía MISA
+                      chưa có hóa đơn thay thế hay điều chỉnh nào</div>`
+                : html`${r.misa_relation || "—"}
+                    ${r.misa_no ? html`<div class="kt-sub">
+                      ${r.misa_series ? r.misa_series + " " : ""}${r.misa_no}</div>` : ""}
+                    ${r.misa_status ? html`<div class="kt-sub">${r.misa_status}</div>` : ""}`}</td>
+            </tr>`)}</tbody>
+          </table></div>
+          <div class="kt-sub" style="margin-top:10px;white-space:pre-line">${d.return_note}</div>
         </div></div>`
       : ""}
 

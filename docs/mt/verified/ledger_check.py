@@ -61,6 +61,7 @@ def main():
     ml = importlib.import_module("ketoan.api.mt_ledger")
     ml._company = lambda company=None: "HGC"
     ml._attach_advices = lambda rows: [r.setdefault("advices", []) for r in rows]
+    ml._attach_returns = lambda rows: [r.update(returns=[], returns_no_misa=0) for r in rows]
 
     print("=" * 82)
     print("KIỂM SỔ THEO DÕI HÓA ĐƠN")
@@ -190,6 +191,79 @@ def main():
           f"ra ngoài cả bốn nhóm")
     bad += not ok
 
+    # ── 4b. TICK CHIẾT KHẤU — bốn trạng thái, bốn nghĩa ─────────────────
+    #
+    # "Chưa biết" (chưa đợt nào trả tờ này) KHÁC "Không" (đợt đã trả, không có
+    # khoản trừ). Gộp lại thì hóa đơn chưa thanh toán hiện dấu "không có chiết
+    # khấu", và kế toán đọc thành đã kiểm rồi.
+    print("-" * 82)
+    ADV = {"SI-A": [], "SI-B": [{"advice": "PA-1"}], "SI-C": [{"advice": "PA-2"}],
+           "SI-D": [], "SI-E": [{"advice": "PA-2"}]}
+    DIRECT = {"SI-E"}          # có dòng trừ gắn đích danh
+    HAS_DED = {"PA-1"}         # đợt PA-1 có khoản trừ, PA-2 không
+
+    def fake_sql(qry, params=None, **kw):
+        qq = " ".join(str(qry).split())
+        if "GROUP BY l.sales_invoice" in qq:
+            return [frappe._dict({"sales_invoice": n, "n": 1})
+                    for n in params["names"] if n in DIRECT]
+        if "GROUP BY l.parent" in qq:
+            return [frappe._dict({"advice": a, "n": 1})
+                    for a in params["advices"] if a in HAS_DED]
+        return []
+
+    real_advices = ml._attach_advices
+    ml._attach_advices = lambda rows: [r.update(advices=ADV.get(r["name"], [])) for r in rows]
+    old_sql = frappe.db.sql
+    frappe.db.sql = fake_sql
+    dt = ml.get_ledger()
+    frappe.db.sql = old_sql
+    ml._attach_advices = real_advices
+
+    got = {r["name"]: r["discount"] for r in dt["rows"]}
+    want = {"SI-A": "chua", "SI-B": "theo_dot", "SI-C": "khong",
+            "SI-D": "chua", "SI-E": "co"}
+    ok = got == want
+    print(f"  {'✅' if ok else '❌'} tick chiết khấu bốn trạng thái: {got}")
+    bad += not ok
+
+    ok = got["SI-A"] != got["SI-C"]
+    print(f"  {'✅' if ok else '❌'} 'CHƯA BIẾT' (chưa đợt nào trả) KHÁC 'KHÔNG' (đợt đã trả, "
+          f"không khoản trừ) — gộp lại là kế toán đọc thành đã kiểm rồi")
+    bad += not ok
+
+    ok = all(r.get("discount_note") for r in dt["rows"])
+    print(f"  {'✅' if ok else '❌'} mỗi tick kèm lời giải thích, không để người đoán ký hiệu")
+    bad += not ok
+
+    src0 = rc.code_only(os.path.join(rc.REPO, "ketoan/api/mt_ledger.py"))
+    seg_tick = src0.split("def _attach_discount_tick")[1].split("\ndef ")[0]
+    ok = not any(t in seg_tick for t in ("/ len(", "pro_rata", "* ratio"))
+    print(f"  {'✅' if ok else '❌'} và tick KHÔNG kèm số tiền chia đều — khoản trừ bị trừ trên "
+          f"TỔNG ĐỢT, chia cho từng tờ là bịa")
+    bad += not ok
+
+    # ── 4c. PHIẾU TRẢ HÀNG: chứng từ MISA đi kèm ────────────────────────
+    #
+    # Hai loại trả hàng đi hai đường chứng từ. App KHÔNG đoán được cái nào là
+    # cái nào — chỉ NGƯỜI biết hàng móp hay hàng date. Nên chỉ đọc ra chứng từ
+    # đang gắn, và chỉ đúng tờ CHƯA có gì.
+    print("-" * 82)
+    seg_ret = src0.split("def _attach_returns")[1].split("\ndef ")[0]
+    ok = "misa_missing" in seg_ret and "custom_misa_relation" in seg_ret
+    print(f"  {'✅' if ok else '❌'} đọc chứng từ MISA của từng phiếu trả và chỉ ra tờ CHƯA có gì")
+    bad += not ok
+
+    ok = not any(t in seg_ret for t in ("Hóa đơn thay thế", "Hóa đơn điều chỉnh"))
+    print(f"  {'✅' if ok else '❌'} và KHÔNG tự chấm loại chứng từ — chỉ người biết hàng móp hay "
+          f"hàng date, đoán hộ là ghi sai loại chứng từ")
+    bad += not ok
+
+    tr = src0.split("def get_trace")[1]
+    ok = "return_note" in tr
+    print(f"  {'✅' if ok else '❌'} màn chi tiết nói ra CẢ HAI đường chứng từ để người chọn")
+    bad += not ok
+
     # ── 5. CÙNG mệnh đề với `mt_debt` ───────────────────────────────────
     #
     # Sổ này là cùng tập hóa đơn của màn công nợ, chỉ bỏ điều kiện "còn nợ" và
@@ -252,6 +326,25 @@ def main():
         ok = tok in lrow
         print(f"  {'✅' if ok else '❌'} dòng sổ có cột {label}")
         bad += not ok
+
+    ok = "DISCOUNT_MARK" in js and "CK" in rc.js_body(js, "loadLedger")
+    print(f"  {'✅' if ok else '❌'} bảng có cột tick CK")
+    bad += not ok
+
+    # Cảnh báo phải CÓ ĐIỀU KIỆN, không chỉ có mặt trong mã.
+    #
+    # Dò `"r.returns_no_misa" in lrow` là KHÔNG ĐỦ: chuỗi đó xuất hiện HAI lần
+    # (một ở điều kiện, một ở chỗ in số), nên gỡ điều kiện đi thì nó VẪN ĐẠT —
+    # cảnh báo không bao giờ hiện mà phép kiểm vẫn xanh. Đã thử và trúng.
+    #
+    # Giới hạn còn lại, nói thẳng: đây vẫn là phép kiểm VĂN BẢN. Nó chứng minh
+    # được cảnh báo có điều kiện, KHÔNG chứng minh được nó render đúng — muốn
+    # thế phải nạp JS vào trình duyệt như `client_script_check` làm.
+    n_ref = lrow.count("r.returns_no_misa")
+    ok = n_ref >= 2 and "chưa có HĐ" in lrow
+    print(f"  {'✅' if ok else '❌'} cảnh báo 'phiếu trả chưa có chứng từ MISA' hiện NGAY TRÊN "
+          f"DÒNG và CÓ ĐIỀU KIỆN ({n_ref} chỗ tham chiếu: điều kiện + số hiện ra)")
+    bad += not ok
 
     ok = "KHÔNG phải số dư công nợ" in js
     print(f"  {'✅' if ok else '❌'} màn hình NÓI RA 'còn lại' không phải số dư công nợ — hai con "

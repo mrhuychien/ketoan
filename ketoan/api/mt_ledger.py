@@ -179,6 +179,143 @@ def _rows(company, from_date, to_date, chain=None, customer=None):
     """, p, as_dict=True)
 
 
+def _attach_discount_tick(rows):
+    """Tick CHIẾT KHẤU: tờ này đã được xử chiết khấu chưa.
+
+    ════════════════════════════════════════════════════════════════════════
+    TICK, KHÔNG PHẢI SỐ TIỀN — VÀ ĐÓ LÀ CHỦ Ý
+    ════════════════════════════════════════════════════════════════════════
+
+    Chiết khấu/phí bị trừ trên TỔNG ĐỢT thanh toán, không trên từng hóa đơn.
+    Cho mỗi dòng một ô "chiết khấu" bằng tiền là phải chia đợt cho các tờ, mà
+    không chứng từ nào nói tờ này chịu bao nhiêu — con số bịa đó rồi sẽ được đem
+    đi đối chiếu với chuỗi.
+
+    Cái kế toán THẬT SỰ cần theo dõi là câu hỏi CÓ/KHÔNG: *tờ này đã đi qua
+    khâu chiết khấu chưa*. Ba trạng thái, ba nghĩa khác nhau:
+
+      · `co`      — có khoản trừ, VÀ khoản đó gắn ĐÍCH DANH tờ này.
+      · `theo_dot`— đợt đã trả tờ này CÓ khoản trừ, nhưng của cả đợt.
+      · `khong`   — đợt đã trả tờ này KHÔNG có khoản trừ nào.
+      · `chua`    — chưa đợt nào trả tờ này, nên CHƯA BIẾT. Không phải "không".
+
+    Tách `chua` khỏi `khong` là chốt chặn: gộp lại thì hóa đơn chưa thanh toán
+    hiện dấu "không có chiết khấu", và kế toán đọc thành đã kiểm rồi.
+    """
+    names = [r["name"] for r in rows]
+    for r in rows:
+        r["discount"] = "chua"
+        r["discount_note"] = ""
+    if not names:
+        return
+
+    # 1. Khoản trừ gắn ĐÍCH DANH hóa đơn này.
+    direct = frappe.db.sql("""
+        SELECT l.sales_invoice, COUNT(*) AS n
+        FROM `tabMT Payment Advice Line` l
+        WHERE l.parenttype = 'MT Payment Advice'
+          AND l.row_kind != %(kind)s
+          AND l.sales_invoice IN %(names)s
+        GROUP BY l.sales_invoice
+    """, {"names": tuple(names), "kind": KIND_PAYMENT}, as_dict=True)
+    direct_set = {d.sales_invoice for d in direct}
+
+    # 2. Đợt đã trả tờ này có khoản trừ nào không.
+    #
+    # Hỏi ở tầng ĐỢT vì đó đúng là tầng khoản trừ tồn tại. Kết quả hiện thành
+    # "theo đợt" chứ không thành một con số của tờ.
+    per_advice = {}
+    advices = set()
+    for r in rows:
+        for a in r.get("advices") or []:
+            advices.add(a["advice"])
+    if advices:
+        got = frappe.db.sql("""
+            SELECT l.parent AS advice, COUNT(*) AS n
+            FROM `tabMT Payment Advice Line` l
+            WHERE l.parenttype = 'MT Payment Advice'
+              AND l.parent IN %(advices)s AND l.row_kind != %(kind)s
+            GROUP BY l.parent
+        """, {"advices": tuple(advices), "kind": KIND_PAYMENT}, as_dict=True)
+        per_advice = {g.advice: cint(g.n) for g in got}
+
+    for r in rows:
+        adv = r.get("advices") or []
+        if r["name"] in direct_set:
+            r["discount"] = "co"
+            r["discount_note"] = _("Có khoản trừ gắn đích danh hóa đơn này")
+        elif not adv:
+            r["discount"] = "chua"
+            r["discount_note"] = _("Chưa đợt thanh toán nào trả tờ này — chưa biết")
+        elif any(per_advice.get(a["advice"]) for a in adv):
+            r["discount"] = "theo_dot"
+            r["discount_note"] = _(
+                "Đợt thanh toán trả tờ này CÓ khoản trừ, nhưng khoản đó của cả đợt — "
+                "không chứng từ nào nói riêng tờ này chịu bao nhiêu")
+        else:
+            r["discount"] = "khong"
+            r["discount_note"] = _("Đợt thanh toán trả tờ này không có khoản trừ nào")
+
+
+def _attach_returns(rows):
+    """Phiếu trả hàng của từng tờ, KÈM chứng từ MISA đi cùng nó.
+
+    ════════════════════════════════════════════════════════════════════════
+    HAI LOẠI TRẢ HÀNG, HAI ĐƯỜNG CHỨNG TỪ — ĐỪNG GỘP
+    ════════════════════════════════════════════════════════════════════════
+
+    a) HÀNG MÓP TRONG VẬN CHUYỂN. Siêu thị chỉ nhận theo thực tế, tức hóa đơn
+       GỐC ghi sai số lượng ngay từ đầu. Chứng từ đúng: **hóa đơn thay thế**
+       trên MISA (`custom_misa_relation = 'Hóa đơn thay thế'`), tờ gốc thành
+       'Bị thay thế'.
+
+    b) HÀNG DATE / THỜI VỤ TRẢ LẠI. Siêu thị đã nhận, đã bày bán, rồi trả về.
+       Đây là giao dịch MỚI, không phải sửa tờ cũ. Chứng từ đúng: siêu thị xuất
+       hóa đơn trả cho mình, HOẶC mình xuất **hóa đơn điều chỉnh giảm**.
+
+    App không đoán được cái nào là cái nào — chỉ NGƯỜI biết hàng móp hay hàng
+    date. Nên ở đây chỉ ĐỌC RA chứng từ MISA đang gắn với phiếu trả, và chỉ ra
+    tờ nào CHƯA có chứng từ nào. Đó là việc còn thiếu, và nó thường bị quên đúng
+    ở đây: phiếu trả đã ghi trên ERPNext, hóa đơn phía MISA thì chưa ai làm.
+    """
+    names = [r["name"] for r in rows]
+    for r in rows:
+        r["returns"] = []
+        r["returns_no_misa"] = 0
+    if not names:
+        return
+
+    def col(f):
+        return f"r.{f}" if frappe.db.has_column("Sales Invoice", f) else "NULL"
+
+    rets = frappe.db.sql(f"""
+        SELECT r.return_against AS si, r.name, r.posting_date,
+               ABS(r.grand_total) AS amount,
+               {col("custom_misa_relation")} AS misa_relation,
+               {col(SI_NO_FIELD)} AS misa_no,
+               {col("custom_misa_status")} AS misa_status
+        FROM `tabSales Invoice` r
+        WHERE r.docstatus = 1 AND r.return_against IN %(names)s
+        ORDER BY r.posting_date, r.name
+    """, {"names": tuple(names)}, as_dict=True)
+
+    by_si = defaultdict(list)
+    for x in rets:
+        by_si[x.si].append({
+            "name": x.name,
+            "posting_date": cstr(x.posting_date),
+            "amount": flt(x.amount),
+            "misa_relation": cstr(x.misa_relation or ""),
+            "misa_no": cstr(x.misa_no or ""),
+            "misa_status": cstr(x.misa_status or ""),
+            # CHƯA có chứng từ MISA nào đi cùng phiếu trả này.
+            "misa_missing": not (cstr(x.misa_no or "") or cstr(x.misa_relation or "")),
+        })
+    for r in rows:
+        r["returns"] = by_si.get(r["name"], [])
+        r["returns_no_misa"] = sum(1 for x in r["returns"] if x["misa_missing"])
+
+
 def _attach_advices(rows):
     """Gắn ĐỢT THANH TOÁN đã trả cho từng hóa đơn của TRANG hiện tại.
 
@@ -271,6 +408,7 @@ def get_ledger(company=None, from_date=None, to_date=None, chain=None, customer=
         "remaining": round(sum(r["remaining"] for r in out), 2),
     }
     by_status = {k: {"count": 0, "amount": 0.0} for k in STATUSES}
+    n_returned = sum(1 for r in out if r["returned"])
     for r in out:
         b = by_status[r["status"]]
         b["count"] += 1
@@ -280,6 +418,9 @@ def get_ledger(company=None, from_date=None, to_date=None, chain=None, customer=
     start = (page - 1) * page_size
     page_rows = out[start:start + page_size]
     _attach_advices(page_rows)
+    # THỨ TỰ QUAN TRỌNG: tick chiết khấu đọc `advices`, nên phải chạy SAU.
+    _attach_discount_tick(page_rows)
+    _attach_returns(page_rows)
 
     return {
         "rows": page_rows,
@@ -289,6 +430,10 @@ def get_ledger(company=None, from_date=None, to_date=None, chain=None, customer=
         "page_size": page_size,
         "totals": totals,
         "by_status": by_status,
+        "n_returned": n_returned,
+        "discount_label": {
+            "co": "Có (đích danh)", "theo_dot": "Có (theo đợt)",
+            "khong": "Không", "chua": "Chưa biết"},
         "status_label": dict(STATUS_LABEL),
         "einv_known": einv_known,
         "from_date": cstr(from_date),
@@ -351,8 +496,15 @@ def get_trace(sales_invoice, company=None):
             ORDER BY l.parent, l.idx
         """, {"advices": tuple(advices), "kind": KIND_PAYMENT}, as_dict=True)
 
-    rets = frappe.db.sql("""
-        SELECT r.name, r.posting_date, ABS(r.grand_total) AS amount, r.docstatus
+    def rcol(f):
+        return f"r.{f}" if frappe.db.has_column("Sales Invoice", f) else "NULL"
+
+    rets = frappe.db.sql(f"""
+        SELECT r.name, r.posting_date, ABS(r.grand_total) AS amount,
+               {rcol("custom_misa_relation")} AS misa_relation,
+               {rcol(SI_NO_FIELD)} AS misa_no,
+               {rcol(SI_SERIES_FIELD)} AS misa_series,
+               {rcol("custom_misa_status")} AS misa_status
         FROM `tabSales Invoice` r
         WHERE r.return_against = %(si)s AND r.docstatus = 1
         ORDER BY r.posting_date, r.name
@@ -388,9 +540,27 @@ def get_trace(sales_invoice, company=None):
     return {
         "sales_invoice": si,
         "batches": batches,
-        "returns": [{"name": r.name, "posting_date": cstr(r.posting_date),
-                     "amount": flt(r.amount)} for r in rets],
+        "returns": [{
+            "name": r.name, "posting_date": cstr(r.posting_date),
+            "amount": flt(r.amount),
+            "misa_relation": cstr(r.misa_relation or ""),
+            "misa_series": cstr(r.misa_series or ""),
+            "misa_no": cstr(r.misa_no or ""),
+            "misa_status": cstr(r.misa_status or ""),
+            "misa_missing": not (cstr(r.misa_no or "") or cstr(r.misa_relation or "")),
+        } for r in rets],
         "returned_total": round(sum(flt(r.amount) for r in rets), 2),
+        # HAI LOẠI TRẢ HÀNG, HAI ĐƯỜNG CHỨNG TỪ. App KHÔNG đoán được cái nào là
+        # cái nào — chỉ NGƯỜI biết hàng móp hay hàng date. Nên nói ra cả hai
+        # đường và để người chọn, thay vì chọn hộ rồi sai.
+        "return_note": _(
+            "Hai loại trả hàng đi hai đường chứng từ khác nhau, và app không đoán thay "
+            "được:\n"
+            "· HÀNG MÓP TRONG VẬN CHUYỂN — siêu thị chỉ nhận theo thực tế, tức hóa đơn "
+            "gốc ghi sai số lượng ngay từ đầu. Chứng từ đúng: HÓA ĐƠN THAY THẾ trên MISA.\n"
+            "· HÀNG DATE / THỜI VỤ TRẢ LẠI — siêu thị đã nhận rồi mới trả. Đây là giao "
+            "dịch MỚI, không phải sửa tờ cũ. Chứng từ đúng: siêu thị xuất hóa đơn trả cho "
+            "mình, HOẶC mình xuất HÓA ĐƠN ĐIỀU CHỈNH GIẢM."),
         "deduction_note": _(
             "Các khoản trừ dưới đây thuộc về CẢ ĐỢT thanh toán, không phải riêng hóa đơn "
             "này. Bảng kê của chuỗi trừ chiết khấu/phí trên tổng đợt, không chứng từ nào "
