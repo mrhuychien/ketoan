@@ -125,6 +125,8 @@ def main():
     ]
     me._scan = lambda company, chain=None: ("EXPR", [dict(r) for r in FIX])
     me._returns_missing = lambda company, chain=None: {"count": 0, "amount": 0.0}
+    me._count_skipped = lambda company, chain=None: {"count": 0, "amount": 0.0,
+                                                     "supported": True}
     me._company = lambda company=None: "HGC"
     mtmod = importlib.import_module("ketoan.api.mt")
     mtmod._customer_chain_map = lambda: (
@@ -208,6 +210,140 @@ def main():
           f"thật ra xem tập khác")
     bad += not ok
 
+    # ── 5c. BỎ QUA — ranh giới của nó ───────────────────────────────────
+    #
+    # Bỏ qua CHỈ ẩn dòng khỏi danh sách này. Nếu có ngày tầng công nợ hay tầng
+    # sổ cái đọc cờ đó, nó thành đường tắt để GIẤU CÔNG NỢ — và đó là chuyện
+    # khác hẳn, phải bàn lại từ đầu. Bộ kiểm khóa ranh giới ấy.
+    print("-" * 82)
+    esrc = rc.code_only(os.path.join(rc.REPO, "ketoan/api/mt_einv.py"))
+    leak = [f for f in ("mt_debt.py", "mt_gl_bridge.py", "mt_hub.py", "mt.py")
+            if "custom_mt_einv_skip" in rc.code_only(
+                os.path.join(rc.REPO, "ketoan/api", f))]
+    ok = not leak
+    print(f"  {'✅' if ok else '❌'} cờ bỏ qua KHÔNG rò sang tầng công nợ / sổ cái / tổng quan "
+          f"— bỏ qua một hóa đơn không được làm nó hết nợ{'' if ok else ' — rò: ' + str(leak)}")
+    bad += not ok
+
+    ok = "guard_manager()" in esrc
+    print(f"  {'✅' if ok else '❌'} ghi (bỏ qua) cần quyền TRƯỞNG, không phải ai xem cũng bấm được")
+    bad += not ok
+
+    seg_sk = esrc.split("def set_skip")[1].split("\n@frappe")[0]
+    ok = "db_set(" in seg_sk and "update_modified=False" in seg_sk and ".save(" not in seg_sk
+    print(f"  {'✅' if ok else '❌'} ghi bằng `db_set(..., update_modified=False)`, KHÔNG `save()` "
+          f"trên chứng từ đã ghi sổ")
+    bad += not ok
+
+    # GỌI THẬT, không dò chữ.
+    #
+    # Bản đầu khẳng định `"MIN_NOTE" in seg` — và nó VẪN ĐẠT khi mệnh đề kiểm đã
+    # bị gỡ, vì tên hằng còn nằm trong câu thông báo ngay bên dưới. Dò chữ chỉ
+    # chứng minh CÓ NHẮC TỚI, không chứng minh CÓ CHẶN.
+    frappe.db.exists = lambda dt, nm=None: True
+    frappe.db.get_value = lambda dt, nm, flds, as_dict=False: (
+        frappe._dict({"company": "HGC", "docstatus": 1, "is_return": 0})
+        if as_dict else 1)
+    frappe.db.has_column = lambda dt, c: True
+    frappe.db.commit = lambda: None
+
+    class _FakeSI:
+        """Chứng từ giả — chỉ đủ để bắt `db_set`, không giả vờ là Sales Invoice."""
+
+        def __init__(self):
+            self.written = {}
+
+        def db_set(self, k, v, update_modified=True):
+            # Bắt luôn ở đây: `update_modified=True` trên chứng từ đã ghi sổ là
+            # đụng `modified`, tức làm mọi phiên đang mở form bị TimestampMismatch.
+            assert update_modified is False, "db_set phải dùng update_modified=False"
+            self.written[k] = v
+
+    fake = _FakeSI()
+    frappe.get_doc = lambda dt, nm: fake
+    for note, want_block in (("", True), ("   ", True), ("abc", True),
+                             ("hóa đơn nội bộ", False)):
+        try:
+            me.set_skip("SI-1", skip=1, note=note)
+            blocked, msg = False, ""
+        except Exception as e:
+            blocked, msg = True, str(e)
+        if blocked != want_block:
+            bad += 1
+            print(f"     ❌ lý do {note!r} -> chặn={blocked}, mong {want_block} ({msg[:50]})")
+            break
+    else:
+        print(f"  ✅ LÝ DO bắt buộc khi bỏ qua (trống · toàn khoảng trắng · quá ngắn đều bị "
+              f"chặn) — bỏ qua không lý do thì sáu tháng sau không ai dựng lại được quyết "
+              f"định, cũng không ai dám mở lại")
+
+    # MỞ LẠI thì KHÔNG đòi lý do — đòi là dựng một rào cản để người ta thôi mở.
+    try:
+        me.set_skip("SI-1", skip=0)
+        ok = True
+    except Exception as e:
+        ok, _m = False, str(e)
+    print(f"  {'✅' if ok else '❌'} nhưng MỞ LẠI thì không đòi lý do — đòi là dựng rào cản để "
+          f"người ta thôi mở, và bỏ qua thành một chiều")
+    bad += not ok
+
+    ok = "docstatus" in seg_sk
+    print(f"  {'✅' if ok else '❌'} chỉ bỏ qua được hóa đơn ĐÃ GHI SỔ — hóa đơn nháp/đã hủy không "
+          f"nằm trong danh sách, đánh dấu nó là ghi một dấu vô nghĩa lên chứng từ")
+    bad += not ok
+
+    ok = "def list_skipped" in esrc
+    print(f"  {'✅' if ok else '❌'} có chỗ XEM LẠI và mở ra — bỏ qua mà không xem lại được thì nó "
+          f"là thùng rác một chiều")
+    bad += not ok
+
+    ok = '"skipped": _count_skipped' in esrc
+    print(f"  {'✅' if ok else '❌'} và LUÔN đếm số tờ đang bị bỏ qua — ẩn dòng mà không nói ẩn "
+          f"bao nhiêu thì '0 việc' không phân biệt được với 'ai đó bỏ qua sạch'")
+    bad += not ok
+
+    # Cờ phải lọc ở CẢ HAI câu quét. Chỉ lọc câu chính thì tờ bị bỏ qua vẫn
+    # tham gia dựng MỐC, tức một tờ người ta cố ý loại vẫn quyết định tờ nào bị
+    # chấm là bỏ sót.
+    # Đếm CHỖ DÙNG trong ĐÚNG hai hàm quét, không đếm cả dòng khai.
+    #
+    # Bản đầu đếm `_skip_clause()` trên cả file và đòi `>= 2` — nhưng dòng
+    # `def _skip_clause():` cũng khớp, nên gỡ một chỗ dùng vẫn còn 2 và phép
+    # kiểm vẫn xanh. Lại đúng kiểu "thấy định nghĩa tưởng là chỗ dùng".
+    miss = [fn for fn in ("_scan", "_returns_missing")
+            if "_skip_clause()" not in esrc.split("def %s" % fn)[1].split("\ndef ")[0]]
+    ok = not miss
+    print(f"  {'✅' if ok else '❌'} cờ lọc trong CẢ `_scan` LẪN `_returns_missing` — thiếu ở "
+          f"`_scan` thì tờ đã bỏ qua vẫn tham gia dựng MỐC"
+          f"{'' if ok else ' — thiếu: ' + str(miss)}")
+    bad += not ok
+
+    # Patch: THÊM FIELD MỚI = THÊM PATCH MỚI.
+    ptxt = open(os.path.join(rc.REPO, "ketoan/patches.txt"), encoding="utf-8").read()
+    ok = "v0_0_18.mt_einv_skip" in ptxt and os.path.exists(
+        os.path.join(rc.REPO, "ketoan/patches/v0_0_18/mt_einv_skip.py"))
+    print(f"  {'✅' if ok else '❌'} có patch riêng khai field mới (THÊM FIELD = THÊM PATCH)")
+    bad += not ok
+
+    isrc = open(os.path.join(rc.REPO, "ketoan/install.py"), encoding="utf-8").read()
+    # Đếm chỗ KHAI (`"fieldname":`), không đếm mọi lần tên ô xuất hiện.
+    # `depends_on` / `insert_after` trỏ về nó là đúng và cần — đếm cả chúng là
+    # phép kiểm bắt lỗi ở chỗ không có lỗi.
+    n_decl = isrc.count('"fieldname": "custom_mt_einv_skip"')
+    seg_si = isrc.split('"Sales Invoice": [')[1].split("\n}")[0]
+    n_aos = seg_si.count('"allow_on_submit": 1')
+    ok = n_decl == 1 and n_aos == 4
+    print(f"  {'✅' if ok else '❌'} field khai ĐÚNG MỘT LẦN ({n_decl}), và CẢ BỐN ô đều có "
+          f"`allow_on_submit` ({n_aos}/4) — thiếu là ghi lên hóa đơn đã submit sẽ nổ")
+    bad += not ok
+
+    psrc = open(os.path.join(rc.REPO, "ketoan/patches/v0_0_18/mt_einv_skip.py"),
+                encoding="utf-8").read()
+    ok = "IS NULL" in psrc
+    print(f"  {'✅' if ok else '❌'} patch chuẩn hóa NULL về 0 — cột Check thêm vào bảng có sẵn dữ "
+          f"liệu được điền NULL, và NULL không bằng 0 trong bộ lọc Desk")
+    bad += not ok
+
     # ── 6. Site chưa có ô số HĐĐT -> nói ra, KHÔNG trả danh sách rỗng ───
     print("-" * 82)
     me._scan = lambda company, chain=None: (None, [])
@@ -270,6 +406,24 @@ def main():
 
     ok = "Hai tập không giao nhau" in js
     print(f"  {'✅' if ok else '❌'} và màn hình nói rõ hai danh sách KHÁC nhau ở chỗ nào")
+    bad += not ok
+
+    print("-" * 82)
+    ok = rc.js_calls(js, "loadWinEinv", "bindEinvSkip") and "data-skip=" in js
+    print(f"  {'✅' if ok else '❌'} danh sách có nút BỎ QUA từng dòng")
+    bad += not ok
+
+    ok = rc.js_calls(js, "openSkipModal", "openModal") and "KHÔNG</b> trừ khỏi công nợ" in js
+    print(f"  {'✅' if ok else '❌'} hộp thoại NÓI RA việc này không đụng công nợ/doanh thu/sổ cái "
+          f"— in trên màn, không giấu trong tooltip")
+    bad += not ok
+
+    ok = "skippedBar" in js and rc.js_calls(js, "skippedBar", "formatVND")
+    print(f"  {'✅' if ok else '❌'} và luôn hiện 'đang bỏ qua N hóa đơn' kèm nút xem lại")
+    bad += not ok
+
+    ok = "data-unskip" in js
+    print(f"  {'✅' if ok else '❌'} mở lại được ngay trong màn xem lại")
     bad += not ok
 
     print("=" * 82)

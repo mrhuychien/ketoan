@@ -4546,7 +4546,7 @@ async function loadEinvGaps(container, state) {
           <div class="kt-sub" style="margin-bottom:8px">Bỏ sót lâu nhất lên trước — đó là thứ tự đi soát.</div>
           <div class="kt-table-wrap"><table class="kt-table">
             <thead><tr><th>Hóa đơn</th><th class="kt-col-wide">Khách hàng</th>
-              <th>Ngày HĐ</th><th class="num">Tổng HĐ</th></tr></thead>
+              <th>Ngày HĐ</th><th class="num">Tổng HĐ</th><th></th></tr></thead>
             <tbody>${rows.map((r) => html`<tr>
               <td><a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a></td>
               <td class="kt-col-wide">${r.customer_name || r.customer}
@@ -4554,13 +4554,20 @@ async function loadEinvGaps(container, state) {
                           : html`<div class="kt-sub" style="color:var(--kt-warning)">chưa gán chuỗi</div>`}</td>
               <td>${formatDate(r.posting_date)}</td>
               <td class="num">${formatVND(r.grand_total)}</td>
+              <td>${state.canManage
+                ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" data-skip="${r.name}"
+                          title="Loại tờ này khỏi danh sách soát. KHÔNG đụng công nợ.">
+                    Bỏ qua</button>`
+                : ""}</td>
             </tr>`)}</tbody>
           </table></div>
           ${pager(d, "hóa đơn")}
+          ${skippedBar(d)}
         </div></div>`}
   `);
 
   bindPager(container, state);
+  bindEinvSkip(container, container, state, () => loadTab(container, state));
   const gc = container.querySelector("#gap-clear");
   if (gc) gc.addEventListener("click", () => {
     state.gapChain = ""; state.page = 1; loadTab(container, state);
@@ -4573,6 +4580,130 @@ async function loadEinvGaps(container, state) {
       state.gapChain = tr.dataset.chain; state.page = 1; loadTab(container, state);
     });
   });
+}
+
+// ── BỎ QUA khỏi danh sách soát HĐĐT ───────────────────────────────────────
+//
+// ⚠ CHỈ ẨN DÒNG KHỎI DANH SÁCH NÀY. Không đụng công nợ, doanh thu hay sổ cái
+// 131. Câu đó được in ra trên chính hộp thoại, không giấu trong tooltip: người
+// bấm phải biết mình đang làm gì và KHÔNG làm gì.
+//
+// Ẩn dòng mà không nói đã ẩn bao nhiêu là biến danh sách thành thứ không kiểm
+// chứng được — hôm nay 0 việc có thể vì xong hết, cũng có thể vì ai đó bỏ qua
+// sạch. Vì vậy `skippedBar` LUÔN hiện khi có tờ bị bỏ qua, và mở ra xem được.
+function skippedBar(d) {
+  const s = d.skipped || {};
+  if (!s.count) return "";
+  return html`
+    <div class="kt-sub" style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <i class="fas fa-eye-slash"></i>
+      <span><b>${s.count} hóa đơn (${formatVND(s.amount)}) đang bị bỏ qua</b> —
+        không hiện trong danh sách trên. Công nợ và sổ cái vẫn tính đủ chúng.</span>
+      <button class="kt-btn kt-btn--outline kt-btn--sm" data-skipped-open="1">Xem lại</button>
+    </div>`;
+}
+
+function bindEinvSkip(box, container, state, reload) {
+  box.querySelectorAll("button[data-skip]").forEach((b) => {
+    b.addEventListener("click", () => openSkipModal(b.dataset.skip, reload));
+  });
+  const so = box.querySelector("button[data-skipped-open]");
+  if (so) so.addEventListener("click", () => openSkippedList(state, reload));
+}
+
+function openSkipModal(name, reload) {
+  const modal = openModal({
+    title: `Bỏ qua hóa đơn ${name}`,
+    icon: "fa-eye-slash",
+    maxWidth: 560,
+    body: html`
+      <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+        <div class="kt-card-body kt-sub">
+          Việc này <b>chỉ ẩn hóa đơn khỏi danh sách soát HĐĐT</b>. Nó
+          <b>KHÔNG</b> làm hóa đơn hết là doanh thu, <b>KHÔNG</b> trừ khỏi công nợ, và
+          <b>KHÔNG</b> đụng sổ cái 131. Mở lại được bất cứ lúc nào.
+        </div></div>
+      <label class="kt-sub">Lý do bỏ qua <b style="color:var(--kt-danger)">(bắt buộc)</b></label>
+      <textarea class="kt-input" id="sk-note" rows="3"
+        placeholder="Ví dụ: hóa đơn nội bộ, không phát hành HĐĐT · đã hủy ngoài hệ ngày …"></textarea>
+      <div class="kt-sub" style="margin-top:6px">
+        Sáu tháng sau không ai dựng lại được một quyết định không ghi lý do — và cũng
+        không ai dám mở lại nó.
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="kt-btn kt-btn--outline" id="sk-cancel">Thôi</button>
+        <button class="kt-btn kt-btn--primary" id="sk-go" style="margin-left:auto">
+          <i class="fas fa-eye-slash"></i> Bỏ qua hóa đơn này</button>
+      </div>`,
+  });
+  modal.body.querySelector("#sk-cancel").addEventListener("click", () => modal.close());
+  const go = modal.body.querySelector("#sk-go");
+  go.addEventListener("click", async () => {
+    const note = modal.body.querySelector("#sk-note").value.trim();
+    go.disabled = true;
+    try {
+      const out = await api.mtEinvSkip({ sales_invoice: name, skip: 1, note });
+      toast(out.message, "success");
+      modal.close();
+      reload();
+    } catch (e) {
+      toast(e.message, "error");
+      go.disabled = false;
+    }
+  });
+}
+
+async function openSkippedList(state, reload) {
+  const modal = openModal({
+    title: "Hóa đơn đang bị bỏ qua",
+    icon: "fa-eye-slash",
+    maxWidth: 900,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  const draw = async () => {
+    let d;
+    try {
+      d = await api.mtEinvSkipped({ chain: state.chain || state.gapChain || undefined });
+    } catch (e) {
+      return setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    }
+    const rows = d.rows || [];
+    setHTML(modal.body, html`
+      ${!rows.length
+        ? html`<div class="kt-empty"><p>Không có hóa đơn nào đang bị bỏ qua.</p></div>`
+        : html`<div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th>Hóa đơn</th><th class="kt-col-wide">Lý do</th>
+              <th>Người bỏ qua</th><th class="num">Tổng HĐ</th><th></th></tr></thead>
+            <tbody>${rows.map((r) => html`<tr>
+              <td><a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a>
+                <div class="kt-sub">${formatDate(r.posting_date)}</div></td>
+              <td class="kt-col-wide">${r.skip_note || html`<span class="kt-sub">(trống)</span>`}</td>
+              <td>${r.skip_by || "—"}
+                ${r.skip_on ? html`<div class="kt-sub">${formatDate(r.skip_on.slice(0, 10))}</div>` : ""}</td>
+              <td class="num">${formatVND(r.grand_total)}</td>
+              <td>${state.canManage
+                ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" data-unskip="${r.name}">
+                    Đưa trở lại</button>`
+                : ""}</td>
+            </tr>`)}</tbody>
+          </table></div>`}
+    `);
+    modal.body.querySelectorAll("button[data-unskip]").forEach((b) => {
+      b.addEventListener("click", async () => {
+        b.disabled = true;
+        try {
+          const out = await api.mtEinvSkip({ sales_invoice: b.dataset.unskip, skip: 0 });
+          toast(out.message, "success");
+          await draw();
+          reload();
+        } catch (e) {
+          toast(e.message, "error");
+          b.disabled = false;
+        }
+      });
+    });
+  };
+  await draw();
 }
 
 // ── Khai hạn thanh toán từng khách ─────────────────────────────────────────
@@ -4905,15 +5036,22 @@ async function loadWinEinv(container, state) {
             <p>Không có hóa đơn nào của ${chain} thiếu số HĐĐT trong nhóm đang chọn.</p></div>`
         : html`<div class="kt-table-wrap"><table class="kt-table">
             <thead><tr><th>Hóa đơn</th><th class="kt-col-wide">Bên mua</th>
-              <th>Ngày HĐ</th><th class="num">Tổng HĐ</th></tr></thead>
+              <th>Ngày HĐ</th><th class="num">Tổng HĐ</th><th></th></tr></thead>
             <tbody>${rows.map((r) => html`<tr>
               <td><a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a></td>
               <td class="kt-col-wide">${r.customer_name || r.customer}</td>
               <td>${formatDate(r.posting_date)}</td>
               <td class="num">${formatVND(r.grand_total)}</td>
+              <td>${state.canManage
+                ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" data-skip="${r.name}"
+                          title="Loại tờ này khỏi danh sách soát. KHÔNG đụng công nợ.">
+                    Bỏ qua</button>`
+                : ""}</td>
             </tr>`)}</tbody>
           </table></div>
           ${pager(d, "hóa đơn")}`}
+
+      ${skippedBar(d)}
 
       ${d.returns_missing.count
         ? html`<div class="kt-sub" style="margin-top:10px;color:var(--kt-warning)">
@@ -4925,6 +5063,7 @@ async function loadWinEinv(container, state) {
         : ""}
     </div></div>`);
 
+  bindEinvSkip(box, container, state, () => loadWinEinv(container, state));
   box.querySelectorAll("button[data-wpe]").forEach((b) => {
     b.addEventListener("click", () => {
       state.wpEinvScope = b.dataset.wpe;

@@ -310,12 +310,72 @@ MT_CUSTOM_FIELDS = {
                             "Co.op 45, AEON 30, Central Retail A030=30 / A040=40."),
             "insert_after": "custom_mt_chain",
         },
-    ]
+    ],
+    # ═══════════════════════════════════════════════════════════════════════
+    # BỎ QUA khỏi danh sách "đã ghi sổ, chưa có số HĐĐT".
+    #
+    # Danh sách đó lấy MỌI hóa đơn trống ô số HĐĐT. Trong đó luôn có một ít tờ
+    # không bao giờ xử được — hóa đơn nội bộ, hóa đơn đã hủy bên ngoài hệ, hóa
+    # đơn của kỳ cũ đã chốt bằng cách khác. Chúng nằm mãi ở đó, và một danh
+    # sách việc-phải-làm không bao giờ về 0 là danh sách người ta thôi nhìn.
+    #
+    # ⚠ CỜ NÀY KHÔNG ĐỘNG TỚI SỔ SÁCH. Nó chỉ ẩn dòng khỏi MỘT danh sách rà
+    # soát. Công nợ, thẻ hai cuốn sổ, sổ cái 131 — không cái nào đọc nó. Bỏ qua
+    # một hóa đơn KHÔNG làm nó hết là doanh thu, cũng không làm nó hết nợ.
+    #
+    # Ghi sau khi submit -> `allow_on_submit=1`, và tầng API ghi bằng
+    # `db_set(..., update_modified=False)` chứ không `save()`.
+    "Sales Invoice": [
+        {
+            "fieldname": "custom_mt_einv_skip",
+            "label": "Bỏ qua khỏi danh sách soát HĐĐT",
+            "fieldtype": "Check",
+            "default": "0",
+            "allow_on_submit": 1,
+            "no_copy": 1,
+            "description": ("CHỈ ẩn hóa đơn khỏi danh sách rà soát 'chưa có số HĐĐT'. "
+                            "KHÔNG ảnh hưởng công nợ, doanh thu hay sổ cái."),
+            "insert_after": "custom_misa_no_locked",
+        },
+        # LÝ DO là BẮT BUỘC ở tầng API. Bỏ qua mà không nói vì sao thì sáu tháng
+        # sau không ai dựng lại được quyết định đó, và cũng không ai dám mở lại.
+        {
+            "fieldname": "custom_mt_einv_skip_note",
+            "label": "Lý do bỏ qua",
+            "fieldtype": "Small Text",
+            "allow_on_submit": 1,
+            "no_copy": 1,
+            "depends_on": "custom_mt_einv_skip",
+            "insert_after": "custom_mt_einv_skip",
+        },
+        # AI bỏ qua và LÚC NÀO. Một quyết định ẩn việc khỏi danh sách kiểm soát
+        # phải có người đứng tên.
+        {
+            "fieldname": "custom_mt_einv_skip_by",
+            "label": "Người bỏ qua",
+            "fieldtype": "Data",
+            "read_only": 1,
+            "allow_on_submit": 1,
+            "no_copy": 1,
+            "depends_on": "custom_mt_einv_skip",
+            "insert_after": "custom_mt_einv_skip_note",
+        },
+        {
+            "fieldname": "custom_mt_einv_skip_on",
+            "label": "Ngày bỏ qua",
+            "fieldtype": "Datetime",
+            "read_only": 1,
+            "allow_on_submit": 1,
+            "no_copy": 1,
+            "depends_on": "custom_mt_einv_skip",
+            "insert_after": "custom_mt_einv_skip_by",
+        },
+    ],
 }
 
 
 def setup_mt_fields():
-    """Tạo custom field kênh MT trên Customer. Idempotent."""
+    """Tạo custom field kênh MT trên Customer + Sales Invoice. Idempotent."""
     from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
     try:

@@ -185,6 +185,17 @@ def _stub_frappe():
     fr.msgprint = lambda *a, **k: None
     fr.enqueue = lambda *a, **k: None
     fr.session = types.SimpleNamespace(user="regression@local")
+
+    # `frappe._dict` — dict truy cập được bằng dấu chấm. Có mặt ở khắp code
+    # Frappe (mọi `as_dict=True` trả về nó), nên bộ giả thiếu nó là bất kỳ phép
+    # kiểm nào GỌI THẬT một hàm dùng `as_dict` đều nổ vì lý do không liên quan.
+    class _D(dict):
+        __getattr__ = dict.get
+
+        def __setattr__(self, k, v):
+            self[k] = v
+
+    fr._dict = _D
     fr.local = types.SimpleNamespace()
     fr.get_all = lambda *a, **k: []
     fr.get_doc = lambda *a, **k: None

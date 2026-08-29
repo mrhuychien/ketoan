@@ -267,6 +267,10 @@ export const api = {
   // Soát hóa đơn BỊ BỎ SÓT số hóa đơn điện tử. KHÔNG phải con số của thẻ hai
   // cuốn sổ: màn kia chỉ nhìn phần còn nợ, màn này nhìn MỌI hóa đơn bán.
   mtEinvGaps: (a) => callMethod(NS + "mt_einv.get_gaps", withCompany(a)),
+  // Bỏ qua CHỈ ẩn dòng khỏi danh sách soát — không đụng công nợ, doanh thu hay
+  // sổ cái. Lý do bắt buộc; mở lại được.
+  mtEinvSkip: (a) => callMethod(NS + "mt_einv.set_skip", withCompany(a)),
+  mtEinvSkipped: (a) => callMethod(NS + "mt_einv.list_skipped", withCompany(a)),
 
   // Ba cuốn sổ + CẦU NỐI: sổ cái 131 lệch rổ hóa đơn ở đâu, vì sao.
   mtGlBridge: (a) => callMethod(NS + "mt_gl_bridge.compare", withCompany(a)),

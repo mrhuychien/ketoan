@@ -586,7 +586,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AB** khởi tạo đợt giao Win từ SỐ DƯ ĐÃ CHỐT, không nạp lại file | `62f9c0c` | `win_seed_check` |
 | **MT2-AC** hai cuốn sổ ngay trong trang chuỗi + màn trống nói đúng lý do | `a03452b` | `two_books_check` · `win_seed_check` |
 | **MT2-AD** cuốn sổ THỨ BA: sổ cái TK 131 + cầu nối phân tích chỗ lệch | `a892c6b` | `gl_bridge_check` |
-| **MT2-AE** "Chờ xuất hóa đơn" Win: liệt kê HĐ ERPNext thiếu số MISA | *(commit này)* | `einv_gap_check` |
+| **MT2-AE** "Chờ xuất hóa đơn" Win: liệt kê HĐ ERPNext thiếu số MISA | `4252bd6` | `einv_gap_check` |
+| **MT2-AF** BỎ QUA hóa đơn khỏi danh sách soát HĐĐT (patch v0_0_18) | *(commit này)* | `einv_gap_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -888,6 +889,50 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AF — bỏ qua hóa đơn khỏi danh sách soát HĐĐT
+
+Danh sách lấy **mọi** hóa đơn trống ô số HĐĐT, nên trong đó luôn có một ít tờ
+không bao giờ xử được — hóa đơn nội bộ, hóa đơn đã hủy ngoài hệ, kỳ cũ đã chốt
+bằng cách khác. Chúng nằm mãi ở đó, và **một danh sách việc-phải-làm không bao
+giờ về 0 là danh sách người ta thôi nhìn.**
+
+Bốn ô mới trên Sales Invoice (patch **v0_0_18**), `allow_on_submit=1`, ghi bằng
+`db_set(..., update_modified=False)` — không `save()` trên chứng từ đã ghi sổ.
+
+**Ranh giới, và bộ kiểm khóa nó lại:**
+
+> Bỏ qua **chỉ ẩn dòng khỏi danh sách này**. Không đụng công nợ, doanh thu hay
+> sổ cái 131 — `mt_debt`, `mt_gl_bridge`, `mt_hub`, `mt` đều **không** đọc cờ
+> đó. Nếu có ngày một trong số chúng đọc, cờ này thành **đường tắt để giấu công
+> nợ**, và đó là chuyện khác hẳn phải bàn lại từ đầu.
+
+Câu đó in thẳng trên hộp thoại, không giấu trong tooltip: người bấm phải biết
+mình đang làm gì và **không** làm gì.
+
+Bốn chốt đi kèm: **lý do bắt buộc** (bỏ qua không lý do thì sáu tháng sau không
+ai dựng lại được quyết định, cũng không ai dám mở lại) · **mở lại thì không đòi
+lý do** (đòi là dựng rào để người ta thôi mở) · số tờ đã bỏ qua **luôn được đếm
+và hiện ra** (ẩn mà không nói ẩn bao nhiêu thì "0 việc" không phân biệt được với
+"ai đó bỏ qua sạch") · có chỗ **xem lại và mở ra**, không phải thùng rác một
+chiều. Ghi cần quyền **trưởng**; xem thì kế toán MT.
+
+Tờ đã bỏ qua rơi khỏi **cả hai** nhóm, kể cả nhóm "đã xuất" — để nó lại thì một
+tờ người ta cố ý loại vẫn quyết định tờ nào bị chấm là bỏ sót.
+
+**Ba lỗ trong bộ kiểm, lộ ra nhờ phép thử phá hoại** — cả ba đều là *dò chữ thay
+vì gọi thật*:
+
+- `"MIN_NOTE" in seg` vẫn ĐẠT khi mệnh đề kiểm đã bị gỡ, vì tên hằng còn nằm
+  trong câu thông báo bên dưới. Nay **gọi thật** `set_skip` với lý do trống ·
+  toàn khoảng trắng · quá ngắn.
+- `count("_skip_clause()") >= 2` vẫn ĐẠT khi gỡ một chỗ dùng, vì dòng
+  `def _skip_clause():` cũng khớp. Nay soi trong thân **đúng hai hàm quét**.
+- `count('"custom_mt_einv_skip"') == 1` báo hỏng oan: `depends_on` /
+  `insert_after` trỏ về nó là đúng và cần. Nay chỉ đếm chỗ **khai**.
+
+`regression_check` được bổ sung `frappe._dict` — thiếu nó thì mọi phép kiểm
+**gọi thật** một hàm dùng `as_dict` đều nổ vì lý do không liên quan.
 
 ### MT2-AE — "Chờ xuất hóa đơn" có HAI nghĩa, và em dựng nhầm cái
 
