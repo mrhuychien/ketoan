@@ -176,6 +176,14 @@ export async function render({ container, query }) {
     // `state.chain` (thứ quyết định tầng điều hướng) cũng không dùng chung
     // `dueChain` của màn công nợ.
     gapChain: query?.gap_chain || "",
+    // Bộ lọc của danh sách soát HĐĐT. RIÊNG cho mỗi màn: bước Chờ xuất hóa đơn
+    // của Win và màn soát toàn kênh là hai chỗ làm việc khác nhau, dùng chung
+    // một ô là lọc bên này thì bên kia đổi theo mà không ai bấm gì.
+    einvFilter: {},
+    wpEinvFilter: {},
+    // Tùy chọn cho ô lọc, nạp một lần theo chuỗi đang xem.
+    einvOpts: null,
+    einvOptsFor: null,
     // Trục HĐĐT trên danh sách hóa đơn (`mt.get_invoices`) — khác màn, khác ô.
     einvoice: "",
     board: null,
@@ -4459,8 +4467,10 @@ async function loadEinvGaps(container, state) {
   const body = container.querySelector("#mt-body");
   let d;
   try {
+    await ensureEinvOpts(state, state.gapChain);
     d = await api.mtEinvGaps({ chain: state.gapChain || undefined,
-                               page: state.page, page_size: 50 });
+                               page: state.page, page_size: 50,
+                               ...(state.einvFilter || {}) });
   } catch (e) {
     setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
     return;
@@ -4544,22 +4554,11 @@ async function loadEinvGaps(container, state) {
           <p>Không có hóa đơn nào bị bỏ sót số HĐĐT${state.gapChain ? ` ở ${state.gapChain}` : ""}.</p></div>`
       : html`<div class="kt-card"><div class="kt-card-body">
           <div class="kt-sub" style="margin-bottom:8px">Bỏ sót lâu nhất lên trước — đó là thứ tự đi soát.</div>
+          ${einvFilterBar(d.filters || {}, state.einvOpts)}
+          ${einvFilterNote(d)}
           <div class="kt-table-wrap"><table class="kt-table">
-            <thead><tr><th>Hóa đơn</th><th class="kt-col-wide">Khách hàng</th>
-              <th>Ngày HĐ</th><th class="num">Tổng HĐ</th><th></th></tr></thead>
-            <tbody>${rows.map((r) => html`<tr>
-              <td><a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a></td>
-              <td class="kt-col-wide">${r.customer_name || r.customer}
-                ${r.chain ? html`<div class="kt-sub">${r.chain}</div>`
-                          : html`<div class="kt-sub" style="color:var(--kt-warning)">chưa gán chuỗi</div>`}</td>
-              <td>${formatDate(r.posting_date)}</td>
-              <td class="num">${formatVND(r.grand_total)}</td>
-              <td>${state.canManage
-                ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" data-skip="${r.name}"
-                          title="Loại tờ này khỏi danh sách soát. KHÔNG đụng công nợ.">
-                    Bỏ qua</button>`
-                : ""}</td>
-            </tr>`)}</tbody>
+            <thead>${einvHead}</thead>
+            <tbody>${rows.map((r) => einvRow(r, state.canManage, true))}</tbody>
           </table></div>
           ${pager(d, "hóa đơn")}
           ${skippedBar(d)}
@@ -4568,18 +4567,141 @@ async function loadEinvGaps(container, state) {
 
   bindPager(container, state);
   bindEinvSkip(container, container, state, () => loadTab(container, state));
+  bindEinvFilter(container, state, (f) => {
+    state.einvFilter = f;
+    state.page = 1;
+    loadTab(container, state);
+  });
   const gc = container.querySelector("#gap-clear");
   if (gc) gc.addEventListener("click", () => {
-    state.gapChain = ""; state.page = 1; loadTab(container, state);
+    state.gapChain = ""; state.einvFilter = {};
+    state.einvOpts = null; state.einvOptsFor = null;
+    state.page = 1; loadTab(container, state);
   });
   container.querySelectorAll("tr.gap-chain").forEach((tr) => {
     tr.addEventListener("click", () => {
       // Chuỗi rỗng = khách chưa gán chuỗi. Lọc theo nó thì backend bỏ qua bộ
       // lọc và trả về TOÀN BỘ — im lặng sai. Chặn ngay ở đây.
       if (!tr.dataset.chain) return;
-      state.gapChain = tr.dataset.chain; state.page = 1; loadTab(container, state);
+      // Đổi chuỗi thì tùy chọn ô lọc CŨ không còn đúng, và bộ lọc đang bật có
+      // thể trỏ vào pháp nhân của chuỗi khác -> danh sách trống mà không hiểu vì sao.
+      state.gapChain = tr.dataset.chain;
+      state.einvFilter = {};
+      state.einvOpts = null;
+      state.einvOptsFor = null;
+      state.page = 1;
+      loadTab(container, state);
     });
   });
+}
+
+// Nạp tùy chọn ô lọc MỘT LẦN cho mỗi chuỗi. Gọi lại mỗi lần vẽ là một truy vấn
+// quét toàn bộ hóa đơn cho một cái combobox không đổi.
+async function ensureEinvOpts(state, chain) {
+  const key = chain || "";
+  if (state.einvOptsFor === key && state.einvOpts) return state.einvOpts;
+  try {
+    state.einvOpts = await api.mtEinvFilterOptions(chain || undefined);
+    state.einvOptsFor = key;
+  } catch (_e) {
+    // Ô lọc thiếu lựa chọn thì vẫn tìm được bằng ô chữ — không chặn cả màn.
+    state.einvOpts = { customers: [], stores: [] };
+  }
+  return state.einvOpts;
+}
+
+// ── BỘ LỌC + CỘT của danh sách soát HĐĐT ──────────────────────────────────
+//
+// Dùng chung cho CẢ HAI màn (bước Chờ xuất hóa đơn của Win, và màn soát toàn
+// kênh). Vẽ hai lần là sớm muộn một bên quên hiện dòng "đang lọc" — và một
+// danh sách bị lọc ngầm là con đường ngắn nhất để đọc ra một con số không phải
+// con số của nhóm đang chọn.
+//
+// ⚠ BỘ LỌC KHÔNG ĐỔI MỐC. Backend lọc SAU khi dựng mốc (`_apply_filters`), nên
+// lọc theo ngày không làm một hóa đơn bình thường bỗng thành "bỏ sót".
+function einvFilterBar(f, opts) {
+  const o = opts || { customers: [], stores: [] };
+  return html`
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <input class="kt-input kt-input--sm" id="ef-q" style="min-width:220px"
+             placeholder="Tìm số HĐ / số PO / khách / điểm giao…" value="${f.q || ""}">
+      <select class="kt-input kt-input--sm" id="ef-customer">
+        <option value="">Mọi pháp nhân</option>
+        ${o.customers.map((c) => html`<option value="${c.value}"
+          ${f.customer === c.value ? "selected" : ""}>${c.label}</option>`)}
+      </select>
+      <select class="kt-input kt-input--sm" id="ef-store">
+        <option value="">Mọi điểm giao</option>
+        ${o.stores.map((c) => html`<option value="${c.value}"
+          ${f.store === c.value ? "selected" : ""}>${c.label}</option>`)}
+      </select>
+      <span class="kt-sub">ngày HĐ</span>
+      <input type="date" class="kt-input kt-input--sm" id="ef-from" value="${f.from_date || ""}">
+      <span class="kt-sub">→</span>
+      <input type="date" class="kt-input kt-input--sm" id="ef-to" value="${f.to_date || ""}">
+      <button class="kt-btn kt-btn--sm" id="ef-go"><i class="fas fa-filter"></i> Lọc</button>
+      <button class="kt-btn kt-btn--outline kt-btn--sm" id="ef-clear">Bỏ lọc</button>
+    </div>`;
+}
+
+// Đang lọc thì NÓI RA, và nói luôn đang giấu bao nhiêu dòng.
+function einvFilterNote(d) {
+  if (!d.filtered) return "";
+  const hidden = (d.total_unfiltered || 0) - (d.total || 0);
+  return html`
+    <div class="kt-sub" style="color:var(--kt-warning);margin-bottom:8px">
+      <i class="fas fa-filter"></i>
+      <b>Đang lọc</b> — hiện ${d.total} / ${d.total_unfiltered} dòng của nhóm đang chọn${
+        hidden > 0 ? html`, <b>${hidden} dòng bị bộ lọc giấu đi</b>` : ""}.
+      Bộ lọc <b>không</b> đổi cách chia bỏ sót / chưa tới lượt.
+    </div>`;
+}
+
+const einvHead = html`<tr>
+  <th>Hóa đơn</th><th>Số PO</th><th class="kt-col-wide">Bên mua / điểm giao</th>
+  <th>Ngày HĐ</th><th class="num">Tổng HĐ</th><th></th></tr>`;
+
+function einvRow(r, canManage, withChain) {
+  return html`<tr>
+    <td><a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a></td>
+    <td>${r.po_no ? html`<code>${r.po_no}</code>` : html`<span class="kt-sub">—</span>`}</td>
+    <td class="kt-col-wide">${r.customer_name || r.customer}
+      ${withChain && r.chain ? html`<div class="kt-sub">${r.chain}</div>` : ""}
+      ${withChain && !r.chain
+        ? html`<div class="kt-sub" style="color:var(--kt-warning)">chưa gán chuỗi</div>` : ""}
+      ${r.store_name || r.store_code
+        ? html`<div class="kt-sub"><i class="fas fa-location-dot"></i>
+            ${r.store_code ? r.store_code + " — " : ""}${r.store_name || ""}</div>`
+        : (r.ship_to
+            ? html`<div class="kt-sub"><i class="fas fa-location-dot"></i> ${r.ship_to}</div>`
+            : html`<div class="kt-sub" style="color:var(--kt-warning)">chưa khai địa chỉ giao</div>`)}</td>
+    <td>${formatDate(r.posting_date)}</td>
+    <td class="num">${formatVND(r.grand_total)}</td>
+    <td>${canManage
+      ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" data-skip="${r.name}"
+                title="Loại tờ này khỏi danh sách soát. KHÔNG đụng công nợ.">
+          Bỏ qua</button>`
+      : ""}</td>
+  </tr>`;
+}
+
+// Ràng buộc thanh lọc. `apply` nhận object bộ lọc mới và tự nạp lại.
+function bindEinvFilter(box, state, apply) {
+  const read = () => ({
+    q: (box.querySelector("#ef-q") || {}).value || "",
+    customer: (box.querySelector("#ef-customer") || {}).value || "",
+    store: (box.querySelector("#ef-store") || {}).value || "",
+    from_date: (box.querySelector("#ef-from") || {}).value || "",
+    to_date: (box.querySelector("#ef-to") || {}).value || "",
+  });
+  const go = box.querySelector("#ef-go");
+  if (go) go.addEventListener("click", () => apply(read()));
+  const cl = box.querySelector("#ef-clear");
+  if (cl) cl.addEventListener("click", () => apply({}));
+  const q = box.querySelector("#ef-q");
+  // Enter trong ô tìm = bấm Lọc. Bắt người ta rời tay khỏi bàn phím để bấm một
+  // cái nút ngay cạnh là ma sát không có lý do.
+  if (q) q.addEventListener("keydown", (e) => { if (e.key === "Enter") apply(read()); });
 }
 
 // ── BỎ QUA khỏi danh sách soát HĐĐT ───────────────────────────────────────
@@ -4989,8 +5111,10 @@ async function loadWinEinv(container, state) {
   const chain = state.chain || "WinCommerce";
   let d;
   try {
+    await ensureEinvOpts(state, chain);
     d = await api.mtEinvGaps({ chain, scope: state.wpEinvScope || "tat_ca",
-                               page: state.wpEinvPage || 1, page_size: 50 });
+                               page: state.wpEinvPage || 1, page_size: 50,
+                               ...(state.wpEinvFilter || {}) });
   } catch (e) {
     setHTML(box, html`<div class="kt-card"><div class="kt-card-body kt-sub"
       style="color:var(--kt-danger)">Không đọc được danh sách hóa đơn: ${e.message}</div></div>`);
@@ -5023,6 +5147,9 @@ async function loadWinEinv(container, state) {
         <span class="kt-sub" style="margin-left:auto">${frontierLine(d.frontier, chain)}</span>
       </div>
 
+      ${einvFilterBar(d.filters || {}, state.einvOpts)}
+      ${einvFilterNote(d)}
+
       ${d.missed.count
         ? html`<div class="kt-sub" style="color:var(--kt-danger);margin-bottom:8px">
             <i class="fas fa-triangle-exclamation"></i>
@@ -5035,19 +5162,8 @@ async function loadWinEinv(container, state) {
         ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i>
             <p>Không có hóa đơn nào của ${chain} thiếu số HĐĐT trong nhóm đang chọn.</p></div>`
         : html`<div class="kt-table-wrap"><table class="kt-table">
-            <thead><tr><th>Hóa đơn</th><th class="kt-col-wide">Bên mua</th>
-              <th>Ngày HĐ</th><th class="num">Tổng HĐ</th><th></th></tr></thead>
-            <tbody>${rows.map((r) => html`<tr>
-              <td><a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a></td>
-              <td class="kt-col-wide">${r.customer_name || r.customer}</td>
-              <td>${formatDate(r.posting_date)}</td>
-              <td class="num">${formatVND(r.grand_total)}</td>
-              <td>${state.canManage
-                ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" data-skip="${r.name}"
-                          title="Loại tờ này khỏi danh sách soát. KHÔNG đụng công nợ.">
-                    Bỏ qua</button>`
-                : ""}</td>
-            </tr>`)}</tbody>
+            <thead>${einvHead}</thead>
+            <tbody>${rows.map((r) => einvRow(r, state.canManage, false))}</tbody>
           </table></div>
           ${pager(d, "hóa đơn")}`}
 
@@ -5064,6 +5180,11 @@ async function loadWinEinv(container, state) {
     </div></div>`);
 
   bindEinvSkip(box, container, state, () => loadWinEinv(container, state));
+  bindEinvFilter(box, state, (f) => {
+    state.wpEinvFilter = f;
+    state.wpEinvPage = 1;
+    loadWinEinv(container, state);
+  });
   box.querySelectorAll("button[data-wpe]").forEach((b) => {
     b.addEventListener("click", () => {
       state.wpEinvScope = b.dataset.wpe;

@@ -44,11 +44,14 @@ sys.path.insert(0, HERE)
 import regression_check as rc  # noqa: E402
 
 
-def inv(name, date, has_e, chain="WinCommerce", amount=10.0, customer=None):
+def inv(name, date, has_e, chain="WinCommerce", amount=10.0, customer=None,
+        po_no=None, ship_to=None, store_name=None, store_code=None):
     return {"name": name, "posting_date": date, "has_einvoice": has_e,
             "grand_total": amount, "chain": chain,
             "customer": customer or ("K-" + chain.replace(" ", "")),
-            "customer_name": chain}
+            "customer_name": chain,
+            "po_no": po_no, "ship_to": ship_to,
+            "store_name": store_name, "store_code": store_code}
 
 
 def main():
@@ -208,6 +211,78 @@ def main():
     print(f"  {'✅' if ok else '❌'} phạm vi lạ -> CHẶN kèm thông báo nói RA giá trị sai "
           f"({msg[:60]!r}). Im lặng lấy mặc định là màn hình tưởng đang xem một tập, "
           f"thật ra xem tập khác")
+    bad += not ok
+
+    # ── 5bb. BỘ LỌC KHÔNG ĐƯỢC ĐỔI MỐC ─────────────────────────────────
+    #
+    # Đây là chốt chặn quan trọng nhất của bộ lọc. Mốc dựng từ hóa đơn ĐÃ có
+    # số. Lọc TRƯỚC khi dựng mốc thì một bộ lọc ngày tháng sẽ ĐỔI LUÔN tờ nào
+    # bị chấm là "bỏ sót": lọc từ 01/03 trở đi là tờ đã xuất tháng 1 biến mất,
+    # mốc tụt về sau, và hóa đơn bình thường bỗng thành bỏ sót.
+    print("-" * 82)
+    F2 = [
+        inv("W-1", "2026-01-10", 1, po_no="PO-1", ship_to="ADDR-A",
+            store_name="Win Bình Dương", store_code="S01"),
+        inv("W-2", "2026-02-10", 0, po_no="PO-2", ship_to="ADDR-A",
+            store_name="Win Bình Dương", store_code="S01"),   # BỎ SÓT thật
+        inv("W-3", "2026-04-01", 1, po_no="PO-3", ship_to="ADDR-B",
+            store_name="Win Thủ Đức", store_code="S02"),
+        inv("W-4", "2026-05-01", 0, po_no="PO-4", ship_to="ADDR-B",
+            store_name="Win Thủ Đức", store_code="S02"),      # chưa tới lượt
+    ]
+    me._scan = lambda company, chain=None: ("EXPR", [dict(r) for r in F2])
+
+    base = me.get_gaps(scope="tat_ca")
+    ok = base["missed"]["count"] == 1 and base["backlog"]["count"] == 1
+    print(f"  {'✅' if ok else '❌'} chưa lọc: 1 bỏ sót / 1 chưa tới lượt")
+    bad += not ok
+
+    # Lọc từ 01/03 — bỏ mất W-1 (tờ ĐÃ xuất tháng 1). Nếu lọc chạy trước khi
+    # dựng mốc thì mốc thành W-3 và W-2 vẫn bỏ sót... nhưng nếu lọc bỏ luôn W-3
+    # thì mọi thứ đảo lộn. Phép kiểm: SỐ ĐẾM hai nhóm KHÔNG được đổi.
+    f1 = me.get_gaps(scope="tat_ca", from_date="2026-03-01")
+    ok = (f1["missed"]["count"] == base["missed"]["count"]
+          and f1["backlog"]["count"] == base["backlog"]["count"])
+    print(f"  {'✅' if ok else '❌'} lọc theo NGÀY không đổi cách chia "
+          f"({f1['missed']['count']}/{f1['backlog']['count']} vs "
+          f"{base['missed']['count']}/{base['backlog']['count']}) — mốc dựng trước, lọc sau")
+    bad += not ok
+
+    ok = [r["name"] for r in f1["rows"]] == ["W-4"] and f1["filtered"] is True
+    print(f"  {'✅' if ok else '❌'} nhưng DANH SÁCH có bị cắt ({[r['name'] for r in f1['rows']]}) "
+          f"và cờ `filtered` bật")
+    bad += not ok
+
+    ok = f1["total_unfiltered"] == 2 and f1["total"] == 1
+    print(f"  {'✅' if ok else '❌'} và trả về CẢ tổng trước lọc ({f1['total_unfiltered']}) lẫn sau "
+          f"lọc ({f1['total']}) — để màn hình nói được đang giấu bao nhiêu dòng")
+    bad += not ok
+
+    # ── 5bc. Tìm và lọc theo PO / điểm giao ─────────────────────────────
+    print("-" * 82)
+    cases = [
+        ({"q": "PO-2"}, ["W-2"], "số PO"),
+        ({"q": "po-2"}, ["W-2"], "số PO, không phân biệt hoa thường"),
+        ({"q": "Thủ Đức"}, ["W-4"], "tên điểm giao"),
+        ({"q": "S01"}, ["W-2"], "mã điểm giao"),
+        ({"q": "W-4"}, ["W-4"], "số hóa đơn"),
+        ({"store": "ADDR-A"}, ["W-2"], "ô lọc điểm giao"),
+        ({"customer": "K-WinCommerce"}, ["W-2", "W-4"], "ô lọc pháp nhân"),
+        ({"to_date": "2026-03-01"}, ["W-2"], "đến ngày"),
+        ({"q": "không-có-gì"}, [], "không khớp gì -> rỗng, không trả cả rổ"),
+    ]
+    miss = []
+    for kw, want, label in cases:
+        got = [r["name"] for r in me.get_gaps(scope="tat_ca", **kw)["rows"]]
+        if got != want:
+            miss.append((label, got, want))
+    ok = not miss
+    print(f"  {'✅' if ok else '❌'} lọc/tìm đúng trên PO · điểm giao · pháp nhân · ngày · số HĐ "
+          f"({len(cases)} ca){'' if ok else ' — sai: ' + str(miss)}")
+    bad += not ok
+
+    ok = me.get_gaps(scope="tat_ca")["filtered"] is False
+    print(f"  {'✅' if ok else '❌'} không lọc gì -> `filtered` tắt, màn hình không kêu oan")
     bad += not ok
 
     # ── 5c. BỎ QUA — ranh giới của nó ───────────────────────────────────
@@ -424,6 +499,38 @@ def main():
 
     ok = "data-unskip" in js
     print(f"  {'✅' if ok else '❌'} mở lại được ngay trong màn xem lại")
+    bad += not ok
+
+    print("-" * 82)
+    # Soi TRONG `einvRow`, không dò cả file: `r.po_no` còn xuất hiện ở bảng đợt
+    # giao Win và bảng đối soát phiếu nhập kho, nên dò cả file là luôn ĐẠT.
+    row_js = rc.js_body(js, "einvRow")
+    head_js = js.split("const einvHead")[1].split(";")[0]
+    ok = "r.po_no" in row_js and "Số PO" in head_js
+    print(f"  {'✅' if ok else '❌'} bảng có cột SỐ PO (soi trong `einvRow`, không dò cả file)")
+    bad += not ok
+
+    ok = ("r.store_name" in row_js and "r.ship_to" in row_js
+          and "chưa khai địa chỉ giao" in row_js)
+    print(f"  {'✅' if ok else '❌'} và cột ĐIỂM GIAO — có tên điểm, rơi về địa chỉ khi chưa nối "
+          f"được, và nói rõ khi hóa đơn chưa khai (bỏ trống đọc thành 'không có địa chỉ giao')")
+    bad += not ok
+
+    for fn in ("loadWinEinv", "loadEinvGaps"):
+        ok = rc.js_calls(js, fn, "bindEinvFilter")
+        print(f"  {'✅' if ok else '❌'} `{fn}` có nối thanh lọc")
+        bad += not ok
+
+    ok = rc.js_calls(js, "einvFilterNote", "html") and "bị bộ lọc giấu đi" in js
+    print(f"  {'✅' if ok else '❌'} đang lọc thì NÓI RA và nói luôn giấu bao nhiêu dòng")
+    bad += not ok
+
+    # Soi TRONG thân từng loader. Dò cả file thì cả hai tên đều còn (chúng nằm
+    # trong state literal và trong lời gọi API), nên đổi một chỗ vẫn ĐẠT.
+    ok = ("state.wpEinvFilter = f" in rc.js_body(js, "loadWinEinv")
+          and "state.einvFilter = f" in rc.js_body(js, "loadEinvGaps"))
+    print(f"  {'✅' if ok else '❌'} mỗi màn GHI vào ô lọc RIÊNG của nó — chung một ô là lọc bên "
+          f"này thì bên kia đổi theo mà không ai bấm gì")
     bad += not ok
 
     print("=" * 82)

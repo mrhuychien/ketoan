@@ -271,6 +271,8 @@ export const api = {
   // sổ cái. Lý do bắt buộc; mở lại được.
   mtEinvSkip: (a) => callMethod(NS + "mt_einv.set_skip", withCompany(a)),
   mtEinvSkipped: (a) => callMethod(NS + "mt_einv.list_skipped", withCompany(a)),
+  mtEinvFilterOptions: (chain) =>
+    callMethod(NS + "mt_einv.filter_options", withCompany({ chain })),
 
   // Ba cuốn sổ + CẦU NỐI: sổ cái 131 lệch rổ hóa đơn ở đâu, vì sao.
   mtGlBridge: (a) => callMethod(NS + "mt_gl_bridge.compare", withCompany(a)),

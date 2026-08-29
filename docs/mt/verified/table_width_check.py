@@ -125,6 +125,27 @@ def body_kinds(src, start):
             for c in chunks]
 
 
+# Tiêu đề dựng thành HẰNG SỐ rồi chèn vào `<thead>${...}</thead>`.
+#
+# Khuôn này xuất hiện khi hai màn dùng chung một bảng — tách ra để không vẽ hai
+# lần rồi lệch nhau. Nhưng bộ đo cũ chỉ dò `<thead>…</thead>` nên nó thấy đúng
+# `${einvHead}` và đếm ra 0 cột: BẢNG BIẾN MẤT KHỎI PHÉP ĐO mà không báo gì.
+# Đã xảy ra thật với bảng soát HĐĐT (6 cột).
+HOISTED = re.compile(r"const\s+(\w+)\s*=\s*html`(.*?)`", re.S)
+
+
+def _resolve_head(src, inner):
+    """`<thead>` chỉ chứa `${tên}` -> tra ra hằng số đó và trả về nội dung thật."""
+    m = re.fullmatch(r"\s*\$\{(\w+)\}\s*", inner)
+    if not m:
+        return inner
+    want = m.group(1)
+    for name, body in HOISTED.findall(src):
+        if name == want:
+            return body
+    return inner
+
+
 def extract_tables():
     """[(file, dòng, [(nhãn, kiểu, thuộc_tính)])] cho mọi `<thead>` tìm thấy."""
     out = []
@@ -133,7 +154,7 @@ def extract_tables():
         for m in re.finditer(r"<thead>(.*?)</thead>", src, re.S):
             kinds = body_kinds(src, m.end())
             cols = []
-            for i, (attrs, raw) in enumerate(TH_RE.findall(m.group(1))):
+            for i, (attrs, raw) in enumerate(TH_RE.findall(_resolve_head(src, m.group(1)))):
                 lab = _label(raw)
                 if not _is_num(attrs):
                     kind = "text"

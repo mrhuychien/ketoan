@@ -158,8 +158,14 @@ def js_body(js, fn_name):
 
 
 def js_calls(js, caller, callee):
-    """Hàm `caller` có GỌI `callee` không — soi trong thân, không soi cả file."""
-    return ("%s(" % callee) in js_body(js, caller)
+    """Hàm `caller` có GỌI `callee` không — soi trong thân, không soi cả file.
+
+    Nhận CẢ HAI dạng gọi: `callee(...)` và tagged template ``callee`...` ``.
+    Bản đầu chỉ dò `callee(` nên báo "không gọi" cho mọi hàm dựng HTML bằng
+    ``html`...` `` — tức là gần hết tầng giao diện của app này.
+    """
+    body = js_body(js, caller)
+    return ("%s(" % callee) in body or ("%s`" % callee) in body
 
 
 def _stub_frappe():

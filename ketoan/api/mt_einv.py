@@ -99,6 +99,39 @@ def _cols():
     )
 
 
+def _col(field):
+    """`si.<field>` nếu site có ô đó, không thì `NULL`.
+
+    `po_no` và `shipping_address_name` là ô CHUẨN của ERPNext, nhưng bản dựng
+    site có thể đã gỡ hoặc đổi. Hỏi trước vẫn rẻ hơn một câu SQL gãy giữa màn
+    hình đang chạy.
+    """
+    return f"si.{field}" if frappe.db.has_column("Sales Invoice", field) else "NULL"
+
+
+def _store_join():
+    """Nối ĐIỂM SIÊU THỊ qua `MT Store.address = si.shipping_address_name`.
+
+    Vì sao không in thẳng `si.shipping_address`: ô đó là HTML đã dựng sẵn
+    (`<br>` giữa các dòng), không phải một cái tên. Còn `shipping_address_name`
+    là docname kiểu 'WinMart Bình Dương-Shipping' — đọc được nhưng không phải
+    tên điểm mà kế toán dùng.
+
+    `MT Store` chính là bảng điểm siêu thị của app, đã có `store_code` +
+    `store_name` do kế toán seed. Nối vào đó là hiện đúng cái tên người ta gọi.
+    Không khớp thì rơi về docname địa chỉ — KHÔNG bỏ trống, vì trống đọc thành
+    "hóa đơn không có địa chỉ giao".
+    """
+    if not frappe.db.table_exists("MT Store"):
+        return "", "NULL", "NULL"
+    if not frappe.db.has_column("Sales Invoice", "shipping_address_name"):
+        return "", "NULL", "NULL"
+    return (
+        " LEFT JOIN `tabMT Store` st ON st.address = si.shipping_address_name ",
+        "st.store_code", "st.store_name",
+    )
+
+
 def _scan(company, chain=None):
     """Mọi hóa đơn BÁN của kênh MT, kèm cờ đã điền số HĐĐT chưa.
 
@@ -119,6 +152,7 @@ def _scan(company, chain=None):
         extra = " AND " + _customer_in_clause(chain_customers(chain), p)
 
     no_col, ser_col = _cols()
+    st_join, st_code, st_name = _store_join()
     # Hóa đơn ĐÃ BỎ QUA rơi khỏi CẢ HAI nhóm — kể cả nhóm "đã xuất", vì nó cũng
     # không còn tham gia việc dựng MỐC. Để nó lại làm mốc thì một tờ người ta
     # cố ý loại vẫn quyết định tờ nào bị chấm là bỏ sót.
@@ -126,9 +160,13 @@ def _scan(company, chain=None):
         SELECT si.name, si.customer, si.customer_name, si.posting_date,
                ABS(si.grand_total) AS grand_total,
                {no_col} AS inv_no, {ser_col} AS inv_series,
+               {_col("po_no")} AS po_no,
+               {_col("shipping_address_name")} AS ship_to,
+               {st_code} AS store_code, {st_name} AS store_name,
                {einv} AS has_einvoice
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
+        {st_join}
         WHERE si.docstatus = 1 AND si.company = %(company)s
           AND si.is_return = 0
           AND {mt} {extra}{_skip_clause()}
@@ -197,8 +235,52 @@ def _sum(rows):
 SCOPES = ("bo_sot", "chua_toi_luot", "tat_ca")
 
 
+def _apply_filters(rows, q=None, customer=None, store=None, from_date=None, to_date=None):
+    """Cắt danh sách theo bộ lọc màn hình. Trả về (rows, có_lọc_gì_không).
+
+    ⚠ CHẠY SAU `_split`, KHÔNG BAO GIỜ TRƯỚC.
+
+    MỐC dựng từ hóa đơn ĐÃ có số. Lọc trước khi dựng mốc thì một bộ lọc ngày
+    tháng sẽ ĐỔI LUÔN tờ nào bị chấm là "bỏ sót" — lọc từ 01/07 trở đi là mọi
+    tờ đã xuất trước đó biến mất, mốc tụt về sau, và một loạt hóa đơn bình
+    thường bỗng thành bỏ sót. Bộ lọc là chuyện của MÀN HÌNH; mốc là chuyện của
+    DỮ LIỆU. Trộn hai thứ đó là để giao diện quyết định cái gì bất thường.
+    """
+    q = cstr(q or "").strip().lower()
+    customer = cstr(customer or "").strip()
+    store = cstr(store or "").strip()
+    from_date = cstr(from_date or "").strip()[:10]
+    to_date = cstr(to_date or "").strip()[:10]
+    on = bool(q or customer or store or from_date or to_date)
+    if not on:
+        return rows, False
+
+    def keep(r):
+        if customer and cstr(r.get("customer")) != customer:
+            return False
+        if store and cstr(r.get("ship_to") or "") != store:
+            return False
+        d = cstr(r.get("posting_date") or "")[:10]
+        if from_date and d < from_date:
+            return False
+        if to_date and d > to_date:
+            return False
+        if q:
+            # Tìm trên MỌI thứ người ta cầm trong tay khi đi tra: số hóa đơn
+            # ERPNext, số PO của siêu thị, tên pháp nhân, tên/mã điểm giao.
+            hay = " ".join(cstr(r.get(k) or "") for k in
+                           ("name", "po_no", "customer_name", "customer",
+                            "store_name", "store_code", "ship_to")).lower()
+            if q not in hay:
+                return False
+        return True
+
+    return [r for r in rows if keep(r)], True
+
+
 @frappe.whitelist()
-def get_gaps(company=None, chain=None, page=1, page_size=50, scope="bo_sot"):
+def get_gaps(company=None, chain=None, page=1, page_size=50, scope="bo_sot",
+             q=None, customer=None, store=None, from_date=None, to_date=None):
     """Hóa đơn MT chưa điền số HĐĐT, tách 'bỏ sót' khỏi 'chưa tới lượt'.
 
     Không truyền `chain` -> soát toàn kênh, kèm bảng gộp theo từng chuỗi (MỐC
@@ -287,6 +369,10 @@ def get_gaps(company=None, chain=None, page=1, page_size=50, scope="bo_sot"):
     # CŨ NHẤT LÊN TRƯỚC cho cả ba tập — đó là thứ tự làm việc: tờ đọng lâu nhất
     # là tờ phải xử trước, dù nó thuộc nhóm nào.
     listed = sorted(listed, key=lambda r: (r["posting_date"], r["name"]))
+    # LỌC SAU CÙNG — sau khi mốc đã dựng xong. Xem `_apply_filters`.
+    n_before = len(listed)
+    listed, filtered = _apply_filters(listed, q=q, customer=customer, store=store,
+                                      from_date=from_date, to_date=to_date)
     total = len(listed)
     start = (page - 1) * page_size
     return {
@@ -295,6 +381,14 @@ def get_gaps(company=None, chain=None, page=1, page_size=50, scope="bo_sot"):
         "chain": chain or "",
         "scope": scope,
         "rows": listed[start:start + page_size],
+        # Đang lọc thì phải NÓI RA đang lọc và ĐANG GIẤU BAO NHIÊU. Một danh
+        # sách bị lọc ngầm là con đường ngắn nhất để đọc ra một con số không
+        # phải con số của nhóm đang chọn.
+        "filtered": filtered,
+        "total_unfiltered": n_before,
+        "filters": {"q": cstr(q or ""), "customer": cstr(customer or ""),
+                    "store": cstr(store or ""), "from_date": cstr(from_date or ""),
+                    "to_date": cstr(to_date or "")},
         "total": total,
         "pages": max(1, -(-total // page_size)),
         "page": page,
@@ -415,6 +509,37 @@ def set_skip(sales_invoice, skip=1, note=None, company=None):
         "message": (_("Đã bỏ qua hóa đơn {0} khỏi danh sách soát HĐĐT. Công nợ và sổ cái "
                       "KHÔNG đổi.").format(si) if on
                     else _("Đã đưa hóa đơn {0} trở lại danh sách soát.").format(si)),
+    }
+
+
+@frappe.whitelist()
+def filter_options(company=None, chain=None):
+    """Pháp nhân + điểm giao ĐANG CÓ trong danh sách, để đổ vào ô lọc.
+
+    Lấy từ CHÍNH tập hóa đơn đang soát chứ không liệt kê mọi Customer/Address
+    của công ty: ô lọc bày ra một lựa chọn không có dòng nào là mời người dùng
+    bấm rồi nhận màn hình trống và tưởng hỏng.
+    """
+    guard_mt()
+    _require_tables()
+    company = _company(company)
+
+    _einv, rows = _scan(company, chain=chain)
+    cus, sto = {}, {}
+    for r in rows:
+        c = cstr(r.get("customer") or "")
+        if c:
+            cus[c] = cstr(r.get("customer_name") or c)
+        s_id = cstr(r.get("ship_to") or "")
+        if s_id:
+            name = cstr(r.get("store_name") or "") or s_id
+            code = cstr(r.get("store_code") or "")
+            sto[s_id] = ("%s — %s" % (code, name)) if code else name
+    return {
+        "customers": [{"value": k, "label": v} for k, v in
+                      sorted(cus.items(), key=lambda x: x[1])],
+        "stores": [{"value": k, "label": v} for k, v in
+                   sorted(sto.items(), key=lambda x: x[1])],
     }
 
 

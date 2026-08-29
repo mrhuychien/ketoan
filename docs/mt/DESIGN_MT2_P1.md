@@ -587,7 +587,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AC** hai cuốn sổ ngay trong trang chuỗi + màn trống nói đúng lý do | `a03452b` | `two_books_check` · `win_seed_check` |
 | **MT2-AD** cuốn sổ THỨ BA: sổ cái TK 131 + cầu nối phân tích chỗ lệch | `a892c6b` | `gl_bridge_check` |
 | **MT2-AE** "Chờ xuất hóa đơn" Win: liệt kê HĐ ERPNext thiếu số MISA | `4252bd6` | `einv_gap_check` |
-| **MT2-AF** BỎ QUA hóa đơn khỏi danh sách soát HĐĐT (patch v0_0_18) | *(commit này)* | `einv_gap_check` |
+| **MT2-AF** BỎ QUA hóa đơn khỏi danh sách soát HĐĐT (patch v0_0_18) | `159fc64` | `einv_gap_check` |
+| **MT2-AG** danh sách soát: cột PO · điểm giao · bộ lọc | *(commit này)* | `einv_gap_check` · `table_width_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -889,6 +890,44 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AG — cột PO, điểm giao, và bộ lọc
+
+**Chốt chặn quan trọng nhất: bộ lọc KHÔNG được đổi MỐC.**
+
+Mốc dựng từ hóa đơn *đã* có số. Lọc **trước** khi dựng mốc thì một bộ lọc ngày
+tháng đổi luôn tờ nào bị chấm là "bỏ sót" — lọc từ 01/03 là mọi tờ đã xuất
+trước đó biến mất, mốc tụt về sau, và một loạt hóa đơn bình thường bỗng thành
+bỏ sót. Bộ lọc là chuyện của **màn hình**; mốc là chuyện của **dữ liệu**.
+`_apply_filters` chạy **sau** `_split`, và bộ kiểm chạy thật để chứng minh: lọc
+theo ngày giữ nguyên 1 bỏ sót / 1 chưa tới lượt, chỉ danh sách bị cắt.
+
+Đang lọc thì **nói ra**, kèm số dòng bị giấu (`filtered`, `total_unfiltered`).
+
+**Cột mới.** Số PO (`si.po_no`) · điểm giao — nối `MT Store.address =
+si.shipping_address_name` để hiện đúng tên điểm kế toán dùng, rơi về docname
+địa chỉ khi chưa nối được, và nói rõ *"chưa khai địa chỉ giao"* khi trống (bỏ
+trống đọc thành "hóa đơn không có địa chỉ"). Không in `si.shipping_address` vì
+ô đó là HTML đã dựng sẵn, không phải một cái tên.
+
+**Ô lọc chỉ bày lựa chọn CÓ THẬT** trong tập đang soát (`filter_options`) — bày
+một lựa chọn không có dòng nào là mời người dùng bấm rồi tưởng màn hình hỏng.
+Hai màn dùng **ô lọc riêng**; đổi chuỗi thì xóa bộ lọc và nạp lại tùy chọn.
+
+**Ba lỗ trong bộ kiểm, lộ ra nhờ phép thử phá hoại** — cả ba đều là *dò trên cả
+file thay vì soi đúng chỗ*:
+
+- `"r.po_no" in js` luôn ĐẠT vì `r.po_no` còn ở bảng đợt giao Win và bảng đối
+  soát phiếu nhập kho. Nay soi trong thân `einvRow`.
+- `"state.wpEinvFilter" in js` luôn ĐẠT vì tên đó còn trong state literal. Nay
+  soi trong thân từng loader.
+- `js_calls` không nhận **tagged template** — ``html`…` `` không phải `html(`,
+  nên nó báo "không gọi" cho gần hết tầng giao diện. Đã sửa ở hàm dùng chung.
+
+**Và một lỗ ở bộ đo bề rộng.** Tiêu đề bảng nay là hằng số chèn vào
+`<thead>${einvHead}</thead>`; `table_width_check` chỉ dò `<thead>…</thead>` nên
+nó đếm ra 0 cột và **bảng biến mất khỏi phép đo mà không báo gì**. Nay bộ đo
+tra được hằng số đó — bảng 6 cột mới đã vào phép đo và không cuộn ngang.
 
 ### MT2-AF — bỏ qua hóa đơn khỏi danh sách soát HĐĐT
 
