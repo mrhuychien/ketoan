@@ -23,6 +23,10 @@ from ketoan.misa_integration.doctype.misa_invoice_snapshot.misa_invoice_snapshot
 # Chỉ dòng thanh toán hàng hóa mới được nối sang Sales Invoice.
 ROW_KIND_PAYMENT = "Thanh toán"
 
+# Chỉ dòng ghi giảm mới được nối `return_invoice` — xem docstring của
+# `_validate_return_invoice` bên dưới.
+ROW_KIND_DEDUCT = "Ghi giảm"
+
 
 # Ký hiệu hóa đơn điện tử theo TT78/2021: <mẫu số 1 chữ số><C hoặc K><2 chữ số
 # năm><3 ký tự do người bán tự đặt>, ví dụ '1C26THG'. 'C' = có mã cơ quan thuế,
@@ -93,3 +97,51 @@ class MTPaymentAdviceLine(Document):
             # Không còn nối SI thì "cách khớp" cũ vô nghĩa. Giữ nguyên độ tin cậy
             # vì "Không khớp" là kết luận hợp lệ cho dòng chưa có hóa đơn.
             self.match_method = None
+
+        self._validate_return_invoice()
+
+    def _validate_return_invoice(self):
+        """`return_invoice` — nối CHỨNG TỪ, tuyệt đối không nối TIỀN.
+
+        ════════════════════════════════════════════════════════════════════
+        VÌ SAO CÓ Ô NÀY
+        ════════════════════════════════════════════════════════════════════
+
+        Siêu thị trả hàng date/thời vụ thì CÓ THỂ chính siêu thị xuất hóa đơn
+        trả hàng, chứ không phải mình. Khi đó phiếu trả hàng trên ERPNext sẽ
+        KHÔNG BAO GIỜ có số hóa đơn MISA của mình — và màn sổ theo dõi sẽ kêu
+        "chưa có HĐ" mãi mãi. Báo động giả kêu mãi thì sau hai tuần không ai
+        nhìn nữa, và lúc đó nó nuốt luôn cả những cảnh báo thật.
+
+        Số hóa đơn của siêu thị đã nằm sẵn trong bảng kê thanh toán, ở dòng
+        `Ghi giảm`. Nên chỉ cần trỏ dòng đó về phiếu trả là đủ chứng minh
+        "đã có chứng từ thuế" — không phải gõ tay ô nào.
+
+        ════════════════════════════════════════════════════════════════════
+        VÌ SAO KHÔNG DÙNG LUÔN `sales_invoice` CHO VIỆC NÀY
+        ════════════════════════════════════════════════════════════════════
+
+        Vì `sales_invoice` là ĐƯỜNG TIỀN. `mt._paid_join` cộng dồn nó để ra
+        "đã trả bao nhiêu". Mà hàng trả lại ĐÃ được trừ khỏi công nợ MỘT LẦN
+        rồi, bằng chính phiếu trả (`_returns_join` từ MT2-N). Cho dòng ghi
+        giảm nối vào đường tiền là trừ HAI LẦN cùng một lần trả hàng — và
+        `mt_advice` đã chặn ở ba chỗ vì đúng lý do đó.
+
+        Nên đây là ô THỨ HAI, cố ý tách hẳn. Không mệnh đề tính tiền nào được
+        đọc nó; `two_books_check` có phép kiểm chứng minh điều đó.
+        """
+        if not self.return_invoice:
+            return
+
+        if self.row_kind != ROW_KIND_DEDUCT:
+            frappe.throw(
+                _("Dòng {0}: chỉ dòng '{1}' mới được nối Phiếu trả hàng. Dòng '{2}' "
+                  "thì hóa đơn nối ở ô 'Hóa đơn ERPNext'.").format(
+                    self.idx, ROW_KIND_DEDUCT, self.row_kind or ""))
+
+        # Phải đúng là PHIẾU TRẢ. Trỏ nhầm sang hóa đơn bán ra thì màn hình
+        # tưởng hóa đơn đó đã đủ chứng từ trả hàng trong khi nó chưa hề bị trả.
+        if not frappe.db.get_value("Sales Invoice", self.return_invoice, "is_return"):
+            frappe.throw(
+                _("Dòng {0}: {1} không phải phiếu trả hàng (is_return = 0).").format(
+                    self.idx, self.return_invoice))

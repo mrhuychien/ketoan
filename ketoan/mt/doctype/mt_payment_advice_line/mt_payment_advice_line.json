@@ -26,6 +26,7 @@
   "match_method",
   "column_break_match",
   "match_confidence",
+  "return_invoice",
   "source_row"
  ],
  "fields": [
@@ -155,6 +156,14 @@
    "in_list_view": 1,
    "label": "Độ tin cậy",
    "options": "\nChắc chắn\nCần review\nKhông khớp"
+  },
+  {
+   "description": "Phiếu trả hàng ERPNext mà dòng GHI GIẢM này là chứng từ thuế đi kèm — dùng khi SIÊU THỊ tự xuất hóa đơn trả hàng, nên mình KHÔNG có hóa đơn MISA nào cho phiếu trả đó. CHỈ để đối chiếu CHỨNG TỪ. TUYỆT ĐỐI không phải đường tính tiền: hàng trả đã được trừ công nợ một lần qua chính phiếu trả rồi.",
+   "fieldname": "return_invoice",
+   "fieldtype": "Link",
+   "label": "Phiếu trả hàng (đối chiếu chứng từ)",
+   "options": "Sales Invoice",
+   "search_index": 1
   },
   {
    "description": "Số dòng trong file gốc (1-indexed như người dùng nhìn trong Excel) — để truy ngược khi nghi ngờ.",

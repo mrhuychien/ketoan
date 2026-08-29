@@ -591,7 +591,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AG** danh sách soát: cột PO · điểm giao · bộ lọc | `208a735` | `einv_gap_check` · `table_width_check` |
 | **MT2-AH** SỔ THEO DÕI HÓA ĐƠN — dựng lại cuốn Excel kế toán vẫn giữ | `115eb8c` | `ledger_check` |
 | **MT2-AI** tick chiết khấu 4 trạng thái · phiếu trả kèm chứng từ MISA | `a2c6603` | `ledger_check` |
-| **MT2-AJ** số PO gom về MỘT ô — `custom_po_`, bỏ `po_no` | *(commit này)* | `po_field_check` |
+| **MT2-AJ** số PO gom về MỘT ô — `custom_po_`, bỏ `po_no` | `0831b66` | `po_field_check` |
+| **MT2-AK** `return_invoice` — nối chứng từ trả hàng, cấm đường tiền | *(commit này)* | `return_doc_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -893,6 +894,41 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AK — chứng từ trả hàng của siêu thị, và một cái lỗ suýt mở lại
+
+MT2-AI cảnh báo `N chưa có HĐ` khi phiếu trả chưa có chứng từ MISA. Nhưng có
+một nhánh làm cảnh báo đó **không bao giờ tắt được**: khi hàng date được trả và
+**chính siêu thị** xuất hóa đơn, mình không có hóa đơn MISA nào cho phiếu trả
+đó — hỏi mãi cũng không bao giờ có. Báo động giả kêu mãi thì sau hai tuần không
+ai nhìn nữa, và lúc đó nó nuốt luôn những cảnh báo thật.
+
+Chứng từ ấy **đã nằm sẵn** trong bảng kê thanh toán, ở dòng `Ghi giảm`. Nên chỉ
+cần trỏ dòng đó về phiếu trả — không ô nhập tay nào.
+
+**Nhưng đó đúng là con đường mở lại lỗ trừ-hai-lần của MT2-G.** Hàng trả đã
+được trừ công nợ một lần bằng chính phiếu trả (`_returns_join`, MT2-N); cho
+dòng ghi giảm nối vào đường tiền là trừ lần thứ hai. `mt_advice` chặn ở ba chỗ
+vì đúng lý do đó.
+
+Cách gỡ: **ô THỨ HAI, tách hẳn khỏi ô tiền.**
+
+```
+sales_invoice    đường TIỀN     — dòng ghi giảm vẫn CẤM, luật cũ nguyên vẹn
+return_invoice   đường CHỨNG TỪ — chỉ dòng ghi giảm, và phải là is_return = 1
+```
+
+`_attach_returns` giờ hỏi **cả hai phía**: chứng từ của mình *hoặc* của siêu
+thị. Thiếu cả hai mới kêu.
+
+**Phép kiểm ở đây không kiểm tính năng — nó canh cái lỗ.** Và `"return_invoice"
+in src` là vô dụng, vì ô này *được phép* xuất hiện. Câu hỏi là nó xuất hiện ở
+**hàm nào**. Nên `return_doc_check` soi thân từng hàm: danh sách hàm tiền đã
+biết, cộng một lượt quét rộng bắt mọi hàm vừa có `SUM(`/`total_amount`/`paid`
+vừa nhắc `return_invoice`. Hàm tiền mới ai đó viết sau này cũng dính.
+
+Đã thử phá bốn kiểu, cả bốn đều trúng — trong đó có kiểu nguy hiểm nhất: thêm
+`SUM(l.total_amount)` vào chính hàm đọc chứng từ.
 
 ### MT2-AJ — số PO nằm ở hai ô, và app đọc nhầm ô
 

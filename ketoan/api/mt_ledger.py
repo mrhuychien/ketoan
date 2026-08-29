@@ -278,6 +278,14 @@ def _attach_returns(rows):
     date. Nên ở đây chỉ ĐỌC RA chứng từ MISA đang gắn với phiếu trả, và chỉ ra
     tờ nào CHƯA có chứng từ nào. Đó là việc còn thiếu, và nó thường bị quên đúng
     ở đây: phiếu trả đã ghi trên ERPNext, hóa đơn phía MISA thì chưa ai làm.
+
+    ⚠ NHÁNH THỨ BA, và nếu bỏ sót thì cảnh báo ở đây thành báo động giả VĨNH
+    VIỄN: ở nhánh (b), khi CHÍNH SIÊU THỊ xuất hóa đơn trả hàng, mình không hề
+    có hóa đơn MISA nào cho phiếu trả đó — hỏi mãi cũng không bao giờ có. Chứng
+    từ nằm ở phía siêu thị, và nó về theo BẢNG KÊ THANH TOÁN, ở dòng `Ghi giảm`
+    được kế toán trỏ về phiếu trả qua `MT Payment Advice Line.return_invoice`.
+    Nên "đã có chứng từ" phải hỏi CẢ HAI phía. Hỏi một phía là bắt kế toán nhìn
+    một cảnh báo không bao giờ tắt được.
     """
     names = [r["name"] for r in rows]
     for r in rows:
@@ -300,8 +308,12 @@ def _attach_returns(rows):
         ORDER BY r.posting_date, r.name
     """, {"names": tuple(names)}, as_dict=True)
 
+    chain_docs = _chain_return_docs([x.name for x in rets])
+
     by_si = defaultdict(list)
     for x in rets:
+        ours = cstr(x.misa_no or "") or cstr(x.misa_relation or "")
+        theirs = chain_docs.get(x.name) or {}
         by_si[x.si].append({
             "name": x.name,
             "posting_date": cstr(x.posting_date),
@@ -309,12 +321,42 @@ def _attach_returns(rows):
             "misa_relation": cstr(x.misa_relation or ""),
             "misa_no": cstr(x.misa_no or ""),
             "misa_status": cstr(x.misa_status or ""),
-            # CHƯA có chứng từ MISA nào đi cùng phiếu trả này.
-            "misa_missing": not (cstr(x.misa_no or "") or cstr(x.misa_relation or "")),
+            # Hóa đơn do CHÍNH SIÊU THỊ xuất, đọc từ bảng kê thanh toán.
+            "chain_inv_no": theirs.get("inv_no", ""),
+            "chain_advice": theirs.get("advice", ""),
+            # CHƯA có chứng từ nào đi cùng phiếu trả này — hỏi CẢ HAI phía.
+            "misa_missing": not (ours or theirs),
         })
     for r in rows:
         r["returns"] = by_si.get(r["name"], [])
         r["returns_no_misa"] = sum(1 for x in r["returns"] if x["misa_missing"])
+
+
+def _chain_return_docs(return_names):
+    """Hóa đơn trả hàng do SIÊU THỊ xuất, đọc từ dòng ghi giảm của bảng kê.
+
+    Đọc `MT Payment Advice Line.return_invoice` — ô nối CHỨNG TỪ, không phải
+    đường tiền. Hàm này KHÔNG cộng `total_amount` và không được phép cộng: hàng
+    trả đã trừ công nợ một lần qua chính phiếu trả rồi (xem `_returns_join`),
+    cộng thêm ở đây là trừ hai lần.
+    """
+    if not return_names or not frappe.db.table_exists("MT Payment Advice Line"):
+        return {}
+    if not frappe.db.has_column("MT Payment Advice Line", "return_invoice"):
+        # Chưa `bench migrate` thì coi như chưa ai trỏ dòng nào — KHÔNG ném lỗi:
+        # sổ vẫn đọc được, chỉ là cảnh báo "chưa có HĐ" rộng hơn thực tế.
+        return {}
+    rows = frappe.db.sql("""
+        SELECT l.return_invoice AS ret, l.inv_no, l.parent AS advice
+        FROM `tabMT Payment Advice Line` l
+        INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent
+        WHERE l.return_invoice IN %(names)s AND a.docstatus < 2
+        ORDER BY l.parent, l.idx
+    """, {"names": tuple(return_names)}, as_dict=True)
+    out = {}
+    for x in rows:
+        out.setdefault(x.ret, {"inv_no": cstr(x.inv_no or ""), "advice": cstr(x.advice)})
+    return out
 
 
 def _attach_advices(rows):
@@ -561,7 +603,10 @@ def get_trace(sales_invoice, company=None):
             "gốc ghi sai số lượng ngay từ đầu. Chứng từ đúng: HÓA ĐƠN THAY THẾ trên MISA.\n"
             "· HÀNG DATE / THỜI VỤ TRẢ LẠI — siêu thị đã nhận rồi mới trả. Đây là giao "
             "dịch MỚI, không phải sửa tờ cũ. Chứng từ đúng: siêu thị xuất hóa đơn trả cho "
-            "mình, HOẶC mình xuất HÓA ĐƠN ĐIỀU CHỈNH GIẢM."),
+            "mình, HOẶC mình xuất HÓA ĐƠN ĐIỀU CHỈNH GIẢM.\n"
+            "Khi CHÍNH SIÊU THỊ xuất hóa đơn thì mình không có hóa đơn MISA nào cho phiếu "
+            "trả — chứng từ về theo BẢNG KÊ THANH TOÁN. Mở bảng kê, tìm dòng Ghi giảm "
+            "tương ứng rồi trỏ nó về phiếu trả này; cột trên sẽ hiện 'Siêu thị xuất'."),
         "deduction_note": _(
             "Các khoản trừ dưới đây thuộc về CẢ ĐỢT thanh toán, không phải riêng hóa đơn "
             "này. Bảng kê của chuỗi trừ chiết khấu/phí trên tổng đợt, không chứng từ nào "

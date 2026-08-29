@@ -4861,8 +4861,14 @@ async function openTrace(name) {
               <td class="num">${formatVND(r.amount)}</td>
               <td class="kt-col-wide">${r.misa_missing
                 ? html`<b style="color:var(--kt-danger)">CHƯA CÓ</b>
-                    <div class="kt-sub">phiếu trả đã ghi trên ERPNext nhưng phía MISA
-                      chưa có hóa đơn thay thế hay điều chỉnh nào</div>`
+                    <div class="kt-sub">phiếu trả đã ghi trên ERPNext, nhưng chưa có
+                      hóa đơn thay thế / điều chỉnh của mình, cũng chưa trỏ được sang
+                      hóa đơn trả do siêu thị xuất trên bảng kê</div>`
+                : r.chain_inv_no
+                ? html`<b>Siêu thị xuất</b>
+                    <div class="kt-sub">HĐ ${r.chain_inv_no} · bảng kê
+                      <a href="/app/mt-payment-advice/${r.chain_advice}"
+                         target="_blank">${r.chain_advice}</a></div>`
                 : html`${r.misa_relation || "—"}
                     ${r.misa_no ? html`<div class="kt-sub">
                       ${r.misa_series ? r.misa_series + " " : ""}${r.misa_no}</div>` : ""}
