@@ -62,7 +62,7 @@ from frappe import _
 from frappe.utils import cint, cstr, flt
 
 from ketoan.api._guard import guard_manager, guard_mt, is_chief
-from ketoan.api.mt import _company, _require_tables
+from ketoan.api.mt import SI_PO_FIELD, _company, _require_tables
 from ketoan.api.mt_advice import decode_upload, to_date
 from ketoan.api.mt_rebate_pdf import is_pdf, label_value, lines_of, read_words
 from ketoan.misa_integration.doctype.misa_invoice_snapshot.misa_invoice_snapshot import (
@@ -74,7 +74,6 @@ from ketoan.mt.doctype.mt_win_pending.mt_win_pending import (
     STATUS_RECEIVED,
 )
 
-SI_PO_FIELD = "custom_po_"
 SII_CODE_FIELD = "custom_ma_win"
 
 PENDING_DOCTYPE = "MT Win Pending"

@@ -83,6 +83,7 @@ from ketoan.api.mt import (
     chain_customers,
     einvoice_all_fields,
     einvoice_issued_expr,
+    po_column,
 )
 from ketoan.install import MT_CHAINS
 
@@ -102,9 +103,11 @@ def _cols():
 def _col(field):
     """`si.<field>` nếu site có ô đó, không thì `NULL`.
 
-    `po_no` và `shipping_address_name` là ô CHUẨN của ERPNext, nhưng bản dựng
-    site có thể đã gỡ hoặc đổi. Hỏi trước vẫn rẻ hơn một câu SQL gãy giữa màn
-    hình đang chạy.
+    `shipping_address_name` là ô CHUẨN của ERPNext, nhưng bản dựng site có thể
+    đã gỡ hoặc đổi. Hỏi trước vẫn rẻ hơn một câu SQL gãy giữa màn hình đang
+    chạy.
+
+    Số PO KHÔNG đi qua đây — nó có ô riêng của site, hỏi bằng `mt.po_column()`.
     """
     return f"si.{field}" if frappe.db.has_column("Sales Invoice", field) else "NULL"
 
@@ -160,7 +163,7 @@ def _scan(company, chain=None):
         SELECT si.name, si.customer, si.customer_name, si.posting_date,
                ABS(si.grand_total) AS grand_total,
                {no_col} AS inv_no, {ser_col} AS inv_series,
-               {_col("po_no")} AS po_no,
+               {po_column()} AS po_no,
                {_col("shipping_address_name")} AS ship_to,
                {st_code} AS store_code, {st_name} AS store_name,
                {einv} AS has_einvoice

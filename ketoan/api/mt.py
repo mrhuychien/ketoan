@@ -177,6 +177,19 @@ MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 SI_SERIES_FIELD = "custom_misa_inv_series"
 SI_NO_FIELD = "custom_misa_inv_no"
 
+# Field SỐ PO trên Sales Invoice. `custom_po_` là ô CỦA SITE, không app nào tạo.
+#
+# VÌ SAO KHÔNG dùng `po_no` — ô chuẩn của ERPNext, nghe hợp lý hơn hẳn:
+# Client Script điền CẢ HAI ô (`custom_po_` ở đầu, `po_no` chép lại sau), rồi
+# với đơn có thu hộ COD nó GHI ĐÈ `po_no = "THU HỘ COD"`. Nên `po_no` của đơn
+# COD không còn là số PO nữa, còn `custom_po_` thì vẫn nguyên. Màn hình nào đọc
+# `po_no` sẽ in chữ "THU HỘ COD" vào cột PO và không ai hiểu vì sao.
+#
+# `misa_push`, `mt_win`, `mt_win_grn` và toàn bộ app `vanchuyen` vốn đã đọc
+# `custom_po_`; `mt_einv` với `mt_ledger` thì đọc `po_no` — hai nửa nói hai
+# thứ. Gom về ĐÂY để chỉ còn một nơi phải sửa nếu site đổi ô.
+SI_PO_FIELD = "custom_po_"
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Tiện ích chung
@@ -456,6 +469,16 @@ def einvoice_fields():
     thông báo — mà mỗi lần gõ lại là một bản sao của luật chờ ngày lệch.
     """
     return tuple(f for f in (SI_NO_FIELD, LEGACY_NO_FIELD) if _has_si_field(f))
+
+
+def po_column(alias="si"):
+    """Cột SQL đọc số PO, hoặc `NULL` nếu site chưa có ô.
+
+    Trả về chuỗi để nhét thẳng vào `SELECT`. Site chưa có ô thì cột PO trống —
+    KHÔNG lùi về `po_no`: ô đó có thể mang chữ "THU HỘ COD" thay vì số PO
+    (xem `SI_PO_FIELD`), và in một giá trị sai còn tệ hơn để trống.
+    """
+    return f"{alias}.`{SI_PO_FIELD}`" if _has_si_field(SI_PO_FIELD) else "NULL"
 
 
 def einvoice_all_fields():

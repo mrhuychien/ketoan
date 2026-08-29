@@ -84,6 +84,7 @@ from ketoan.api.mt import (
     _require_tables,
     chain_customers,
     einvoice_issued_expr,
+    po_column,
     opening_open_clause,
 )
 
@@ -158,7 +159,7 @@ def _rows(company, from_date, to_date, chain=None, customer=None):
                {col(SI_SERIES_FIELD)} AS misa_series,
                {col(SI_NO_FIELD)} AS misa_no,
                {col("custom_misa_status")} AS misa_status,
-               {col("po_no")} AS po_no,
+               {po_column()} AS po_no,
                {col("shipping_address_name")} AS ship_to,
                IFNULL(rt.returned, 0) AS returned,
                IFNULL(rt.n_returns, 0) AS n_returns,

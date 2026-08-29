@@ -590,7 +590,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AF** BỎ QUA hóa đơn khỏi danh sách soát HĐĐT (patch v0_0_18) | `159fc64` | `einv_gap_check` |
 | **MT2-AG** danh sách soát: cột PO · điểm giao · bộ lọc | `208a735` | `einv_gap_check` · `table_width_check` |
 | **MT2-AH** SỔ THEO DÕI HÓA ĐƠN — dựng lại cuốn Excel kế toán vẫn giữ | `115eb8c` | `ledger_check` |
-| **MT2-AI** tick chiết khấu 4 trạng thái · phiếu trả kèm chứng từ MISA | *(commit này)* | `ledger_check` |
+| **MT2-AI** tick chiết khấu 4 trạng thái · phiếu trả kèm chứng từ MISA | `a2c6603` | `ledger_check` |
+| **MT2-AJ** số PO gom về MỘT ô — `custom_po_`, bỏ `po_no` | *(commit này)* | `po_field_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -892,6 +893,37 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AJ — số PO nằm ở hai ô, và app đọc nhầm ô
+
+Trên Sales Invoice có hai ô mang số PO. Nghe thì ô chuẩn của ERPNext phải là ô
+đúng — nhưng đọc Client Script thì ngược lại:
+
+```
+dòng 313:  custom_po_: so_po        <- người nhập điền ô này
+dòng 474:  po_no: so_po             <- chép sang
+dòng 488:  po_no: "THU HỘ COD"      <- GHI ĐÈ, với đơn có thu hộ COD
+```
+
+Với đơn COD, `po_no` **không còn là số PO**: nó là chữ "THU HỘ COD". Màn hình
+nào đọc `po_no` sẽ in chữ đó vào cột PO và **không có gì báo là sai** — ô vẫn
+có giá trị, chỉ là giá trị của việc khác. Kiểu hỏng im lặng nhất.
+
+App đang đọc **cả hai**: `misa_push` · `mt_win` · `mt_win_grn` đọc `custom_po_`,
+còn `mt_einv` · `mt_ledger` đọc `po_no`. Hai nửa nói hai thứ về cùng một đơn,
+và chưa ai thấy vì hai nửa chưa gặp nhau.
+
+Gom về `mt.SI_PO_FIELD` + `mt.po_column()`. **`po_column()` không có đường lùi
+về `po_no`** — site thiếu ô thì trả `NULL`, vì in một giá trị sai tệ hơn để
+trống. Chuỗi `"custom_po_"` giờ chỉ được phép xuất hiện đúng một lần trong
+`api/`, và `po_field_check` đếm.
+
+Chỗ dễ làm phép kiểm báo động giả: `MT Win Pending` có ô `po_no` **của chính
+nó**, hợp lệ. Phép kiểm phải phân biệt được — một phép kiểm hay báo động giả
+thì sớm muộn cũng bị gỡ.
+
+Việc này thành ra cấp thiết vì app `vanchuyen` đọc `custom_po_`: PO là khóa
+nghiệp vụ nối hai app, nên hai app phải nói về cùng một ô.
 
 ### MT2-AI — tick chiết khấu, và phiếu trả hàng phải đi kèm chứng từ MISA
 

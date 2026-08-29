@@ -209,7 +209,8 @@ def build_payload(si, settings):
         rates.add(round(rate, 4))
         lines.append(_line(row, i, ref_id, by_box, rate))
 
-    po_no = (si.get("custom_po_") or "").strip()
+    from ketoan.api.mt import SI_PO_FIELD
+    po_no = (si.get(SI_PO_FIELD) or "").strip()
     if po_no and si.customer not in PO_COMMA and si.customer not in PO_IN_NAME:
         lines.append(_po_line(po_no, ref_id, len(lines) + 1))
 

@@ -66,11 +66,12 @@ def _company(company=None):
 def _po_column():
     """Cột số PO của WinCommerce trên Sales Invoice.
 
-    `custom_po_` là field CỦA SITE (không do app này tạo) — `misa_push` đã đọc
-    nó để ghép vào tên người mua khi đẩy hóa đơn Winmart. Site nào chưa có thì
-    hồ sơ vẫn lập được, chỉ trống cột PO và có cảnh báo.
+    Tên ô lấy từ `mt.SI_PO_FIELD` — field CỦA SITE (không do app này tạo), đọc
+    ở một chỗ duy nhất. Site nào chưa có thì hồ sơ vẫn lập được, chỉ trống cột
+    PO và có cảnh báo.
     """
-    return "custom_po_" if frappe.db.has_column("Sales Invoice", "custom_po_") else None
+    from ketoan.api.mt import SI_PO_FIELD
+    return SI_PO_FIELD if frappe.db.has_column("Sales Invoice", SI_PO_FIELD) else None
 
 
 def _win_customers(company):
