@@ -274,6 +274,12 @@ export const api = {
   mtEinvFilterOptions: (chain) =>
     callMethod(NS + "mt_einv.filter_options", withCompany({ chain })),
 
+  // SỔ THEO DÕI HÓA ĐƠN — đúng cuốn Excel kế toán vẫn giữ: một dòng mỗi hóa
+  // đơn, đi từ hàng -> hóa đơn -> tiền về -> còn lại.
+  mtLedger: (a) => callMethod(NS + "mt_ledger.get_ledger", withCompany(a)),
+  mtLedgerTrace: (sales_invoice) =>
+    callMethod(NS + "mt_ledger.get_trace", withCompany({ sales_invoice })),
+
   // Ba cuốn sổ + CẦU NỐI: sổ cái 131 lệch rổ hóa đơn ở đâu, vì sao.
   mtGlBridge: (a) => callMethod(NS + "mt_gl_bridge.compare", withCompany(a)),
   mtSaveCreditDays: (customer, credit_days) =>

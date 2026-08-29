@@ -588,7 +588,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AD** cuốn sổ THỨ BA: sổ cái TK 131 + cầu nối phân tích chỗ lệch | `a892c6b` | `gl_bridge_check` |
 | **MT2-AE** "Chờ xuất hóa đơn" Win: liệt kê HĐ ERPNext thiếu số MISA | `4252bd6` | `einv_gap_check` |
 | **MT2-AF** BỎ QUA hóa đơn khỏi danh sách soát HĐĐT (patch v0_0_18) | `159fc64` | `einv_gap_check` |
-| **MT2-AG** danh sách soát: cột PO · điểm giao · bộ lọc | *(commit này)* | `einv_gap_check` · `table_width_check` |
+| **MT2-AG** danh sách soát: cột PO · điểm giao · bộ lọc | `208a735` | `einv_gap_check` · `table_width_check` |
+| **MT2-AH** SỔ THEO DÕI HÓA ĐƠN — dựng lại cuốn Excel kế toán vẫn giữ | *(commit này)* | `ledger_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -601,7 +602,7 @@ for t in regression_check crosscheck_mt2 mutation_check \
          mega_check refid_check replace_check opening_gl_check \
          table_width_check client_script_check win_pdf_check \
          two_books_check portal_js_check einv_gap_check win_seed_check \
-         gl_bridge_check; do
+         gl_bridge_check ledger_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -890,6 +891,46 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AH — sổ theo dõi hóa đơn: dựng lại cuốn Excel
+
+Kế toán MT ngồi giữa **ba** cuốn sổ: ERPNext theo dõi **hàng**, MISA theo dõi
+**hóa đơn**, và một file Excel — cuốn *thật sự làm việc*, mở suốt ngày.
+
+Việc chính không phải ba việc rời. Nó là **một** việc: căn hóa đơn MISA cho
+khớp hàng đã đi, rồi theo tờ đó tới lúc thu được tiền. Cuốn Excel là nơi việc
+đó diễn ra, và nó có đúng một hình dạng — **một dòng mỗi hóa đơn**, các cột đi
+từ trái sang phải theo đời của tờ hóa đơn:
+
+```
+số HĐ MISA · ngày · hàng (chứng từ ERPNext, PO, điểm giao)
+   → tiền HĐ → trả hàng → phải thu → đã nhận → còn lại
+   → thuộc đợt thanh toán nào, đợt đó bị trừ những gì
+```
+
+Ba câu hỏi cuốn sổ đó trả lời mà chưa màn nào của app trả lời trọn vẹn: tờ nào
+**đã** thanh toán / tờ nào **chưa** · khoản tiền về bị **cấn trừ** những gì ·
+tờ nào có **hóa đơn xuất trả**.
+
+**Chiết khấu thuộc về ĐỢT, không thuộc về hóa đơn** — chỗ dễ dựng sai nhất.
+Bảng kê trừ chiết khấu/phí trên **tổng đợt**; không chứng từ nào nói tờ này
+chịu bao nhiêu. Nên khoản trừ bày ở tầng đợt (mở "Chi tiết" một dòng là thấy),
+kèm câu nói rõ. Chia đều cho từng tờ để mỗi dòng có một ô "chiết khấu" cho đẹp
+là **bịa**, và con số bịa đó sẽ được đem đi đối chiếu với chuỗi. Bộ kiểm chặn
+mọi phép chia trong `get_trace`.
+
+**"Chưa xuất HĐĐT" đứng trước mọi trạng thái tiền.** Siêu thị không trả cho tờ
+chưa phát hành — nói "chưa thu" ở đó là đổ lỗi nhầm chỗ. Site chưa có ô số HĐĐT
+thì không dùng trạng thái này: không biết ≠ chưa xuất.
+
+**Sổ trong kỳ, không phải số dư.** Lọc theo ngày hóa đơn và cố ý bày cả tờ đã
+thu đủ (vì câu hỏi số 1 là "tờ nào đã thanh toán"). Cột *Còn lại* cộng lại là
+công nợ của các tờ **trong kỳ đang xem** — số dư nằm ở màn Công nợ đến hạn. In
+thẳng trên màn, vì hai con số gần giống nhau mà khác nghĩa là chỗ dễ chép nhầm
+vào báo cáo nhất.
+
+Tập hóa đơn dùng **đúng** các mệnh đề của `mt_debt._fetch` trừ điều kiện "còn
+nợ" — lọc sang *Chưa thu* + *Thu một phần* là ra đúng tập của màn công nợ.
 
 ### MT2-AG — cột PO, điểm giao, và bộ lọc
 

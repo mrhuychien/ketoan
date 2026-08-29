@@ -50,6 +50,13 @@ const STEPS = [
   { key: "ho-so", no: "", label: "Hồ sơ nộp", icon: "fa-folder-open",
     need: "has_dossier", count: ["dossiers_draft"],
     hint: "Bảng kê Excel + PDF hóa đơn đặt ĐÚNG TÊN. Win không xử lý thanh toán khi hồ sơ sai tên." },
+  // SỔ THEO DÕI — chỗ LÀM VIỆC quen thuộc, không phải một báo cáo.
+  //
+  // Đứng TRƯỚC "Đối soát thanh toán" vì đây là màn kế toán mở suốt ngày: nó
+  // thay cuốn Excel. Các bước kia là việc theo đợt; cuốn này là việc hằng ngày.
+  { key: "so-theo-doi", no: "2", label: "Sổ theo dõi hóa đơn", icon: "fa-book-open",
+    need: null, count: [],
+    hint: "Một dòng mỗi hóa đơn: hàng đã đi → hóa đơn MISA → tiền về → còn lại. Bấm một dòng để xem đợt thanh toán nào trả nó và đợt đó bị trừ những gì." },
   { key: "thanh-toan", no: "4", label: "Đối soát thanh toán", icon: "fa-money-check-dollar",
     need: null, count: ["advices_unreconciled", "lines_unmatched", "lines_review"],
     hint: "Nạp bảng kê của chuỗi → hệ khớp từng dòng với hóa đơn → xử lý dòng chưa khớp và dòng cần review." },
@@ -176,6 +183,11 @@ export async function render({ container, query }) {
     // `state.chain` (thứ quyết định tầng điều hướng) cũng không dùng chung
     // `dueChain` của màn công nợ.
     gapChain: query?.gap_chain || "",
+    // Sổ theo dõi hóa đơn — bộ lọc riêng, không dùng chung với màn nào.
+    ledStatus: "",
+    ledQ: "",
+    ledPage: 1,
+    ledOpen: "",
     // Bộ lọc của danh sách soát HĐĐT. RIÊNG cho mỗi màn: bước Chờ xuất hóa đơn
     // của Win và màn soát toàn kênh là hai chỗ làm việc khác nhau, dùng chung
     // một ô là lọc bên này thì bên kia đổi theo mà không ai bấm gì.
@@ -732,6 +744,7 @@ async function loadTab(container, state) {
   if (state.step === "chiet-khau") return loadBkck(container, state);
   if (state.step === "cho-xuat-hd") return loadWinPending(container, state);
   if (state.step === "ho-so") return loadWinDossiers(container, state);
+  if (state.step === "so-theo-doi") return loadLedger(container, state);
   if (state.step === "cong-no") return loadDueDebt(container, state);
   if (state.step === "but-toan") {
     return state.jeView === "duyet"
@@ -4608,6 +4621,253 @@ async function ensureEinvOpts(state, chain) {
     state.einvOpts = { customers: [], stores: [] };
   }
   return state.einvOpts;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SỔ THEO DÕI HÓA ĐƠN — cuốn Excel kế toán vẫn giữ, dựng lại trong phần mềm
+//
+// Một dòng mỗi hóa đơn, các cột đi từ TRÁI SANG PHẢI theo đời của tờ hóa đơn:
+//
+//     hàng đã đi  →  hóa đơn MISA  →  trả hàng  →  phải thu  →  đã nhận  →  còn lại
+//
+// Đây là chỗ LÀM VIỆC, không phải báo cáo. Nên nó ưu tiên: liếc mắt biết tờ nào
+// đang ở đâu (cột trạng thái), và bấm một cái là ra đời của tờ đó.
+//
+// ⚠ Cột "Còn lại" cộng lại là công nợ CỦA CÁC TỜ TRONG KỲ ĐANG XEM, không phải
+// số dư công nợ — số dư nằm ở màn Công nợ đến hạn. Câu đó in trên màn, vì hai
+// con số gần giống nhau mà khác nghĩa là chỗ dễ chép nhầm vào báo cáo nhất.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const LED_TONE = {
+  chua_xuat_hddt: "red",
+  chua_thu: "yellow",
+  thu_mot_phan: "yellow",
+  da_thu_du: "green",
+};
+
+async function loadLedger(container, state) {
+  const body = container.querySelector("#mt-body");
+  let d;
+  try {
+    d = await api.mtLedger({
+      from_date: state.from, to_date: state.to,
+      chain: state.chain || undefined,
+      customer: state.customer || undefined,
+      status: state.ledStatus || undefined,
+      q: state.ledQ || undefined,
+      page: state.ledPage || 1, page_size: 50,
+    });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+
+  const t = d.totals || {};
+  const bs = d.by_status || {};
+  const rows = d.rows || [];
+
+  setHTML(body, html`
+    <div class="kt-card kt-mb"><div class="kt-card-body">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input class="kt-input kt-input--sm" id="led-q" style="min-width:260px"
+               placeholder="Tìm số HĐ MISA / chứng từ / PO / khách / điểm giao…"
+               value="${d.q || ""}">
+        <button class="kt-btn kt-btn--sm" id="led-go"><i class="fas fa-magnifying-glass"></i> Tìm</button>
+        ${d.q ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="led-clear">Bỏ tìm</button>` : ""}
+        <span class="kt-sub" style="margin-left:auto">${t.count} hóa đơn ·
+          ngày HĐ ${formatDate(d.from_date)} → ${formatDate(d.to_date)}</span>
+      </div>
+      <div class="kt-sub" style="margin-top:8px">${d.note}</div>
+    </div></div>
+
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+         style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <button class="kt-btn kt-btn--sm ${d.status ? "kt-btn--outline" : ""}"
+              data-led="">Tất cả · ${t.count}</button>
+      ${Object.keys(d.status_label).map((k) => html`
+        <button class="kt-btn kt-btn--sm ${d.status === k ? "" : "kt-btn--outline"}"
+                data-led="${k}">${d.status_label[k]} · ${(bs[k] || {}).count || 0}</button>`)}
+    </div></div>
+
+    <div class="kt-stats kt-mb">
+      <div class="kt-stat">
+        <div class="kt-stat-label"><i class="fas fa-file-invoice"></i> Tiền hóa đơn trong kỳ</div>
+        <div class="kt-stat-value">${formatVNDShort(t.grand_total)}</div>
+        <div class="kt-stat-sub">${formatVND(t.grand_total)}</div>
+      </div>
+      <div class="kt-stat">
+        <div class="kt-stat-label"><i class="fas fa-rotate-left"></i> Hàng trả lại</div>
+        <div class="kt-stat-value ${t.returned ? "warn" : ""}">${formatVNDShort(t.returned)}</div>
+        <div class="kt-stat-sub">phải thu còn ${formatVND(t.net_due)}</div>
+      </div>
+      <div class="kt-stat">
+        <div class="kt-stat-label"><i class="fas fa-hand-holding-dollar"></i> Đã nhận</div>
+        <div class="kt-stat-value pos">${formatVNDShort(t.paid)}</div>
+        <div class="kt-stat-sub">${formatVND(t.paid)}</div>
+      </div>
+      <div class="kt-stat">
+        <div class="kt-stat-label"><i class="fas fa-hourglass-half"></i> Còn lại của kỳ này</div>
+        <div class="kt-stat-value ${t.remaining ? "neg" : ""}">${formatVNDShort(t.remaining)}</div>
+        <div class="kt-stat-sub">KHÔNG phải số dư công nợ</div>
+      </div>
+    </div>
+
+    ${!rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-book-open"></i>
+          <p>Không có hóa đơn nào trong kỳ và bộ lọc đang chọn.</p></div>`
+      : html`<div class="kt-card"><div class="kt-card-body">
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr>
+              <th class="kt-col-mid">Hóa đơn MISA</th>
+              <th class="kt-col-wide">Hàng / chứng từ ERPNext</th>
+              <th class="num">Tiền HĐ</th>
+              <th class="num">Trả hàng</th>
+              <th class="num">Phải thu</th>
+              <th class="num">Đã nhận</th>
+              <th class="num">Còn lại</th>
+              <th>Đợt thanh toán</th>
+              <th>Trạng thái</th>
+            </tr></thead>
+            <tbody>${rows.map((r) => ledgerRow(r, state))}</tbody>
+          </table></div>
+          ${pager(d, "hóa đơn")}
+        </div></div>`}
+  `);
+
+  const go = () => {
+    state.ledQ = (container.querySelector("#led-q") || {}).value || "";
+    state.ledPage = 1;
+    loadTab(container, state);
+  };
+  const gb = container.querySelector("#led-go");
+  if (gb) gb.addEventListener("click", go);
+  const qi = container.querySelector("#led-q");
+  if (qi) qi.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+  const cl = container.querySelector("#led-clear");
+  if (cl) cl.addEventListener("click", () => {
+    state.ledQ = ""; state.ledPage = 1; loadTab(container, state);
+  });
+  container.querySelectorAll("button[data-led]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.ledStatus = b.dataset.led; state.ledPage = 1; loadTab(container, state);
+    });
+  });
+  container.querySelectorAll("button[data-trace]").forEach((b) => {
+    b.addEventListener("click", () => openTrace(b.dataset.trace));
+  });
+  // Phân trang RIÊNG: sổ này dùng `ledPage`, không chung `state.page` với các
+  // bước khác — chung là lật trang ở đây thì bước kia cũng nhảy theo.
+  container.querySelectorAll("button[data-page]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.ledPage = parseInt(b.dataset.page, 10) || 1;
+      loadTab(container, state);
+    });
+  });
+}
+
+function ledgerRow(r, state) {
+  const adv = r.advices || [];
+  return html`<tr>
+    <td class="kt-col-mid">${r.misa_no
+      ? html`<b>${r.misa_series ? r.misa_series + " " : ""}${r.misa_no}</b>`
+      : html`<span style="color:var(--kt-danger)">chưa có số</span>`}
+      <div class="kt-sub">${formatDate(r.posting_date)}</div>
+      ${r.misa_status ? html`<div class="kt-sub">${r.misa_status}</div>` : ""}</td>
+    <td class="kt-col-wide">
+      <a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a>
+      <div class="kt-sub">${r.customer_name || r.customer}</div>
+      ${r.po_no ? html`<div class="kt-sub">PO <code>${r.po_no}</code></div>` : ""}
+      ${r.ship_to ? html`<div class="kt-sub"><i class="fas fa-location-dot"></i> ${r.ship_to}</div>` : ""}</td>
+    <td class="num">${formatVND(r.grand_total)}</td>
+    <td class="num">${r.returned
+      ? html`<span style="color:var(--kt-warning)">−${formatVND(r.returned)}</span>
+          <div class="kt-sub">${r.n_returns} phiếu</div>`
+      : html`<span class="kt-sub">—</span>`}</td>
+    <td class="num"><b>${formatVND(r.net_due)}</b></td>
+    <td class="num">${r.paid_net
+      ? html`<span style="color:var(--kt-success)">${formatVND(r.paid_net)}</span>`
+      : html`<span class="kt-sub">—</span>`}
+      ${r.paid_review
+        ? html`<div class="kt-sub" style="color:var(--kt-warning)"
+                 title="dòng bảng kê máy đoán, chưa ai chốt — CHƯA trừ vào nợ">
+            chờ chốt ${formatVNDShort(r.paid_review)}</div>`
+        : ""}</td>
+    <td class="num">${r.remaining
+      ? html`<b style="color:var(--kt-danger)">${formatVND(r.remaining)}</b>`
+      : html`<span class="kt-sub">—</span>`}</td>
+    <td>${adv.length
+      ? adv.map((a) => html`<div class="kt-sub">
+          <a href="/app/mt-payment-advice/${a.advice}" target="_blank">${a.advice_no || a.advice}</a>
+          ${a.payment_date ? html` · ${formatDate(a.payment_date)}` : ""}</div>`)
+      : html`<span class="kt-sub">—</span>`}</td>
+    <td><span class="kt-badge kt-badge--${LED_TONE[r.status] || "gray"}">${r.status_label}</span>
+      <div style="margin-top:4px">
+        <button class="kt-btn kt-btn--outline kt-btn--sm" data-trace="${r.name}">Chi tiết</button>
+      </div></td>
+  </tr>`;
+}
+
+// Đời của MỘT tờ hóa đơn. Đây là cái kế toán mở khi chuỗi gọi hỏi về một tờ.
+async function openTrace(name) {
+  const modal = openModal({
+    title: `Đời của hóa đơn ${name}`,
+    icon: "fa-timeline",
+    maxWidth: 860,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  let d;
+  try {
+    d = await api.mtLedgerTrace(name);
+  } catch (e) {
+    return setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+  }
+  setHTML(modal.body, html`
+    ${d.returns.length
+      ? html`<div class="kt-card kt-mb"><div class="kt-card-body">
+          <div style="font-weight:600;margin-bottom:6px">
+            <i class="fas fa-rotate-left"></i> Hóa đơn xuất trả —
+            ${formatVND(d.returned_total)}</div>
+          ${d.returns.map((r) => html`<div class="kt-sub">
+            <a href="/app/sales-invoice/${r.name}" target="_blank">${r.name}</a>
+            · ${formatDate(r.posting_date)} · ${formatVND(r.amount)}</div>`)}
+        </div></div>`
+      : ""}
+
+    ${!d.batches.length
+      ? html`<div class="kt-empty"><i class="fas fa-money-check-dollar"></i>
+          <p>Chưa có đợt thanh toán nào trả cho hóa đơn này.</p></div>`
+      : d.batches.map((b) => html`
+          <div class="kt-card kt-mb"><div class="kt-card-body">
+            <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+              <b><a href="/app/mt-payment-advice/${b.advice}" target="_blank">
+                ${b.advice_no || b.advice}</a></b>
+              ${b.payment_date ? html`<span class="kt-sub">${formatDate(b.payment_date)}</span>` : ""}
+              <span class="kt-badge kt-badge--${STATUS_TONE[b.status] || "gray"}">${b.status}</span>
+              ${b.je_state ? html`<span class="kt-sub">bút toán: ${b.je_state}</span>` : ""}
+              <b style="margin-left:auto;color:var(--kt-success)">
+                trả cho tờ này ${formatVND(b.paid_this_invoice)}</b>
+            </div>
+
+            ${b.deductions.length
+              ? html`<div style="margin-top:10px">
+                  <div class="kt-sub" style="margin-bottom:6px">
+                    Đợt này bị trừ <b>${formatVND(b.deduction_total)}</b> —
+                    ${d.deduction_note}
+                  </div>
+                  <div class="kt-table-wrap"><table class="kt-table">
+                    <thead><tr><th>Loại</th><th class="kt-col-wide">Diễn giải</th>
+                      <th>Chứng từ</th><th class="num">Số tiền</th></tr></thead>
+                    <tbody>${b.deductions.map((x) => html`<tr>
+                      <td><span class="kt-badge kt-badge--${KIND_TONE[x.kind] || "gray"}">${x.kind}</span></td>
+                      <td class="kt-col-wide">${x.description || html`<span class="kt-sub">—</span>`}</td>
+                      <td>${x.doc_no || html`<span class="kt-sub">—</span>`}</td>
+                      <td class="num">${formatVND(x.amount)}</td>
+                    </tr>`)}</tbody>
+                  </table></div>
+                </div>`
+              : html`<div class="kt-sub" style="margin-top:8px">Đợt này không có khoản trừ nào.</div>`}
+          </div></div>`)}
+  `);
 }
 
 // ── BỘ LỌC + CỘT của danh sách soát HĐĐT ──────────────────────────────────
