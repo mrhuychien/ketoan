@@ -1,0 +1,113 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-08-31 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "item_name",
+  "uom",
+  "col_sl",
+  "sl_tra",
+  "sl_ve",
+  "sl_nhap_lai",
+  "sl_hong",
+  "col_tien",
+  "don_gia",
+  "tien_mat_duong"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "options": "Item",
+   "label": "Mã hàng",
+   "in_list_view": 1,
+   "reqd": 1,
+   "columns": 2
+  },
+  {
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "label": "Tên hàng",
+   "fetch_from": "item_code.item_name",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 3
+  },
+  {
+   "fieldname": "uom",
+   "fieldtype": "Link",
+   "options": "UOM",
+   "label": "ĐVT",
+   "fetch_from": "item_code.stock_uom",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_sl",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sl_tra",
+   "fieldtype": "Float",
+   "label": "SL siêu thị trả",
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Theo biên bản / phiếu trả hàng. Đây là số dùng để ghi giảm công nợ."
+  },
+  {
+   "fieldname": "sl_ve",
+   "fieldtype": "Float",
+   "label": "SL thực về sân",
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Lệch với SL siêu thị trả = MẤT TRÊN ĐƯỜNG, là căn cứ đòi nhà xe."
+  },
+  {
+   "fieldname": "sl_nhap_lai",
+   "fieldtype": "Float",
+   "label": "SL lọc dùng được",
+   "in_list_view": 1,
+   "columns": 1,
+   "description": "Đã nhập lại kho bằng Stock Entry."
+  },
+  {
+   "fieldname": "sl_hong",
+   "fieldtype": "Float",
+   "label": "SL hỏng, bỏ",
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "col_tien",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "don_gia",
+   "fieldtype": "Currency",
+   "label": "Đơn giá",
+   "description": "Lấy từ dòng hàng của hóa đơn gốc. Dùng để quy ra tiền phần mất trên đường."
+  },
+  {
+   "fieldname": "tien_mat_duong",
+   "fieldtype": "Currency",
+   "label": "Tiền mất trên đường",
+   "read_only": 1,
+   "description": "(SL siêu thị trả − SL thực về) × đơn giá. Máy tính, không gõ tay."
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-31 00:00:00",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Hang Hoan Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

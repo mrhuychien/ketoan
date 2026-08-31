@@ -1,0 +1,354 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-08-31 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "company",
+  "su_co",
+  "sales_invoice",
+  "customer",
+  "customer_name",
+  "col_head",
+  "chain",
+  "po_no",
+  "ngay_xay_ra",
+  "ngay_bao",
+  "sec_ly_do",
+  "loai_su_co",
+  "huong_xu_ly",
+  "col_ly_do",
+  "chung_tu_can",
+  "ghi_chu",
+  "sec_giay",
+  "trang_thai_giay",
+  "credit_note",
+  "col_giay",
+  "misa_no",
+  "ngay_xong_giay",
+  "sec_hang",
+  "trang_thai_hang",
+  "ngay_hang_ve",
+  "col_hang",
+  "stock_entry",
+  "tong_mat_duong",
+  "sec_items",
+  "items",
+  "sec_bt",
+  "nha_xe",
+  "boi_thuong_trang_thai",
+  "col_bt",
+  "boi_thuong_so_tien",
+  "boi_thuong_ghi_chu"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "Dãy số",
+   "options": "MT-HH-.#####",
+   "default": "MT-HH-.#####",
+   "hidden": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "options": "Company",
+   "label": "Công ty",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "su_co",
+   "fieldtype": "Data",
+   "label": "Phiếu sự cố (vanchuyen)",
+   "search_index": 1,
+   "read_only": 1,
+   "description": "Tên bản ghi `Su Co Van Chuyen` bên app vanchuyen. Là DATA chứ không phải Link: app này KHÔNG được phụ thuộc vào việc site đã cài vanchuyen hay chưa."
+  },
+  {
+   "fieldname": "sales_invoice",
+   "fieldtype": "Link",
+   "options": "Sales Invoice",
+   "label": "Hóa đơn gốc",
+   "reqd": 1,
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "options": "Customer",
+   "label": "Khách hàng",
+   "read_only": 1
+  },
+  {
+   "fieldname": "customer_name",
+   "fieldtype": "Data",
+   "label": "Tên khách",
+   "fetch_from": "customer.customer_name",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "col_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "chain",
+   "fieldtype": "Data",
+   "label": "Chuỗi",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "po_no",
+   "fieldtype": "Data",
+   "label": "Số PO",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ngay_xay_ra",
+   "fieldtype": "Date",
+   "label": "Ngày xảy ra",
+   "in_list_view": 1,
+   "description": "Ngày sự việc XẢY RA ở điểm giao, KHÔNG phải ngày điều phối nhập. Tuổi việc tính từ ô này — tính từ ngày nhập sẽ giấu mất đúng phần chậm trễ."
+  },
+  {
+   "fieldname": "ngay_bao",
+   "fieldtype": "Date",
+   "label": "Ngày nhận tin",
+   "read_only": 1,
+   "description": "Ngày điều phối ghi nhận. Lệch với ngày xảy ra = độ trễ của luồng tin."
+  },
+  {
+   "fieldname": "sec_ly_do",
+   "fieldtype": "Section Break",
+   "label": "Nguyên nhân & hướng xử lý"
+  },
+  {
+   "fieldname": "loai_su_co",
+   "fieldtype": "Data",
+   "label": "Loại sự cố",
+   "read_only": 1,
+   "in_standard_filter": 1,
+   "description": "Chép từ phiếu sự cố. KHÔNG dùng Select: options bên vanchuyen đổi lúc nào app này không biết, và một giá trị lạ mà lưu được vẫn tốt hơn một giá trị bị nuốt."
+  },
+  {
+   "fieldname": "huong_xu_ly",
+   "fieldtype": "Data",
+   "label": "Hướng xử lý",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "col_ly_do",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "chung_tu_can",
+   "fieldtype": "Select",
+   "options": "\nHóa đơn thay thế\nHóa đơn điều chỉnh\nSiêu thị xuất hóa đơn trả\nKhông cần chứng từ",
+   "label": "Chứng từ thuế cần làm",
+   "description": "Gợi ý theo lệ của chuỗi — CÓ SIÊU THỊ THAY THẾ, CÓ SIÊU THỊ ĐIỀU CHỈNH. App không ép: kế toán chốt theo chuỗi."
+  },
+  {
+   "fieldname": "ghi_chu",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú"
+  },
+  {
+   "fieldname": "sec_giay",
+   "fieldtype": "Section Break",
+   "label": "Giấy tờ kế toán"
+  },
+  {
+   "fieldname": "trang_thai_giay",
+   "fieldtype": "Select",
+   "options": "Chưa lập phiếu trả\nChưa có chứng từ thuế\nĐã đủ chứng từ",
+   "label": "Trạng thái giấy tờ",
+   "default": "Chưa lập phiếu trả",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "read_only": 1,
+   "description": "MÁY SUY từ chứng từ có thật, không ai gõ. Cố ý KHÔNG đọc `trang_thai` bên vanchuyen: cột đó nghĩa là 'vận chuyển xong', và điều hành đóng phiếu ngay khi hàng về — lọc theo nó là việc giấy tờ biến mất trước khi có ai làm."
+  },
+  {
+   "fieldname": "credit_note",
+   "fieldtype": "Link",
+   "options": "Sales Invoice",
+   "label": "Phiếu trả hàng",
+   "description": "Phiếu trả ứng với CHÍNH sự cố này. Một hóa đơn có thể có nhiều sự cố và nhiều phiếu trả — nên phải ghi đích danh, suy bằng EXISTS(return_against) là sai cả hai chiều."
+  },
+  {
+   "fieldname": "col_giay",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "misa_no",
+   "fieldtype": "Data",
+   "label": "Số HĐ chứng từ",
+   "read_only": 1,
+   "description": "Số hóa đơn thay thế/điều chỉnh của mình, HOẶC số hóa đơn siêu thị xuất trả."
+  },
+  {
+   "fieldname": "ngay_xong_giay",
+   "fieldtype": "Date",
+   "label": "Ngày đủ chứng từ",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_hang",
+   "fieldtype": "Section Break",
+   "label": "Hàng vật lý"
+  },
+  {
+   "fieldname": "trang_thai_hang",
+   "fieldtype": "Select",
+   "options": "Chưa về\nĐang về\nĐã về sân\nĐã lọc xong",
+   "label": "Trạng thái hàng",
+   "default": "Chưa về",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "ngay_hang_ve",
+   "fieldtype": "Date",
+   "label": "Ngày hàng về sân"
+  },
+  {
+   "fieldname": "col_hang",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "stock_entry",
+   "fieldtype": "Link",
+   "options": "Stock Entry",
+   "label": "Phiếu nhập lại kho",
+   "description": "Do THỦ KHO / ĐIỀU PHỐI lập bên app vanchuyen. Ở đây chỉ ghi lại để truy ngược."
+  },
+  {
+   "fieldname": "tong_mat_duong",
+   "fieldtype": "Currency",
+   "label": "Tiền mất trên đường",
+   "read_only": 1,
+   "description": "Cộng từ bảng dưới. Đây là con số đi đòi nhà xe — SUY TỪ LƯỢNG LỆCH, không gõ tay."
+  },
+  {
+   "fieldname": "sec_items",
+   "fieldtype": "Section Break",
+   "label": "Mã hàng"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "options": "MT Hang Hoan Item",
+   "label": "Chi tiết mã hàng"
+  },
+  {
+   "fieldname": "sec_bt",
+   "fieldtype": "Section Break",
+   "label": "Bồi thường nhà xe"
+  },
+  {
+   "fieldname": "nha_xe",
+   "fieldtype": "Data",
+   "label": "Nhà xe",
+   "read_only": 1
+  },
+  {
+   "fieldname": "boi_thuong_trang_thai",
+   "fieldtype": "Select",
+   "options": "\nChưa đòi\nĐã đòi\nĐã thu\nKhông đòi",
+   "label": "Trạng thái đòi bồi thường"
+  },
+  {
+   "fieldname": "col_bt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "boi_thuong_so_tien",
+   "fieldtype": "Currency",
+   "label": "Số tiền đòi",
+   "description": "Mặc định bằng tiền mất trên đường, cho sửa. CHỈ THỐNG KÊ — đòi riêng, không sinh bút toán, không trừ vào cước chuyến."
+  },
+  {
+   "fieldname": "boi_thuong_ghi_chu",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú đòi bồi thường"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-31 00:00:00",
+ "modified_by": "Administrator",
+ "module": "MT",
+ "name": "MT Hang Hoan",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan Truong",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan MT",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
