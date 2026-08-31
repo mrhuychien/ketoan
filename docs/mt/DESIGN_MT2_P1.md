@@ -965,6 +965,23 @@ Kèm hai chốt nữa trên chính controller đó:
   những sự cố đông người xem nhất. Chỉ chặn khi `su_co` có giá trị: dòng lập tay
   (hàng date siêu thị trả, không qua chuyến xe nào) để trống ô đó.
 
+Và bốn lỗ nữa cùng vòng soát đó:
+
+- **`_le_cua_chuoi` đọc `tabSales Invoice` không buộc công ty.** Khách hàng dùng
+  CHUNG giữa các pháp nhân, nên "khách của chuỗi này" không phải một ranh giới
+  công ty; mà `frappe.db.sql` thô thì không đi qua User Permission mà `_company()`
+  vừa kiểm. Người chỉ được đọc HGC nhận về con số đếm cả phiếu trả của HGF.
+- **Hai dòng sổ cùng nhận MỘT phiếu trả.** Khóa duy nhất là ô `disabled` vẽ lúc
+  mở trang; hai người mở trước khi ai kịp lưu thì cả hai đều thấy nó còn trống,
+  còn Desk thì chỉ có một ô Link trần.
+- **Ô chọn phiếu trả tự xóa liên kết đang có.** Phiếu bị hủy để amend rơi khỏi
+  bộ lọc `docstatus = 1`, nên không `<option>` nào `selected` → trình duyệt chọn
+  dòng đầu ("— chưa lập —") → lần bấm Lưu tiếp theo XÓA TRẮNG phiếu trả và số
+  chứng từ, của người chỉ định vào sửa ghi chú.
+- **Trang rơi ra ngoài phạm vi.** Nhận dòng cuối của trang 2 thì trang 2 hết
+  dòng, và màn hình in "mọi phiếu sự cố đều đã vào sổ" ngay dưới cái thẻ đang
+  ghi 50.
+
 #### Đọc SỐNG từ `vanchuyen`; bản chép chỉ là lưới an toàn
 
 `MT Hang Hoan` chép `loai_su_co` · `huong_xu_ly` · `ngay_xay_ra` sang cột
@@ -981,6 +998,36 @@ hình xem thành màn hình ghi, và mọi lượt mở đều đụng vào ch�
 Chỉ ba cột được báo "đã đổi". Báo mọi cột thì mỗi lần điều phối gõ thêm một chữ
 vào ghi chú là cả danh sách nhấp nháy, mà cảnh báo nhấp nháy vì chuyện vặt là
 cảnh báo bị tắt.
+
+#### Trạng thái giấy tờ SUY LÚC ĐỌC, không đọc cột đã lưu
+
+Đây là chỗ bản đầu sai nặng nhất, và bản soát đối kháng tìm ra.
+
+`MT Hang Hoan.trang_thai_giay` chỉ được tính trong `validate()`, tức **chỉ khi
+có người bấm lưu**. Nhưng hai sự kiện quyết định nó thì đến SAU đó và **không
+đi qua bảng này**:
+
+```
+kế toán nối phiếu trả          ->  lưu, tính trạng thái  ->  "Chưa có chứng từ"
+(ngày hôm sau) MISA trả số về  ->  ghi lên Sales Invoice ->  KHÔNG ai lưu lại
+(tuần sau) nạp bảng kê         ->  ghi return_invoice    ->  KHÔNG ai lưu lại
+```
+
+Việc đã xong từ lâu mà dòng vẫn nằm trong "Chưa có chứng từ thuế" vĩnh viễn,
+thẻ chuỗi vẫn đếm nó, và **không thao tác nào của kế toán làm nó thoát ra** —
+đúng cái bệnh mà phần "hàng đợi không bao giờ về 0" ở trên nói.
+
+Nên `_trang_thai_expr()` dựng lại luật đó thành **một mệnh đề SQL**, và cả ba
+chỗ — danh sách, ô đếm, thẻ chuỗi — lọc bằng nó. Cột đã lưu còn lại làm **ảnh
+chụp cho Desk và bản in**; khi ảnh chụp lệch với sự thật thì màn hình nói ra,
+và lần bấm Lưu kế tiếp cho nó đuổi kịp.
+
+Không chọn đường "ghi lại lúc đọc": biến một màn hình XEM thành màn hình GHI
+thì mọi lượt mở đều đụng vào chứng từ.
+
+Cùng lý do, `misa_no` thôi dùng `self.misa_no or _doc_no_of(...)`. Đổi phiếu
+trả là thao tác **bình thường** ở đây — màn hình bày cả danh sách để chọn — nên
+giữ số cũ là dòng mang số chứng từ của một lần trả hàng khác mà vẫn báo "Đã đủ".
 
 #### `return_invoice` vẫn không được chạm đường tiền
 
@@ -1001,6 +1048,36 @@ Kèm theo: bước 2 của vòng đời tháng (`tra_hang`) trước đây khai 
 với ghi chú "không thuộc portal". Sau khi màn này dựng xong, ghi chú đó nói sai
 về chính thứ nó điều khiển — đổi thành `portal: True`, và nói rõ chứng từ **vẫn**
 lập trên ERPNext/MISA, portal chỉ theo dõi việc còn thiếu.
+
+#### Bảy chỗ bộ kiểm NÓI DỐI, và cách thử ra
+
+Bản soát đối kháng không chỉ đọc `hoan_check` — nó **phá mã rồi chạy lại**, và
+bảy khẳng định vẫn in ✅ trên mã đã hỏng:
+
+| khẳng định | vì sao nó không kiểm gì |
+|---|---|
+| `EXISTS(return_against)` | chỉ soi 200 ký tự quanh lần nhắc ĐẦU TIÊN, mà lần đầu nằm ở một hàm hợp lệ nên cửa sổ ghim luôn ở đó |
+| `"Su Co" not in body` | tên bảng khai một lần ở hằng `SU_CO`, nên `set_value(SU_CO, ...)` không chứa chuỗi nào nhìn thấy được; và vòng lặp "nếu có set_value thì kiểm" **không khẳng định gì** khi không hàm nào khớp |
+| ba luật của controller | gọi thẳng method, nên không thấy được `validate()` có gọi chúng hay không |
+| bộ giả `get_value` | nuốt mọi tham số, nên vế "tự loại mình" của bộ lọc trùng không kiểm được — bỏ vế đó là mọi lần lưu lại đều tự đụng chính nó và cả hàng đợi đông cứng |
+| regex so sánh | `\b` đặt SAU nhóm `(?:=\|!=\|IN\|NOT)` nên không bao giờ khớp `=` hay `!=` |
+| `A or B` | `B` luôn đúng khi dòng kiểm phía trên đã đạt |
+| "guard ở dòng đầu" | chỉ dò chuỗi, nên guard nằm trong một nhánh `if` vẫn đạt — mà nhánh đó đúng là cửa màn hình dùng |
+
+Bản sửa đổi cách hỏi chứ không chỉ vá luật: vị trí `sc.trang_thai` so với mệnh
+đề `FROM` của **chính câu chứa nó** (không cắt ở `FROM` đầu tiên — một hàm
+thường có hai câu), câu lệnh đầu tiên của hàm hỏi bằng **AST**, bộ giả
+`get_value` **ghi lại bộ lọc**, và `unassigned_todo` hỏi bằng AST xem nó có
+thật sự CỘNG hai ô đếm hay đã bị gán một hằng số.
+
+Mười lăm phép phá cố ý — bảy cho bộ kiểm, tám cho mã — chạy lại sau khi sửa,
+cả mười lăm đều bị bắt.
+
+Và bộ giả SQL của mục 12 cũng sai theo cùng kiểu: nó nhận diện câu truy vấn
+theo mệnh đề `FROM`, trong khi `_trang_thai_expr` nhúng một `EXISTS` trên bảng
+kê vào giữa danh sách SELECT của câu đọc sổ — nên "FROM đầu tiên" của câu đó là
+bảng kê. Bộ giả trả nhầm dữ liệu cho nhau, rồi bộ kiểm báo hỏng vì lỗi của
+chính nó. Đổi sang nhận theo đầu danh sách SELECT.
 
 #### Bộ giả `frappe` trả lời SAI, và nó làm hỏng một bộ kiểm khác
 
