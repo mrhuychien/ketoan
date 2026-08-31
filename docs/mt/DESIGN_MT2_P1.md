@@ -1045,8 +1045,14 @@ Chúng chỉ hiện số cũ, và **số cũ trông y hệt số mới**.
 
 `bulk_link` là cái đắt nhất: `_auto_ok` **chỉ dám nói** "dòng này có đúng một
 hóa đơn ứng". Nó không nói gì về chiều ngược lại, và nhận hàng loạt đọc lời hứa
-đó rộng hơn nó thật sự nói. Nay có `taken`, và dòng thứ hai ra `clashed` để
-người chọn — chứ không im.
+đó rộng hơn nó thật sự nói. Nay có `taken` cho trong-một-lượt, và một truy vấn
+hỏi TRƯỚC khi nối xem hóa đơn đã có dòng tiền nào trỏ tới chưa — `relink_line`
+vẫn trả `other_lines_on_invoice` đúng để cảnh báo chuyện đó, và bản đầu vứt nó
+đi. Cả hai đường ra `clashed` để người chọn tay, chứ không im.
+
+Trả GÓP không rơi vào đây: một kỳ trả nhỏ hơn hẳn hóa đơn nên `_rank` không xếp
+nó mức `chac_chan` để mà nhận. Một gợi ý mức 1 rơi vào hóa đơn đã có dòng khác
+nghĩa là **trả trọn thêm một lần nữa**.
 
 Bốn chỗ còn lại chữa bằng cách **cho một chỗ làm chủ**: rổ chọn chốt lúc VẼ
 (`pickedFor`), hàng đợi nhớ cả chuyến đang bay (`wlPending` + `wlGen`, kết quả

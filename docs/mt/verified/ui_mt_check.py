@@ -382,6 +382,13 @@ def main():
           "taken" in bl and "clashed.append" in bl and "taken.add(" in bl)
     check("và trả danh sách dòng bị bỏ lại để màn hình bày ra",
           '"clashed": clashed' in bl)
+    # `relink_line` phát cảnh báo `other_lines_on_invoice`; bản đầu vứt đi. Một
+    # cảnh báo phát ra rồi không ai đọc còn tệ hơn không phát.
+    check("cũng KHÔNG nhận tự động vào hóa đơn đã có dòng tiền khác trỏ tới",
+          "claimed" in bl and "si in claimed" in bl
+          and "SELECT DISTINCT l.sales_invoice" in bl)
+    check("và hỏi TRƯỚC khi nối, không phải sau",
+          bl.index("claimed = set()") < bl.index("link_statement_line("))
     check("màn hình ĐỌC danh sách đó, không lặng lẽ báo thành công",
           "out.clashed" in js_body(js, "bindReconcile"))
     cnd = rb.get("_candidates", "")

@@ -452,14 +452,38 @@ def bulk_link(advice, company=None):
     taken = set()
     while True:
         todo = [r for r in data["rows"] if r.get("auto")]
+        # Hóa đơn ĐÃ CÓ dòng tiền khác trỏ tới thì KHÔNG nhận tự động.
+        #
+        # `relink_line` trả về `other_lines_on_invoice` đúng để cảnh báo chuyện
+        # này, và bản đầu vứt nó đi — cảnh báo phát ra rồi không ai đọc còn tệ
+        # hơn không phát. Ở đây hỏi TRƯỚC khi nối, vì hỏi sau là đã nối rồi.
+        #
+        # Trả GÓP không rơi vào đây: một kỳ trả nhỏ hơn hẳn hóa đơn, nên `_rank`
+        # không xếp nó mức `chac_chan` để mà nhận. Một gợi ý mức 1 rơi vào hóa
+        # đơn đã có dòng khác nghĩa là TRẢ TRỌN thêm một lần nữa.
+        claimed = set()
+        cand = sorted({r["auto"]["sales_invoice"] for r in todo})
+        if cand:
+            for c in frappe.db.sql(f"""
+                SELECT DISTINCT l.sales_invoice AS si
+                FROM `tab{LINE}` l
+                INNER JOIN `tab{ADVICE}` a ON a.name = l.parent
+                WHERE l.parenttype = %(pt)s AND l.row_kind = %(kind)s
+                  AND a.docstatus < 2 AND l.sales_invoice IN %(n)s
+            """, {"pt": ADVICE, "kind": KIND_PAYMENT, "n": tuple(cand)}, as_dict=True):
+                claimed.add(cstr(c.si))
         for r in todo:
             si = r["auto"]["sales_invoice"]
-            if si in taken:
+            if si in taken or si in claimed:
                 # `_auto_ok` chỉ dám nói "dòng này có ĐÚNG MỘT hóa đơn ứng".
                 # Nó KHÔNG nói chiều ngược lại. Hai dòng bảng kê cùng chỉ về một
                 # hóa đơn mà nhận cả hai là ghi có hai lần trên một khoản nợ —
                 # đúng cái lỗ MT2-G. Dòng thứ hai để người xử lý tay.
-                clashed.append({"line": r["line"], "sales_invoice": si})
+                clashed.append({
+                    "line": r["line"], "sales_invoice": si,
+                    "reason": _("đã nhận ở lượt này") if si in taken
+                    else _("hóa đơn đã có dòng tiền khác trỏ tới"),
+                })
                 continue
             try:
                 link_statement_line(r["line"], si)
@@ -478,8 +502,9 @@ def bulk_link(advice, company=None):
     if failed:
         msg += _(" {0} dòng không nối được.").format(len(failed))
     if clashed:
-        msg += _(" {0} dòng cùng chỉ về một hóa đơn đã nối — để lại cho bạn chọn.").format(
-            len(clashed))
+        msg += _(" {0} dòng KHÔNG nhận tự động vì hóa đơn của chúng đã có tiền trỏ "
+                 "tới — nhận nữa là ghi có hai lần. Chúng còn nguyên trong danh "
+                 "sách để bạn chọn tay.").format(len(clashed))
     return {"linked": len(done), "rows": done, "failed": failed,
             "clashed": clashed, "message": msg}
 
