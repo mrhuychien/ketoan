@@ -7950,6 +7950,14 @@ async function renderReconcile(container, state, modal, st) {
         : ""}
     </div>
 
+    ${d.pool_truncated
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+          <div class="kt-card-body kt-sub"><b>Rổ hóa đơn ứng viên đã chạm trần
+          ${d.pool_cap} tờ và bị cắt bớt.</b> Dòng nào ở dưới ghi "không có hóa đơn nào
+          khớp" thì có thể là do CẮT chứ không phải do dữ liệu — thu hẹp khoảng ngày của
+          bảng kê, hoặc chọn hóa đơn bằng tay.</div></div>`
+      : ""}
+
     ${!d.rows.length
       ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i>
           <p>Không có dòng nào trong bộ lọc này.</p></div>`
@@ -8047,6 +8055,11 @@ function reconRight(d, r) {
     ${si ? html`<div class="ktmt-rec-sub">${si.posting_date ? formatDate(si.posting_date) : ""}
       ${si.inv_series ? ` · ${si.inv_series}` : ""}${si.inv_no ? ` · ${si.inv_no}` : ""}
       ${si.ship_to ? ` · ${si.ship_to}` : ""}</div>` : ""}
+    ${r.one_of_many
+      ? html`<div class="ktmt-rec-sub">Hóa đơn này được trả làm nhiều lần —
+          tổng đã trả <b>${formatVND(r.paid_total)}</b>. Mức lệch bên trái tính trên
+          CẢ hóa đơn, không phải trên riêng dòng này.</div>`
+      : ""}
     ${r.variance_kind
       ? html`<div class="ktmt-rec-sub" style="color:#b45309">
           Đã ghi nhận <b>${r.variance_kind}</b> ${formatVND(Math.abs(r.variance_amount))}${
@@ -8136,7 +8149,8 @@ function bindReconcile(container, state, modal, st, d) {
     bulk.disabled = true;
     try {
       const out = await api.mtReconBulk(st.advice);
-      toast(out.message, out.failed && out.failed.length ? "warning" : "success");
+      const soft = (out.failed && out.failed.length) || (out.clashed && out.clashed.length);
+      toast(out.message, soft ? "warning" : "success");
       invalidateWorklist(state);
       reload();
     } catch (e) { toast(e.message, "error"); bulk.disabled = false; }
@@ -8146,11 +8160,13 @@ function bindReconcile(container, state, modal, st, d) {
   if (commit) commit.addEventListener("click", async () => {
     commit.disabled = true;
     try {
-      const pre = await api.mtReconCommit(st.advice);
+      const out = await api.mtReconCommit(st.advice);
+      toast(out.message, out.unlinked ? "warning" : "success");
+      invalidateWorklist(state);
       modal.close();
       // Bản xem trước đi qua ĐÚNG modal bút toán cũ — nó là chỗ đã có đủ cảnh
       // báo về tài khoản thiếu, dòng không ghi sổ được và vân tay kế hoạch.
-      openJePreviewFor(container, state, st.advice, pre);
+      openJePreviewFor(container, state, st.advice, out);
     } catch (e) { toast(e.message, "error"); commit.disabled = false; }
   });
 }
@@ -8159,12 +8175,11 @@ function bindReconcile(container, state, modal, st, d) {
 // thứ hai ở đây: modal kia mới là chỗ có vân tay kế hoạch, cảnh báo thiếu tài
 // khoản, và danh sách dòng không ghi sổ được — ba thứ quyết định bút toán có
 // đúng hay không, và không nhìn thấy được từ màn đối soát.
-function openJePreviewFor(container, state, advice, pre) {
+function openJePreviewFor(container, state, advice, _out) {
+  // `commit_statement` đã đánh dấu đã đối chiếu VÀ đã báo số dòng còn bỏ lại,
+  // nên ở đây chỉ còn việc mở modal bút toán cũ. Báo lần thứ hai là hai toast
+  // chồng nhau nói cùng một điều.
   invalidateWorklist(state);
-  if (pre && pre.unlinked) {
-    toast(`Đã chốt, nhưng còn ${pre.unlinked} dòng chưa nối hóa đơn — chúng KHÔNG vào bút toán.`,
-      "warning");
-  }
   openJePreview(container, state, advice);
 }
 

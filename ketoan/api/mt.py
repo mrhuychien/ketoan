@@ -917,11 +917,18 @@ def _invoice_where(company, from_date, to_date, bucket, search, p,
 SORTS = {
     # Mặc định: NỢ GIÀ NHẤT LÊN TRƯỚC. Đó là thứ tự đi đòi. Hóa đơn chưa khai
     # hạn xếp cuối chứ không lẫn vào giữa — chúng không có tuổi để mà so.
-    "tuoi": "(od IS NULL), od DESC, si.posting_date ASC",
+    "tuoi": "(od IS NULL), od DESC, si.posting_date ASC, si.name ASC",
     "moi_nhat": "si.posting_date DESC, si.name DESC",
     "cu_nhat": "si.posting_date ASC, si.name ASC",
-    "tien_lon": "remaining DESC",
+    "tien_lon": "remaining DESC, si.name ASC",
 }
+# ⚠ MỌI KHÓA KẾT THÚC BẰNG `si.name`. Không có cột duy nhất ở cuối thì các dòng
+# bằng khóa nhau xếp theo thứ tự MariaDB tùy ý trả về, và thứ tự đó KHÔNG bảo
+# đảm giống nhau giữa hai câu truy vấn. `LIMIT/OFFSET` cắt giữa một nhóm bằng
+# nhau thì một hóa đơn hiện ở trang 1 có thể hiện LẠI ở trang 2 trong khi một
+# tờ khác không bao giờ được hiện — mà `total` và số trang vẫn đúng, nên không
+# gì trên màn hình lộ ra. Rổ "đã thu đủ" là ca xấu nhất: mọi dòng `remaining =
+# 0`, tức CẢ rổ là một nhóm bằng nhau.
 SORT_DEFAULT = "tuoi"
 
 # Trần xuất file. 5.000 dòng là một file Excel ~1MB, mở được; trên nữa thì
@@ -969,12 +976,25 @@ def _invoice_page(company, from_date, to_date, bucket, search, page_size, offset
     # Dòng tfoot mà chỉ cộng 20 dòng đang hiện thì nó là một con số đúng về một
     # tập không ai hỏi. Kế toán đọc "còn lại 613 tr" rồi đem đi đối chiếu với
     # chuỗi — và con số đó phải là của CẢ rổ.
+    # ⚠ PHIẾU TRẢ HÀNG KHÔNG PHẢI KHOẢN PHẢI THU, và rổ `tat_ca` có chúng.
+    #
+    # Với một phiếu trả, `rt` không nối vào đâu (không ai `return_against` một
+    # phiếu trả), nên `_NET_DUE` bằng trọn giá trị tuyệt đối của nó và `_REMAIN`
+    # dương. Cộng thẳng là dòng tổng ghi "còn lại" đúng bằng số tiền của một lần
+    # bán ĐÃ BỊ HỦY, và cột quá hạn cũng vậy: hóa đơn 3tr bị trả hết sạch ra
+    # tổng "còn nợ 3tr, quá hạn 3tr" — cho một lần bán không còn nợ đồng nào.
+    #
+    # Nên tiền phải thu chỉ cộng trên `is_return = 0`; phiếu trả ĐẾM RIÊNG để
+    # dòng tổng nói ra chúng có mặt trong danh sách mà không nằm trong phép cộng.
+    sale = "si.is_return = 0"
     tot = frappe.db.sql(f"""
-        SELECT SUM(ABS(si.grand_total)) AS invoiced,
-               SUM({_NET_PAID}) AS paid,
-               SUM({_REMAIN}) AS remaining,
-               SUM(CASE WHEN {od} > 0 THEN {_REMAIN} ELSE 0 END) AS overdue,
-               SUM(CASE WHEN {od} IS NULL THEN 1 ELSE 0 END) AS n_no_term
+        SELECT SUM(CASE WHEN {sale} THEN ABS(si.grand_total) ELSE 0 END) AS invoiced,
+               SUM(CASE WHEN {sale} THEN {_NET_PAID} ELSE 0 END) AS paid,
+               SUM(CASE WHEN {sale} THEN {_REMAIN} ELSE 0 END) AS remaining,
+               SUM(CASE WHEN {sale} AND {od} > 0 THEN {_REMAIN} ELSE 0 END) AS overdue,
+               SUM(CASE WHEN {sale} AND {od} IS NULL THEN 1 ELSE 0 END) AS n_no_term,
+               SUM(CASE WHEN si.is_return = 1 THEN 1 ELSE 0 END) AS n_returns,
+               SUM(CASE WHEN si.is_return = 1 THEN ABS(si.grand_total) ELSE 0 END) AS returns_amt
         {base}
     """, p, as_dict=True)
     t = tot[0] if tot else {}
@@ -987,6 +1007,9 @@ def _invoice_page(company, from_date, to_date, bucket, search, page_size, offset
         # trong "chưa đến hạn" — nó là một khoảng trắng. Đếm và nói ra, chứ
         # không để con số quá hạn trông như đã bao trọn.
         "no_term": cint(t.get("n_no_term")),
+        # Có trong DANH SÁCH, không có trong PHÉP CỘNG.
+        "returns": cint(t.get("n_returns")),
+        "returns_amt": flt(t.get("returns_amt")),
         "count": cint(total),
     }
 
@@ -995,7 +1018,8 @@ def _invoice_page(company, from_date, to_date, bucket, search, page_size, offset
                si.net_total, si.total_taxes_and_charges, si.grand_total,
                {series_col} AS inv_series, {no_col} AS inv_no,
                {dead} AS misa_dead,
-               IFNULL(p.paid, 0) AS paid,
+               {_NET_PAID} AS paid,
+               IFNULL(p.paid, 0) AS paid_gross,
                IFNULL(p.clawed_back, 0) AS clawed_back,
                IFNULL(p.paid_review, 0) AS paid_review,
                IFNULL(p.pay_lines, 0) AS pay_lines,
@@ -1007,6 +1031,15 @@ def _invoice_page(company, from_date, to_date, bucket, search, page_size, offset
         LIMIT %(limit)s OFFSET %(offset)s
     """, p, as_dict=True)
 
+    # ⚠ `paid` LÀ SỐ RÒNG (`_NET_PAID` = đã trả − đã đòi lại) — CÙNG một định
+    # nghĩa với dòng cộng ở trên và với `remaining`. Bản đầu trả `p.paid` gộp
+    # trong khi dòng cộng cộng số ròng: hóa đơn Co.op bị đòi lại trọn 5tr hiện
+    # "Đã nhận 5.000.000" ở dòng chi tiết và "Đã nhận 0" ở dòng cộng ngay bên
+    # dưới. Một tiêu đề cột, hai nghĩa — và file Excel xuất ra không khớp chính
+    # màn hình đã xuất nó.
+    #
+    # Số gộp vẫn trả ở `paid_gross` để màn hình nói được "đã trả X, bị đòi lại
+    # Y" khi có clawback — đó là lời giải thích, không phải một cột tiền thứ hai.
     _attach_payment_lines(rows)
     for r in rows:
         # `od` NULL = chưa khai hạn. KHÔNG đổi thành 0: 0 đọc là "đến hạn hôm
@@ -1145,6 +1178,15 @@ def _bucket_counts(company, from_date, to_date, search, customer, chain, einvoic
     if customer:
         p2["cus"] = customer
         w2.append("a.customer = %(cus)s")
+    # Ô TÌM phải lọc CẢ số trên chip, không chỉ danh sách. Bản đầu bỏ sót đúng
+    # rổ này: chip ghi 412 trong khi bảng ngay dưới ghi 3 dòng, cho cùng một bộ
+    # lọc, và không gì trên màn hình nói 409 dòng kia đi đâu. Mệnh đề phải TRÙNG
+    # `_deduction_page` — hai luật tìm khác nhau thì hai con số lại lệch theo
+    # một kiểu khác.
+    if cstr(search).strip():
+        p2["kw"] = "%" + cstr(search).strip() + "%"
+        w2.append("(l.description LIKE %(kw)s OR l.doc_no LIKE %(kw)s"
+                  " OR l.store_name LIKE %(kw)s OR l.inv_no LIKE %(kw)s)")
     out["chiet_khau"] = cint(frappe.db.sql("""
         SELECT COUNT(*) FROM `tabMT Payment Advice Line` l
         INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent

@@ -285,8 +285,10 @@ export const api = {
   // các bảng kê đã nạp. KHÔNG phải "đánh dấu đã thu" — xem docstring backend.
   mtReconForInvoices: (invoices) =>
     callMethod(NS + "mt_reconcile.suggest_for_invoices", withCompany({ invoices })),
-  mtReconCommit: (advice, expected_hash) =>
-    callMethod(NS + "mt_reconcile.commit_statement", withCompany({ advice, expected_hash })),
+  // Chốt bảng kê = đánh dấu ĐÃ ĐỐI CHIẾU. Bút toán vẫn do modal bút toán cũ
+  // sinh, vì chốt chặn vân tay của `mt_je` thuộc về nó.
+  mtReconCommit: (advice) =>
+    callMethod(NS + "mt_reconcile.commit_statement", withCompany({ advice })),
   mtChainDesk: (chain, a) => callMethod(NS + "mt_hub.get_chain", withCompany({ chain, ...a })),
 
   // Công nợ MT đến hạn (SOP §5, việc hàng tuần). Số còn nợ tính từ DÒNG BẢNG KÊ
