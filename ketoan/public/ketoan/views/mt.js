@@ -47,6 +47,12 @@ const STEPS = [
   { key: "cho-xuat-hd", no: "1", label: "Chờ xuất hóa đơn", icon: "fa-truck",
     need: "has_dossier", count: [],
     hint: "Hàng ĐÃ GIAO nhưng CHƯA xuất hóa đơn — Win chỉ cho xuất sau khi có phiếu nhập kho của họ. Đây CHƯA phải công nợ, nên không nằm trong số còn nợ." },
+  // BƯỚC 2 của vòng đời tháng. Trước đây bước này được ghi là "không thuộc
+  // portal" — chứng từ vẫn lập trên ERPNext/MISA, nhưng VIỆC CÒN THIẾU thì
+  // không màn hình nào theo, và đó mới là phần bị bỏ quên.
+  { key: "hang-hoan", no: "2", label: "Hàng hoàn chờ xử lý", icon: "fa-rotate-left",
+    need: null, count: ["hoan_chua_vao_so", "hoan_open"],
+    hint: "Mỗi LẦN HÀNG QUAY VỀ một dòng: nhận phiếu sự cố bên vận chuyển vào sổ → lập phiếu trả hàng ERPNext → hóa đơn thay thế/điều chỉnh. Một hóa đơn có thể có hai lần hàng về, và mỗi lần cần một phiếu trả riêng." },
   { key: "ho-so", no: "", label: "Hồ sơ nộp", icon: "fa-folder-open",
     need: "has_dossier", count: ["dossiers_draft"],
     hint: "Bảng kê Excel + PDF hóa đơn đặt ĐÚNG TÊN. Win không xử lý thanh toán khi hồ sơ sai tên." },
@@ -82,6 +88,10 @@ const GLOBAL_VIEWS = [
   // vẫn là lỗ hổng chứng từ. Hai con số không bao giờ bằng nhau, và đó là đúng.
   { key: "g-soat-hddt", label: "Soát HĐ bỏ sót số HĐĐT", icon: "fa-magnifying-glass-dollar",
     hint: "Hóa đơn CŨ HƠN tờ mới nhất đã điền số HĐĐT mà vẫn trống — tức đã đi qua rồi mà không xuất. Khác với hàng vừa giao chưa tới lượt." },
+  // Hàng hoàn là việc LIÊN CHUỖI thật: phiếu sự cố về theo chuyến xe, không về
+  // theo chuỗi, và kế toán xử cả nắm một lượt chứ không mở bảy bàn làm việc.
+  { key: "g-hang-hoan", label: "Hàng hoàn chờ xử lý", icon: "fa-rotate-left",
+    hint: "Lần hàng quay về mà giấy tờ chưa xong. Ô 'Chưa vào sổ' là phiếu sự cố bên vận chuyển chưa ai nhận — việc duy nhất ở đây còn nằm ngoài tầm nhìn của kế toán." },
   { key: "g-khach", label: "Công nợ theo khách hàng", icon: "fa-building",
     hint: "Xuống từng pháp nhân của mỗi chuỗi. Một chuỗi thường có nhiều pháp nhân xuất hóa đơn riêng." },
   // Việc MỘT LẦN, làm trước tất cả: chuyển sổ theo dõi Excel sang phần mềm.
@@ -183,6 +193,10 @@ export async function render({ container, query }) {
     // `state.chain` (thứ quyết định tầng điều hướng) cũng không dùng chung
     // `dueChain` của màn công nợ.
     gapChain: query?.gap_chain || "",
+    // Hàng hoàn — ô hàng đợi và chuỗi đang lọc. Ô RIÊNG: `state.chain` quyết
+    // định tầng điều hướng, dùng chung là bấm lọc chuỗi thì nhảy màn.
+    hoanBucket: query?.hoan_bucket || "",
+    hoanChain: query?.hoan_chain || "",
     // Sổ theo dõi hóa đơn — bộ lọc riêng, không dùng chung với màn nào.
     ledStatus: "",
     ledQ: "",
@@ -254,6 +268,12 @@ function syncHash(state) {
   // Không mang theo thì F5 ra một danh sách KHÁC mà đầu trang vẫn ghi cùng tiêu đề.
   if (state.dueEinv) p.push(`due_einv=${state.dueEinv}`);
   if (state.global === "g-soat-hddt" && state.gapChain) p.push(`gap_chain=${q(state.gapChain)}`);
+  // Ô hàng đợi vào URL cùng lý do: kế toán bấm "Chưa vào sổ" rồi F5, hoặc gửi
+  // link cho người khác. Không mang theo thì mở ra một danh sách KHÁC mà tiêu
+  // đề vẫn y nguyên.
+  const onHoan = state.global === "g-hang-hoan" || state.step === "hang-hoan";
+  if (onHoan && state.hoanBucket) p.push(`hoan_bucket=${state.hoanBucket}`);
+  if (state.global === "g-hang-hoan" && state.hoanChain) p.push(`hoan_chain=${q(state.hoanChain)}`);
   history.replaceState(null, "", `#/cong-no-mt?${p.join("&")}`);
 }
 
@@ -732,6 +752,7 @@ async function loadTab(container, state) {
   if (state.view === "toan-kenh") {
     if (state.global === "g-cong-no") return loadDueDebt(container, state);
     if (state.global === "g-soat-hddt") return loadEinvGaps(container, state);
+    if (state.global === "g-hang-hoan") return loadHangHoan(container, state);
     if (state.global === "g-khach") return loadChains(container, state);
     if (state.global === "g-so-du") {
       return state.openName
@@ -742,6 +763,7 @@ async function loadTab(container, state) {
   }
 
   if (state.step === "chiet-khau") return loadBkck(container, state);
+  if (state.step === "hang-hoan") return loadHangHoan(container, state);
   if (state.step === "cho-xuat-hd") return loadWinPending(container, state);
   if (state.step === "ho-so") return loadWinDossiers(container, state);
   if (state.step === "so-theo-doi") return loadLedger(container, state);
@@ -6698,5 +6720,509 @@ async function openOpeningFinalize(container, state, doc) {
       toast(e.message, "error");
       go.disabled = false;
     }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// HÀNG HOÀN CHỜ XỬ LÝ
+//
+// Đơn vị của màn này là MỘT LẦN HÀNG QUAY VỀ, không phải một tờ hóa đơn. Sổ
+// theo dõi đã đếm "phiếu trả chưa có chứng từ" rồi; cái nó không đếm được là
+// lần hàng về mà CHƯA AI LẬP PHIẾU TRẢ — chưa có phiếu thì không có gì để đếm,
+// và việc đó vô hình với mọi màn hình khác.
+//
+// Ô "Chưa vào sổ" đứng ĐẦU vì nó là ô duy nhất mà việc còn nằm bên app vận
+// chuyển, ngoài tầm nhìn của kế toán.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const HOAN_BUCKETS = [
+  { key: "chua_vao_so", label: "Chưa vào sổ", icon: "fa-inbox", tone: "neg",
+    sub: "phiếu sự cố bên vận chuyển chưa ai nhận" },
+  { key: "chua_phieu_tra", label: "Chưa lập phiếu trả", icon: "fa-file-circle-xmark", tone: "neg",
+    sub: "công nợ vẫn đang đòi đủ tiền hóa đơn gốc" },
+  { key: "chua_chung_tu", label: "Chưa có chứng từ thuế", icon: "fa-file-invoice", tone: "warn",
+    sub: "đã có phiếu trả, chưa có hóa đơn thay thế/điều chỉnh" },
+  { key: "xong", label: "Đã đủ chứng từ", icon: "fa-circle-check", tone: "pos",
+    sub: "gồm cả kết luận 'không cần chứng từ'" },
+];
+
+const HOAN_CT_TONE = {
+  "Hóa đơn thay thế": "yellow",
+  "Hóa đơn điều chỉnh": "yellow",
+  "Siêu thị xuất hóa đơn trả": "gray",
+  "Không cần chứng từ": "green",
+};
+
+const HOAN_HANG_TONE = {
+  "Chưa về": "red", "Đang về": "yellow", "Đã về sân": "gray", "Đã lọc xong": "green",
+};
+
+// Tuổi việc — TÍNH TỪ NGÀY XẢY RA, và "chưa biết" KHÔNG được vẽ thành 0 ngày.
+// Phiếu sự cố cũ chưa khai ngày xảy ra thì tuổi là không biết; in "0 ngày" là
+// nói với kế toán rằng việc vừa mới phát sinh.
+function hoanAge(r) {
+  if (r.tuoi === null || r.tuoi === undefined) {
+    return html`<span class="kt-sub" title="Phiếu chưa khai ngày xảy ra">chưa rõ tuổi</span>`;
+  }
+  const tone = r.tuoi >= 30 ? "danger" : (r.tuoi >= 14 ? "warning" : "muted");
+  return html`<span class="kt-sub" style="color:var(--kt-${tone})">${r.tuoi} ngày</span>`;
+}
+
+function hoanViec(r) {
+  return html`
+    ${r.loai_su_co || html`<span class="kt-sub">—</span>`}
+    ${r.huong_xu_ly ? html`<div class="kt-sub">→ ${r.huong_xu_ly}</div>` : ""}
+    ${(r.da_doi || []).length
+      ? html`<div class="kt-sub" style="color:var(--kt-warning)">
+          <i class="fas fa-triangle-exclamation"></i>
+          điều hành đã sửa ${r.da_doi.map((c) => c.field).join(", ")}
+        </div>`
+      : ""}`;
+}
+
+function hoanStats(d) {
+  const c = d.counts || {};
+  return html`<div class="kt-stats kt-mb">
+    ${HOAN_BUCKETS.map((b) => html`<div class="kt-stat is-link hoan-tile" data-bucket="${b.key}"
+        style="${d.bucket === b.key ? "border-color:var(--kt-primary)" : ""}">
+      <div class="kt-stat-label"><i class="fas ${b.icon}"></i> ${b.label}</div>
+      <div class="kt-stat-value ${c[b.key] ? b.tone : ""}">${c[b.key] || 0}</div>
+      <div class="kt-stat-sub">${b.sub}</div>
+    </div>`)}
+  </div>`;
+}
+
+const hoanHeadUngVien = html`<tr>
+  <th class="kt-col-mid">Ngày xảy ra</th>
+  <th class="kt-col-mid">Phiếu sự cố</th>
+  <th class="kt-col-mid">Hóa đơn gốc</th>
+  <th class="kt-col-wide">Khách hàng</th>
+  <th class="kt-col-wide">Việc</th>
+  <th class="kt-col-mid">Hàng</th>
+  <th class="kt-col-role"></th>
+</tr>`;
+
+const hoanHeadSo = html`<tr>
+  <th class="kt-col-mid">Ngày xảy ra</th>
+  <th class="kt-col-mid">Hóa đơn gốc</th>
+  <th class="kt-col-wide">Khách hàng</th>
+  <th class="kt-col-wide">Việc</th>
+  <th class="kt-col-mid">Chứng từ cần</th>
+  <th class="kt-col-wide">Phiếu trả</th>
+  <th class="kt-col-mid">Hàng</th>
+</tr>`;
+
+function hoanRowUngVien(r) {
+  return html`<tr>
+    <td class="kt-col-mid">${r.ngay_xay_ra ? formatDate(r.ngay_xay_ra) : "—"}
+      <div>${hoanAge(r)}</div></td>
+    <td class="kt-col-mid">${r.su_co}
+      ${r.trang_thai ? html`<div class="kt-sub">điều hành: ${r.trang_thai}</div>` : ""}</td>
+    <td class="kt-col-mid">${r.sales_invoice}
+      ${r.po_no ? html`<div class="kt-sub">PO ${r.po_no}</div>` : ""}</td>
+    <td class="kt-col-wide">${r.customer_name || r.customer}
+      <div class="kt-sub">${formatVNDShort(r.grand_total)}</div></td>
+    <td class="kt-col-wide">${hoanViec(r)}</td>
+    <td class="kt-col-mid">${r.trang_thai_hang
+      ? html`<span class="kt-badge kt-badge--${HOAN_HANG_TONE[r.trang_thai_hang] || "gray"}">${r.trang_thai_hang}</span>`
+      : html`<span class="kt-sub">—</span>`}
+      ${r.tong_mat_duong
+        ? html`<div class="kt-sub" style="color:var(--kt-danger)">mất đường ${formatVNDShort(r.tong_mat_duong)}</div>`
+        : ""}</td>
+    <td class="kt-col-role">
+      <button class="kt-btn kt-btn--sm hoan-take" data-su-co="${r.su_co}"
+        title="Nhận lần hàng về này vào sổ kế toán">Nhận</button>
+      <div style="margin-top:4px">
+        <button class="kt-btn kt-btn--outline kt-btn--sm hoan-skip" data-su-co="${r.su_co}"
+          title="Hóa đơn gốc vẫn đúng — không chứng từ nào phải làm">Không cần</button>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function hoanRowSo(r) {
+  const t = r.chung_tu_sieu_thi;
+  return html`<tr class="hoan-row" data-name="${r.name}" style="cursor:pointer">
+    <td class="kt-col-mid">${r.ngay_xay_ra ? formatDate(r.ngay_xay_ra) : "—"}
+      <div>${hoanAge(r)}</div></td>
+    <td class="kt-col-mid">${r.sales_invoice}
+      ${r.po_no ? html`<div class="kt-sub">PO ${r.po_no}</div>` : ""}</td>
+    <td class="kt-col-wide">${r.customer_name || r.customer}
+      <div class="kt-sub">${r.chain || "chưa gán chuỗi"}</div></td>
+    <td class="kt-col-wide">${hoanViec(r)}</td>
+    <td class="kt-col-mid">${r.chung_tu_can
+      ? html`<span class="kt-badge kt-badge--${HOAN_CT_TONE[r.chung_tu_can] || "gray"}">${r.chung_tu_can}</span>`
+      : html`<span class="kt-sub" style="color:var(--kt-warning)">chưa chốt</span>`}</td>
+    <td class="kt-col-wide">${r.credit_note
+      ? html`${r.credit_note}
+          <div class="kt-sub">${formatVNDShort(r.cn_amount)}${r.cn_date ? ` · ${formatDate(r.cn_date)}` : ""}</div>
+          ${r.misa_no
+            ? html`<div class="kt-sub" style="color:var(--kt-success)">HĐ ${r.misa_no}${t ? " · siêu thị xuất" : ""}</div>`
+            : html`<div class="kt-sub" style="color:var(--kt-danger)">chưa có chứng từ thuế</div>`}`
+      : html`<span class="kt-sub" style="color:var(--kt-danger)">chưa lập</span>`}</td>
+    <td class="kt-col-mid">${r.trang_thai_hang
+      ? html`<span class="kt-badge kt-badge--${HOAN_HANG_TONE[r.trang_thai_hang] || "gray"}">${r.trang_thai_hang}</span>`
+      : html`<span class="kt-sub">—</span>`}
+      ${r.su_co && !r.su_co_con
+        ? html`<div class="kt-sub" style="color:var(--kt-warning)">mất phiếu sự cố</div>`
+        : ""}</td>
+  </tr>`;
+}
+
+async function loadHangHoan(container, state) {
+  const body = container.querySelector("#mt-body");
+  // Ở bàn làm việc của một chuỗi thì chuỗi ĐÃ được chọn — dùng luôn, không để
+  // người dùng chọn lại một lần nữa rồi tự hỏi hai ô chuỗi khác nhau chỗ nào.
+  const inChain = state.view === "chuoi";
+  const chain = inChain ? state.chain : state.hoanChain;
+  let d;
+  try {
+    d = await api.mtHoan({
+      bucket: state.hoanBucket || undefined, chain: chain || undefined,
+      search: state.search || undefined, page: state.page, page_size: 50,
+    });
+  } catch (e) {
+    setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
+    return;
+  }
+  state.hoanBucket = d.bucket;
+
+  const rows = d.rows || [];
+  const ungVien = d.bucket === "chua_vao_so";
+
+  setHTML(body, html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+      <div class="kt-card-body kt-sub">
+        <b>Một dòng = một LẦN HÀNG QUAY VỀ, không phải một tờ hóa đơn.</b>
+        Một hóa đơn có thể vừa móp lúc giao vừa bị trả hàng date — hai lần, hai phiếu trả,
+        hai việc. Trạng thái giấy tờ ở đây do <b>máy suy từ chứng từ có thật</b>, không ai gõ,
+        và cố ý KHÔNG đọc cột trạng thái bên điều hành: điều hành đóng phiếu ngay khi nhà xe
+        xác nhận hàng về, còn hóa đơn điều chỉnh thì chưa ai xuất.
+      </div></div>
+
+    ${hoanStats(d)}
+
+    <div class="kt-card kt-mb"><div class="kt-card-body"
+        style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      ${inChain
+        ? html`<span class="kt-sub">Đang xem <b>${state.chain}</b></span>`
+        : html`<label class="kt-sub">Chuỗi
+            <select class="kt-input kt-input--sm" id="hoan-chain">
+              <option value="">— mọi chuỗi —</option>
+              ${chainOptionHTML(state, state.hoanChain)}
+            </select></label>`}
+      ${d.bucket === "cho_xu_ly"
+        ? html`<span class="kt-sub">Đang xem cả hai ô việc — bấm một thẻ ở trên để tách riêng.</span>`
+        : html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="hoan-all">
+            <i class="fas fa-list"></i> Xem cả hai ô việc
+          </button>`}
+      <button class="kt-btn kt-btn--outline kt-btn--sm" id="hoan-new" style="margin-left:auto">
+        <i class="fas fa-plus"></i> Lập dòng từ hóa đơn
+      </button>
+    </div></div>
+
+    ${!d.vanchuyen && d.bucket === "chua_vao_so"
+      ? html`<div class="kt-empty"><i class="fas fa-plug-circle-xmark"></i><p>${d.note}</p></div>`
+      : !rows.length
+        ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i>
+            <p>${d.bucket === "chua_vao_so"
+              ? "Mọi phiếu sự cố trên hóa đơn MT đều đã vào sổ."
+              : d.bucket === "xong"
+                ? "Chưa có lần hàng về nào đủ chứng từ."
+                : "Không còn lần hàng về nào chờ xử lý."}</p></div>`
+        : html`<div class="kt-card"><div class="kt-card-body">
+            <div class="kt-sub" style="margin-bottom:8px">
+              Việc CŨ NHẤT lên trước — tuổi tính từ <b>ngày xảy ra</b>, không phải ngày nhập
+              phiếu. Nhà xe báo trễ vài ngày là thường, và tính từ ngày nhập giấu mất đúng
+              phần chậm đó.
+            </div>
+            <div class="kt-table-wrap"><table class="kt-table">
+              <thead>${ungVien ? hoanHeadUngVien : hoanHeadSo}</thead>
+              <tbody>${rows.map((r) => (ungVien ? hoanRowUngVien(r) : hoanRowSo(r)))}</tbody>
+            </table></div>
+            ${pager(d, "lần hàng về")}
+          </div></div>`}
+  `);
+
+  bindPager(container, state);
+  bindHoan(container, state, d);
+}
+
+function bindHoan(container, state, d) {
+  const reload = () => loadTab(container, state);
+
+  container.querySelectorAll(".hoan-tile").forEach((el) => {
+    el.addEventListener("click", () => {
+      state.hoanBucket = el.dataset.bucket;
+      state.page = 1;
+      syncHash(state);
+      reload();
+    });
+  });
+
+  const ch = container.querySelector("#hoan-chain");
+  if (ch) ch.addEventListener("change", () => {
+    state.hoanChain = ch.value;
+    state.page = 1;
+    syncHash(state);
+    reload();
+  });
+
+  container.querySelectorAll(".hoan-take").forEach((b) => {
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        const out = await api.mtHoanCreate({ su_co: b.dataset.suCo });
+        toast("Đã nhận vào sổ — " + out.trang_thai_giay, "success");
+        reload();
+      } catch (e) { toast(e.message, "error"); b.disabled = false; }
+    });
+  });
+
+  // "Không cần chứng từ" KHÔNG phải một cái cờ bỏ qua: nó là một KẾT LUẬN, và
+  // nó vẫn để lại một dòng sổ ghi ai kết luận, lúc nào. Bỏ qua bằng cờ thì làm
+  // được đúng việc ẩn dòng, nhưng mất phần trả lời cho người soát sau.
+  container.querySelectorAll(".hoan-skip").forEach((b) => {
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        await api.mtHoanCreate({
+          su_co: b.dataset.suCo, chung_tu_can: "Không cần chứng từ",
+        });
+        toast("Đã ghi kết luận: không cần chứng từ", "success");
+        reload();
+      } catch (e) { toast(e.message, "error"); b.disabled = false; }
+    });
+  });
+
+  container.querySelectorAll("tr.hoan-row").forEach((tr) => {
+    tr.addEventListener("click", () => openHoanDetail(container, state, tr.dataset.name));
+  });
+
+  const all = container.querySelector("#hoan-all");
+  if (all) all.addEventListener("click", () => {
+    state.hoanBucket = "cho_xu_ly";
+    state.page = 1;
+    syncHash(state);
+    reload();
+  });
+
+  const nw = container.querySelector("#hoan-new");
+  if (nw) nw.addEventListener("click", () => openHoanNew(container, state, d));
+}
+
+// ── Lập dòng THẲNG TỪ HÓA ĐƠN ─────────────────────────────────────────────
+//
+// Không phải lần hàng về nào cũng có phiếu sự cố vận chuyển: hàng date siêu thị
+// trả lại là giao dịch MỚI, thường không đi qua chuyến xe nào có sự cố. Bắt
+// buộc phải có phiếu sự cố là đóng cửa với đúng một nửa nghiệp vụ.
+function openHoanNew(container, state, d) {
+  const modal = openModal({
+    title: "Lập dòng hàng hoàn từ hóa đơn",
+    icon: "fa-rotate-left",
+    maxWidth: 560,
+    body: html`
+      <div class="kt-sub" style="margin-bottom:12px">
+        Dùng khi lần hàng về KHÔNG có phiếu sự cố vận chuyển — hàng date / thời vụ siêu thị
+        trả lại chẳng hạn. Có phiếu sự cố thì bấm <b>Nhận</b> ở ô "Chưa vào sổ" để dòng sổ
+        nối được sang bên vận chuyển.
+      </div>
+      <label style="display:block">Hóa đơn gốc (Sales Invoice)
+        <input class="kt-input" id="hn-si" placeholder="ACC-SINV-…"></label>
+      <label style="display:block;margin-top:10px">Ngày xảy ra
+        <input type="date" class="kt-input" id="hn-date">
+        <div class="kt-sub">Ngày siêu thị trả hàng, không phải hôm nay. Tuổi việc tính từ ô này.</div>
+      </label>
+      <label style="display:block;margin-top:10px">Chứng từ thuế cần làm
+        <select class="kt-input" id="hn-ct">
+          <option value="">— chốt sau —</option>
+          ${(d.chung_tu_options || []).map((x) => html`<option value="${x}">${x}</option>`)}
+        </select></label>
+      <label style="display:block;margin-top:10px">Ghi chú
+        <textarea class="kt-input" id="hn-note" rows="2"></textarea></label>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="kt-btn kt-btn--success" id="hn-save"><i class="fas fa-check"></i> Lập dòng</button>
+      </div>`,
+  });
+  const val = (id) => modal.body.querySelector(id).value.trim();
+  modal.body.querySelector("#hn-save").addEventListener("click", async () => {
+    const btn = modal.body.querySelector("#hn-save");
+    btn.disabled = true;
+    try {
+      await api.mtHoanCreate({
+        sales_invoice: val("#hn-si"), ngay_xay_ra: val("#hn-date") || undefined,
+        chung_tu_can: val("#hn-ct") || undefined, ghi_chu: val("#hn-note") || undefined,
+      });
+      toast("Đã lập dòng hàng hoàn", "success");
+      modal.close();
+      loadTab(container, state);
+    } catch (e) { toast(e.message, "error"); btn.disabled = false; }
+  });
+}
+
+// ── Chi tiết một lần hàng về ──────────────────────────────────────────────
+async function openHoanDetail(container, state, name) {
+  const modal = openModal({
+    title: "Lần hàng quay về",
+    icon: "fa-rotate-left",
+    maxWidth: 820,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  let r;
+  try { r = await api.mtHoanGet(name); }
+  catch (e) { setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`); return; }
+
+  const items = r.items || [];
+  const cands = r.phieu_tra_ung_vien || [];
+
+  setHTML(modal.body, html`
+    <div class="kt-sub" style="margin-bottom:10px">
+      ${r.sales_invoice} · ${r.customer_name || r.customer}
+      ${r.chain ? ` · ${r.chain}` : ""}${r.po_no ? ` · PO ${r.po_no}` : ""}
+      ${r.su_co ? html` · phiếu sự cố <b>${r.su_co}</b>${r.su_co_trang_thai ? ` (điều hành: ${r.su_co_trang_thai})` : ""}` : ""}
+    </div>
+
+    ${(r.da_doi || []).length
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+          <div class="kt-card-body kt-sub">
+            <b>Điều hành đã sửa phiếu sự cố sau khi dòng này vào sổ.</b>
+            Màn hình đang hiện giá trị MỚI; bản chép trên sổ vẫn là bản cũ:
+            ${r.da_doi.map((c) => html`<div>· ${c.field}: <s>${c.cu || "(trống)"}</s> → <b>${c.moi || "(trống)"}</b></div>`)}
+            <button class="kt-btn kt-btn--outline kt-btn--sm" id="hd-sync" style="margin-top:8px">
+              <i class="fas fa-rotate"></i> Chép lại vào sổ
+            </button>
+          </div></div>`
+      : ""}
+
+    ${r.su_co && !r.su_co_con
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+          <div class="kt-card-body kt-sub">Không còn đọc được phiếu sự cố <b>${r.su_co}</b>
+            (đã xóa bên vận chuyển, hoặc site chưa cài app đó). Dòng sổ giữ bản chép cũ —
+            việc giấy tờ vẫn là việc.</div></div>`
+      : ""}
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <label>Chứng từ thuế cần làm
+        <select class="kt-input" id="hd-ct">
+          <option value="">— chưa chốt —</option>
+          ${(r.chung_tu_options || []).map((x) =>
+            html`<option value="${x}" ${r.chung_tu_can === x ? "selected" : ""}>${x}</option>`)}
+        </select>
+        ${(r.le_cua_chuoi || []).length
+          ? html`<div class="kt-sub">Chuỗi này trước giờ:
+              ${r.le_cua_chuoi.map((x) => `${x.quan_he} ${x.n} lần`).join(" · ")}</div>`
+          : ""}
+      </label>
+      <label>Phiếu trả hàng (đã ghi sổ)
+        <select class="kt-input" id="hd-cn">
+          <option value="">— chưa lập —</option>
+          ${cands.map((c) => html`<option value="${c.name}" ${r.credit_note === c.name ? "selected" : ""}
+            ${c.da_dung ? "disabled" : ""}>${c.name} · ${formatVND(c.amount)}${c.da_dung ? ` (đã dùng ở ${c.dung_o})` : ""}</option>`)}
+        </select>
+        ${!cands.length
+          ? html`<div class="kt-sub" style="color:var(--kt-warning)">Hóa đơn gốc chưa có phiếu
+              trả nào ĐÃ GHI SỔ. Lập phiếu trả trên ERPNext (khai Return Against), ghi sổ,
+              rồi quay lại đây.</div>`
+          : ""}
+      </label>
+      <label>Trạng thái hàng vật lý
+        <select class="kt-input" id="hd-hang" ${r.khoa_hang ? "disabled" : ""}>
+          <option value="">—</option>
+          ${(r.trang_thai_hang_options || []).map((x) =>
+            html`<option value="${x}" ${r.trang_thai_hang === x ? "selected" : ""}>${x}</option>`)}
+        </select>
+        ${r.khoa_hang
+          ? html`<div class="kt-sub">Điều phối và thủ kho giữ ô này trên phiếu sự cố
+              <b>${r.su_co}</b> — màn này đọc thẳng sang. Sửa ở đây thì lần mở sau nó quay
+              về giá trị bên đó.</div>`
+          : ""}
+      </label>
+      <label>Ngày hàng về sân
+        <input type="date" class="kt-input" id="hd-ngay" value="${r.ngay_hang_ve || ""}"
+          ${r.khoa_hang ? "disabled" : ""}></label>
+    </div>
+
+    <label style="display:block;margin-top:10px">Ghi chú
+      <textarea class="kt-input" id="hd-note" rows="2">${r.ghi_chu || ""}</textarea></label>
+
+    <div class="kt-sub" style="margin-top:10px;white-space:pre-line;border-left:3px solid var(--kt-border);padding-left:10px">${r.chung_tu_note}</div>
+
+    ${items.length
+      ? html`<div style="margin-top:14px">
+          <div class="kt-sub" style="margin-bottom:6px">
+            <b>Mã hàng — số của điều phối và thủ kho, đọc thẳng bên vận chuyển.</b>
+            App này KHÔNG chép lại: hai trong ba số lượng chỉ họ biết.
+          </div>
+          <div class="kt-table-wrap"><table class="kt-table">
+            <thead><tr><th class="kt-col-wide">Mã hàng</th><th class="num">SL trả</th>
+              <th class="num">SL về sân</th><th class="num">SL dùng được</th>
+              <th class="num">Mất trên đường</th></tr></thead>
+            <tbody>${items.map((it) => html`<tr>
+              <td class="kt-col-wide">${it.item_name || it.item_code}
+                <div class="kt-sub">${it.item_code}</div></td>
+              <td class="num">${it.sl_tra || 0}</td>
+              <td class="num">${it.sl_ve || 0}</td>
+              <td class="num">${it.sl_nhap_lai || 0}</td>
+              <td class="num">${it.tien_mat_duong ? formatVND(it.tien_mat_duong) : "—"}</td>
+            </tr>`)}</tbody>
+          </table></div>
+          ${r.tong_mat_duong
+            ? html`<div class="kt-sub" style="margin-top:6px">Tổng mất trên đường
+                <b style="color:var(--kt-danger)">${formatVND(r.tong_mat_duong)}</b> —
+                việc đòi nhà xe theo dõi bên app vận chuyển, KHÔNG sinh bút toán ở đây.</div>`
+            : ""}
+        </div>`
+      : ""}
+
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <button class="kt-btn kt-btn--success" id="hd-save"><i class="fas fa-check"></i> Lưu</button>
+      <span class="kt-sub" style="align-self:center">Trạng thái giấy tờ do máy suy lại sau khi lưu —
+        hiện là <b>${r.trang_thai_giay}</b>.</span>
+      ${r.can_manage && !r.credit_note
+        ? html`<button class="kt-btn kt-btn--danger kt-btn--sm" id="hd-del" style="margin-left:auto">
+            <i class="fas fa-trash"></i> Xóa dòng
+          </button>`
+        : ""}
+    </div>
+  `);
+
+  const val = (id) => modal.body.querySelector(id).value.trim();
+  modal.body.querySelector("#hd-save").addEventListener("click", async () => {
+    const btn = modal.body.querySelector("#hd-save");
+    btn.disabled = true;
+    try {
+      const out = await api.mtHoanSave({
+        name, chung_tu_can: val("#hd-ct"), credit_note: val("#hd-cn"),
+        ghi_chu: val("#hd-note"),
+        ...(r.khoa_hang
+          ? {}
+          : { trang_thai_hang: val("#hd-hang"), ngay_hang_ve: val("#hd-ngay") }),
+      });
+      toast("Đã lưu — " + out.trang_thai_giay, "success");
+      modal.close();
+      loadTab(container, state);
+    } catch (e) { toast(e.message, "error"); btn.disabled = false; }
+  });
+
+  const sync = modal.body.querySelector("#hd-sync");
+  if (sync) sync.addEventListener("click", async () => {
+    sync.disabled = true;
+    try {
+      await api.mtHoanSync(name);
+      toast("Đã chép lại từ phiếu sự cố", "success");
+      modal.close();
+      loadTab(container, state);
+    } catch (e) { toast(e.message, "error"); sync.disabled = false; }
+  });
+
+  const del = modal.body.querySelector("#hd-del");
+  if (del) del.addEventListener("click", async () => {
+    del.disabled = true;
+    try {
+      await api.mtHoanDelete(name);
+      toast("Đã xóa dòng", "success");
+      modal.close();
+      loadTab(container, state);
+    } catch (e) { toast(e.message, "error"); del.disabled = false; }
   });
 }

@@ -253,6 +253,16 @@ export const api = {
   mtOpeningGlCompare: () => callMethod(NS + "mt_opening_gl.compare", withCompany({})),
   mtOpeningGlDetail: (a) => callMethod(NS + "mt_opening_gl.chain_detail", withCompany(a)),
 
+  // Hàng hoàn chờ xử lý — hàng đợi việc GIẤY TỜ của một lần hàng quay về.
+  // Đơn vị là LẦN HÀNG VỀ, không phải tờ hóa đơn: một hóa đơn có thể vừa móp
+  // lúc giao vừa bị trả hàng date, hai lần thì hai phiếu trả và hai việc.
+  mtHoan: (a) => callMethod(NS + "mt_hoan.list_hoan", withCompany(a)),
+  mtHoanGet: (name) => callMethod(NS + "mt_hoan.get_hoan", withCompany({ name })),
+  mtHoanCreate: (a) => callMethod(NS + "mt_hoan.create_hoan", withCompany(a)),
+  mtHoanSave: (a) => callMethod(NS + "mt_hoan.save_hoan", withCompany(a)),
+  mtHoanSync: (name) => callMethod(NS + "mt_hoan.sync_hoan", withCompany({ name })),
+  mtHoanDelete: (name) => callMethod(NS + "mt_hoan.delete_hoan", withCompany({ name })),
+
   // Bảng điều khiển theo CHUỖI — màn hình đầu tiên của kênh MT. Một lời gọi
   // trả về tiến độ cả năm bước cho mọi chuỗi.
   mtBoard: (a) => callMethod(NS + "mt_hub.get_board", withCompany(a)),

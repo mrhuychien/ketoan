@@ -249,7 +249,20 @@ def _stub_frappe():
             return None
 
     fr.get_meta = _Meta
-    fr.get_cached_doc = lambda *a, **k: None
+    # `Ketoan Portal Settings` — Single doc mà GẦN NHƯ MỌI truy vấn MT đọc, qua
+    # `_mt_clause -> channel_group_clause -> get_settings()`.
+    #
+    # Bản cũ ở đây trả `None`, tức bộ giả TRẢ LỜI SAI chứ không phải im lặng:
+    # bộ kiểm nào chạm vào đường đó nổ `AttributeError: 'NoneType' object has no
+    # attribute 'npp_customer_group'` ở giữa một hàm chẳng liên quan gì tới
+    # Settings, rồi người đọc đi tìm lỗi trong code sản xuất. Cùng loại với lỗi
+    # `add_months` bên dưới — bộ giả sai nguy hiểm hơn không có bộ giả.
+    #
+    # Bộ kiểm cần giá trị khác thì vẫn ghi đè `frappe.get_cached_doc` như trước.
+    _SETTINGS = _D(npp_customer_group="NPP", mt_customer_group="MT",
+                   default_company=None, receivable_account=None,
+                   cash_bank_account_filter="Cash and Bank")
+    fr.get_cached_doc = lambda *a, **k: _SETTINGS
 
     u = types.ModuleType("frappe.utils")
     u.flt = lambda v, p=None: float(v or 0)

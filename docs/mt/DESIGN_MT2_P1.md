@@ -592,7 +592,10 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AH** SỔ THEO DÕI HÓA ĐƠN — dựng lại cuốn Excel kế toán vẫn giữ | `115eb8c` | `ledger_check` |
 | **MT2-AI** tick chiết khấu 4 trạng thái · phiếu trả kèm chứng từ MISA | `a2c6603` | `ledger_check` |
 | **MT2-AJ** số PO gom về MỘT ô — `custom_po_`, bỏ `po_no` | `0831b66` | `po_field_check` |
-| **MT2-AK** `return_invoice` — nối chứng từ trả hàng, cấm đường tiền | *(commit này)* | `return_doc_check` |
+| **MT2-AK** `return_invoice` — nối chứng từ trả hàng, cấm đường tiền | `4198f5c` | `return_doc_check` |
+| **MT2-AL** DocType `MT Hang Hoan` — sổ việc giấy tờ của một lần hàng về | `969501c` | `hoan_check` |
+| **MT2-AM** bảng mã hàng chuyển sang `vanchuyen` + cất bản vá app kia | `540f391` | `hoan_check` |
+| **MT2-AN** màn "Hàng hoàn chờ xử lý" + `mt_hoan.py`, bản vá đã sang repo kia | *(commit này)* | `hoan_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -605,7 +608,8 @@ for t in regression_check crosscheck_mt2 mutation_check \
          mega_check refid_check replace_check opening_gl_check \
          table_width_check client_script_check win_pdf_check \
          two_books_check portal_js_check einv_gap_check win_seed_check \
-         gl_bridge_check ledger_check; do
+         gl_bridge_check ledger_check po_field_check return_doc_check \
+         hoan_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -894,6 +898,127 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AN — hàng đợi hàng hoàn, và việc mà không màn hình nào đếm được
+
+MT2-AL dựng bảng `MT Hang Hoan` rồi dừng: chưa nối vào portal. Phần này nối nó,
+và làm rõ tại sao nó không trùng với sổ theo dõi hóa đơn.
+
+**Sổ theo dõi lấy TỜ HÓA ĐƠN làm đơn vị**, và cột `N chưa có HĐ` của nó đếm
+phiếu trả hàng **đã lập** mà chưa có chứng từ thuế. Đúng, nhưng nó không bao giờ
+đếm được cái nặng hơn: **lần hàng quay về mà chưa ai lập phiếu trả**. Chưa có
+phiếu thì không có gì để đếm. Hóa đơn gốc vẫn đòi đủ tiền, siêu thị vẫn trừ phần
+hàng trả khi trả tiền, và chênh lệch chỉ lộ ra ở khâu đối soát vài tháng sau.
+
+Nên màn này lấy **LẦN HÀNG QUAY VỀ** làm đơn vị. Một hóa đơn có thể vừa móp lúc
+giao (tháng 6) vừa bị trả hàng date (tháng 8) — hai lần, hai phiếu trả, hai
+việc. Bốn ô:
+
+```
+chua_vao_so     phiếu sự cố bên vanchuyen CHƯA có dòng nào trong sổ
+chua_phieu_tra  đã vào sổ, chưa lập phiếu trả trên ERPNext
+chua_chung_tu   đã có phiếu trả, chưa có hóa đơn thay thế/điều chỉnh
+xong            đủ chứng từ, hoặc đã kết luận "không cần"
+```
+
+Ô đầu đứng trước vì nó là ô **duy nhất mà việc còn nằm ngoài tầm nhìn của kế
+toán** — nó ở bên app vận chuyển.
+
+#### Máy liệt kê, NGƯỜI bấm nhận
+
+Cách gọn nhất là `doc_events` trên `Su Co Van Chuyen`: có sự cố thì đẻ luôn một
+dòng. Không làm, vì hai lẽ. Thứ nhất, hook trỏ vào DocType app khác làm `ketoan`
+**không cài được** trên site chưa có `vanchuyen` — đúng lý do `su_co` là Data
+chứ không phải Link. Thứ hai, **không phải sự cố nào cũng sinh việc kế toán**:
+giao chậm rồi giao đủ, sai địa chỉ rồi giao lại — hóa đơn gốc vẫn đúng. Tự tạo
+hàng loạt là dựng một hàng đợi đầy việc không có thật, và hàng đợi như thế thì
+hai tuần nữa không ai mở; lúc đó nó nuốt luôn việc thật.
+
+Và **"bỏ qua" không cần cờ riêng** như `mt_einv.set_skip`: nhận vào sổ rồi chốt
+`chung_tu_can = "Không cần chứng từ"` là dòng ra khỏi hàng đợi ngay, mà vẫn còn
+dấu vết *ai kết luận gì, lúc nào*. Một cái cờ `bo_qua` làm được đúng việc ẩn
+dòng nhưng mất phần trả lời cho người soát sau.
+
+#### Hàng đợi có dòng KHÔNG BAO GIỜ ra được — lỗi của chính MT2-AL
+
+`_derive_paper_status` hỏi `credit_note` **trước**:
+
+```python
+if not self.credit_note:          # <- chặn ở đây
+    return GIAY_CHUA_TRA
+if self.chung_tu_can == KHONG_CAN:
+    return GIAY_XONG
+```
+
+Nhưng "giao lại nguyên lô" thì hóa đơn gốc vẫn đúng: **không cần chứng từ, và
+cũng không cần phiếu trả**. Nhánh đó kẹt vĩnh viễn ở "Chưa lập phiếu trả" —
+đúng cái nó không bao giờ phải lập. Đổi thứ tự: hỏi `chung_tu_can` trước.
+
+Kèm hai chốt nữa trên chính controller đó:
+
+- **Phiếu trả phải ĐÃ GHI SỔ.** `mt._returns_join` chỉ cộng `docstatus = 1`, nên
+  nối một phiếu nháp là sổ này báo "đã lập phiếu trả" trong khi công nợ vẫn đòi
+  đủ tiền tờ gốc. Hai màn hình nói hai đằng, và cái sai là cái bảo việc đã xong.
+  (`docstatus` vốn đã được `get_value` lấy về nhưng chưa dùng.)
+- **Một phiếu sự cố → MỘT dòng sổ.** Hai người cùng mở màn hình cùng bấm "Nhận"
+  là hai dòng cho một lần hàng về, và từ đó mọi con số đếm việc gấp đôi cho đúng
+  những sự cố đông người xem nhất. Chỉ chặn khi `su_co` có giá trị: dòng lập tay
+  (hàng date siêu thị trả, không qua chuyến xe nào) để trống ô đó.
+
+#### Đọc SỐNG từ `vanchuyen`; bản chép chỉ là lưới an toàn
+
+`MT Hang Hoan` chép `loai_su_co` · `huong_xu_ly` · `ngay_xay_ra` sang cột
+read-only của mình lúc nhận. Nhưng `huong_xu_ly` là **khóa chính quyết định
+chứng từ phải làm** ("Hủy đơn" chỉ tồn tại ở cột đó), và điều phối sửa nó sau
+khi làm việc với siêu thị là chuyện thường. Đọc bản chép là kế toán làm việc
+trên một tiền đề đã cũ mà không có gì báo.
+
+Nên danh sách đọc sống, và **nói ra chỗ đã đổi** (`da_doi`: cũ → mới) thay vì
+lặng lẽ tráo giá trị dưới tay người đang đọc. `sync_hoan` là chỗ ghi bản chép
+mới — NGƯỜI bấm, không phải máy ghi lúc đọc: tự ghi mỗi lần đọc là biến một màn
+hình xem thành màn hình ghi, và mọi lượt mở đều đụng vào chứng từ.
+
+Chỉ ba cột được báo "đã đổi". Báo mọi cột thì mỗi lần điều phối gõ thêm một chữ
+vào ghi chú là cả danh sách nhấp nháy, mà cảnh báo nhấp nháy vì chuyện vặt là
+cảnh báo bị tắt.
+
+#### `return_invoice` vẫn không được chạm đường tiền
+
+Module đọc `MT Payment Advice Line.return_invoice` để biết "siêu thị đã tự xuất
+hóa đơn trả" — ở **đúng một hàm**, `_chung_tu_sieu_thi`, và hàm đó không có
+`SUM(`, không `total_amount`. `return_doc_check` quét mọi hàm trong `api/` theo
+luật đó; `hoan_check` kiểm thêm đích danh module này.
+
+#### Thẻ chuỗi đếm bằng CHÍNH tầng của màn hình
+
+`mt_hub.get_board` gọi `mt_hoan.board_counts`, không viết lại SQL: cách chắc
+chắn nhất để hai con số về cùng một tập lệch nhau là để hai module cùng đếm. Và
+`board_counts` gom chuỗi qua `_customer_chain_map`, **không** qua cột `chain` đã
+chép trên dòng sổ — đổi chuỗi của một khách thì bản chép cũ đứng nguyên, và thẻ
+chuỗi sẽ đếm một đằng còn danh sách bấm vào lọc một nẻo.
+
+Kèm theo: bước 2 của vòng đời tháng (`tra_hang`) trước đây khai `portal: False`
+với ghi chú "không thuộc portal". Sau khi màn này dựng xong, ghi chú đó nói sai
+về chính thứ nó điều khiển — đổi thành `portal: True`, và nói rõ chứng từ **vẫn**
+lập trên ERPNext/MISA, portal chỉ theo dõi việc còn thiếu.
+
+#### Bộ giả `frappe` trả lời SAI, và nó làm hỏng một bộ kiểm khác
+
+`regression_check._stub_frappe` để `get_cached_doc = lambda: None`, trong khi
+`Ketoan Portal Settings` là Single doc mà gần như mọi truy vấn MT đọc qua
+`_mt_clause → channel_group_clause → get_settings()`. Ngay khi `get_board` bắt
+đầu gọi `board_counts`, `two_books_check` nổ `AttributeError: 'NoneType' object
+has no attribute 'npp_customer_group'` — ở giữa một hàm chẳng liên quan gì tới
+Settings, và người đọc sẽ đi tìm lỗi trong code sản xuất. Cùng loại với lỗi
+`add_months` đã ghi ở đây: **bộ giả sai nguy hiểm hơn không có bộ giả.** Đổi
+thành một `_dict` mặc định; bộ kiểm cần giá trị khác vẫn ghi đè như trước.
+
+#### Bản vá `vanchuyen` đã sang repo kia
+
+Phiên MT2-AM không có quyền push nên cất bản vá ở `docs/mt/vanchuyen/`. Phiên
+này có quyền: bản vá đã `git am` vào `mrhuychien/vanchuyen`, nhánh
+`claude/mt2-vanchuyen-hanghoan-gtbyb1` (commit `11d4e57`). Site vẫn phải
+`bench --site <site> migrate` cho **cả hai** app — có DocType mới ở cả hai bên.
 
 ### MT2-AK — chứng từ trả hàng của siêu thị, và một cái lỗ suýt mở lại
 

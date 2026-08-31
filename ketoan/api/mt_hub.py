@@ -66,8 +66,13 @@ DOSSIER_DRAFT = "Nháp"
 STEPS = (
     {"key": "xuat_hoa_don", "label": "Xuất hóa đơn bán", "portal": False,
      "note": "Làm trên ERPNext/MISA theo PO — không thuộc portal này."},
-    {"key": "tra_hang", "label": "Móp lỗi / trả lại", "portal": False,
-     "note": "Chứng từ trả hàng ERPNext + hóa đơn điều chỉnh MISA."},
+    # Bước này TỪNG nằm ngoài portal, và ghi chú cũ vẫn nói vậy sau khi màn
+    # "Hàng hoàn chờ xử lý" đã dựng xong — một bảng điều khiển nói sai về chính
+    # thứ nó điều khiển thì tệ hơn là không có bảng nào.
+    {"key": "tra_hang", "label": "Móp lỗi / trả lại", "portal": True,
+     "note": "Hàng đợi hàng hoàn: nhận phiếu sự cố vào sổ → lập phiếu trả ERPNext "
+             "→ hóa đơn thay thế/điều chỉnh MISA. Chứng từ vẫn lập trên "
+             "ERPNext/MISA; portal theo dõi việc còn thiếu."},
     {"key": "chiet_khau", "label": "Chiết khấu", "portal": True,
      "note": "Nạp doanh số → bảng kê BKCK → chốt số → xuất hóa đơn CK → bút toán."},
     {"key": "thanh_toan", "label": "Đối soát thanh toán", "portal": True,
@@ -242,6 +247,14 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
         """, dict(p, dstatus=DOSSIER_DRAFT), as_dict=True)
         n_dossier_draft = cint(row[0].n) if row else 0
 
+    # ── Bước 2: hàng hoàn chờ xử lý ──────────────────────────────────────
+    # Đếm ở `mt_hoan`, không viết lại SQL ở đây: thẻ chuỗi và màn hình phải nói
+    # về CÙNG một tập, và cách chắc chắn nhất để hai con số lệch nhau là để hai
+    # module cùng đếm.
+    from ketoan.api import mt_hoan
+
+    hoan = mt_hoan.board_counts(company)
+
     # ── Bước 5: công nợ — dùng ĐÚNG tầng của màn hình công nợ ────────────
     # Không viết lại phép tính: hai màn hình nói hai số khác nhau về cùng một
     # chuỗi là cách nhanh nhất để mất lòng tin vào cả hai.
@@ -282,6 +295,7 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
         s = sheets.get(label) or {}
         d = debt.get(label) or {}
         j = jes.get(label) or {}
+        hh = hoan.get(label) or {}
 
         n_draft_je = cint(j.get("n_draft_je"))
         n_dossier = n_dossier_draft if cap.get("has_dossier") else 0
@@ -291,7 +305,8 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
         # phải việc. Trộn vào thì con số lúc nào cũng to và mất hết ý nghĩa.
         todo = (cint(a.get("n_unreconciled")) + cint(l.get("n_unmatched"))
                 + cint(l.get("n_review")) + n_draft_je
-                + cint(s.get("n_draft")) + cint(s.get("n_await_invoice")) + n_dossier)
+                + cint(s.get("n_draft")) + cint(s.get("n_await_invoice")) + n_dossier
+                + cint(hh.get("hoan_open")) + cint(hh.get("hoan_chua_vao_so")))
 
         out.append({
             "chain": label,
@@ -313,6 +328,13 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
             "draft_je": n_draft_je,
             # hồ sơ Win
             "dossiers_draft": n_dossier,
+            # bước 2 — hàng hoàn. `hoan_chua_vao_so` là phiếu sự cố bên
+            # `vanchuyen` chưa ai nhận vào sổ kế toán: việc DUY NHẤT trong bảng
+            # này còn nằm ngoài tầm nhìn của kế toán.
+            "hoan_chua_tra": cint(hh.get("hoan_chua_tra")),
+            "hoan_chua_ct": cint(hh.get("hoan_chua_ct")),
+            "hoan_open": cint(hh.get("hoan_open")),
+            "hoan_chua_vao_so": cint(hh.get("hoan_chua_vao_so")),
             # bước 5
             "debt": flt(d.get("amount")),
             "debt_overdue": flt(d.get("overdue")),
