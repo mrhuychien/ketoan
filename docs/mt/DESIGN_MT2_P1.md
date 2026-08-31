@@ -596,7 +596,7 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AL** DocType `MT Hang Hoan` — sổ việc giấy tờ của một lần hàng về | `969501c` | `hoan_check` |
 | **MT2-AM** bảng mã hàng chuyển sang `vanchuyen` + cất bản vá app kia | `540f391` | `hoan_check` |
 | **MT2-AN** màn "Hàng hoàn chờ xử lý" + `mt_hoan.py`, bản vá đã sang repo kia | `8a8a3b9` | `hoan_check` |
-| **MT2-AO** màn làm việc MT xếp lại theo VIỆC · màn đối soát bảng kê | *(commit này)* | `ui_mt_check` · `table_width_check` |
+| **MT2-AO** màn làm việc MT xếp lại theo VIỆC · màn đối soát bảng kê | `d14986d`…`8685fd7` | `ui_mt_check` · `table_width_check` |
 
 Chạy toàn bộ, không cần bench:
 
