@@ -34,16 +34,7 @@
   "trang_thai_hang",
   "ngay_hang_ve",
   "col_hang",
-  "stock_entry",
-  "tong_mat_duong",
-  "sec_items",
-  "items",
-  "sec_bt",
-  "nha_xe",
-  "boi_thuong_trang_thai",
-  "col_bt",
-  "boi_thuong_so_tien",
-  "boi_thuong_ghi_chu"
+  "hang_ve_ghi_chu"
  ],
  "fields": [
   {
@@ -226,61 +217,11 @@
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "stock_entry",
-   "fieldtype": "Link",
-   "options": "Stock Entry",
-   "label": "Phiếu nhập lại kho",
-   "description": "Do THỦ KHO / ĐIỀU PHỐI lập bên app vanchuyen. Ở đây chỉ ghi lại để truy ngược."
-  },
-  {
-   "fieldname": "tong_mat_duong",
-   "fieldtype": "Currency",
-   "label": "Tiền mất trên đường",
-   "read_only": 1,
-   "description": "Cộng từ bảng dưới. Đây là con số đi đòi nhà xe — SUY TỪ LƯỢNG LỆCH, không gõ tay."
-  },
-  {
-   "fieldname": "sec_items",
-   "fieldtype": "Section Break",
-   "label": "Mã hàng"
-  },
-  {
-   "fieldname": "items",
-   "fieldtype": "Table",
-   "options": "MT Hang Hoan Item",
-   "label": "Chi tiết mã hàng"
-  },
-  {
-   "fieldname": "sec_bt",
-   "fieldtype": "Section Break",
-   "label": "Bồi thường nhà xe"
-  },
-  {
-   "fieldname": "nha_xe",
-   "fieldtype": "Data",
-   "label": "Nhà xe",
-   "read_only": 1
-  },
-  {
-   "fieldname": "boi_thuong_trang_thai",
-   "fieldtype": "Select",
-   "options": "\nChưa đòi\nĐã đòi\nĐã thu\nKhông đòi",
-   "label": "Trạng thái đòi bồi thường"
-  },
-  {
-   "fieldname": "col_bt",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "boi_thuong_so_tien",
-   "fieldtype": "Currency",
-   "label": "Số tiền đòi",
-   "description": "Mặc định bằng tiền mất trên đường, cho sửa. CHỈ THỐNG KÊ — đòi riêng, không sinh bút toán, không trừ vào cước chuyến."
-  },
-  {
-   "fieldname": "boi_thuong_ghi_chu",
+   "fieldname": "hang_ve_ghi_chu",
    "fieldtype": "Small Text",
-   "label": "Ghi chú đòi bồi thường"
+   "label": "Ghi chú hàng về",
+   "read_only": 1,
+   "description": "Chép từ phiếu sự cố bên vanchuyen. Chi tiết mã hàng, số lượng thực về và bồi thường nhà xe nằm BÊN ĐÓ — hai trong ba số lượng chỉ điều phối và thủ kho biết, mà họ không vào được portal này."
   }
  ],
  "index_web_pages_for_search": 1,

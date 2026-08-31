@@ -34,6 +34,16 @@ CẢ HAI dòng cùng rời khỏi hàng đợi — phiếu thứ hai không bao 
 nợ thừa vĩnh viễn, và không màn hình nào kêu.
 
 ════════════════════════════════════════════════════════════════════════════
+CHI TIẾT MÃ HÀNG NẰM BÊN `vanchuyen`, KHÔNG Ở ĐÂY
+════════════════════════════════════════════════════════════════════════════
+
+Ba số lượng của một lần hàng về — siêu thị trả / thực về sân / lọc dùng được —
+thì HAI cái sau chỉ điều phối và thủ kho biết, mà họ không vào được portal kế
+toán. Đặt bảng ở đây là bắt kế toán chép lại số của người khác, và việc chép
+lại thì hai tuần nữa sẽ không ai chép. Bảng đó là `Su Co Hang Ve` bên
+`vanchuyen`; app này chỉ ĐỌC.
+
+════════════════════════════════════════════════════════════════════════════
 `su_co` LÀ DATA, KHÔNG PHẢI LINK
 ════════════════════════════════════════════════════════════════════════════
 
@@ -45,7 +55,7 @@ là chuyện của hôm nay; ràng chết vào nhau là chuyện của mãi mãi
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, nowdate
+from frappe.utils import nowdate
 
 # Trạng thái giấy tờ — MÁY SUY, không ai gõ.
 GIAY_CHUA_TRA = "Chưa lập phiếu trả"
@@ -64,7 +74,6 @@ CT_KHONG_CAN = "Không cần chứng từ"
 class MTHangHoan(Document):
     def validate(self):
         self._check_credit_note()
-        self._roll_items()
         self._derive_paper_status()
 
     def _check_credit_note(self):
@@ -90,27 +99,6 @@ class MTHangHoan(Document):
             frappe.throw(_(
                 "Phiếu trả {0} trả cho hóa đơn {1}, không phải {2}."
             ).format(self.credit_note, cn.return_against, self.sales_invoice))
-
-    def _roll_items(self):
-        """Tiền mất trên đường = (SL siêu thị trả − SL thực về) × đơn giá.
-
-        SUY TỪ LƯỢNG LỆCH, không cho gõ tay. Số đi đòi nhà xe mà gõ tay được thì
-        nó là ý kiến; suy từ lượng thì nó là bằng chứng.
-
-        Chỉ tính phần DƯƠNG: SL về nhiều hơn SL trả là dấu hiệu nhập nhầm số,
-        không phải "nhà xe nợ mình số âm" — để nó trừ ngược vào tổng là giấu mất
-        một lỗi nhập liệu bằng một lỗi nhập liệu khác.
-        """
-        tong = 0.0
-        for r in (self.items or []):
-            thieu = max(flt(r.sl_tra) - flt(r.sl_ve), 0.0)
-            r.tien_mat_duong = round(thieu * flt(r.don_gia), 2)
-            tong += r.tien_mat_duong
-        self.tong_mat_duong = round(tong, 2)
-        # Số đòi mặc định bằng số đo được, nhưng CHO SỬA: có lần nhà xe chỉ đền
-        # một phần theo thỏa thuận, và con số thỏa thuận đó mới là số phải theo.
-        if self.boi_thuong_so_tien in (None, 0) and tong:
-            self.boi_thuong_so_tien = self.tong_mat_duong
 
     def _derive_paper_status(self):
         """Suy trạng thái giấy tờ. KHÔNG đọc `trang_thai` bên vanchuyen."""

@@ -1,0 +1,868 @@
+From 27bfc888922dfacccbc6cff869be1d4b8a047952 Mon Sep 17 00:00:00 2001
+From: claude <noreply@anthropic.com>
+Date: Mon, 31 Aug 2026 02:45:57 +0000
+Subject: [PATCH] =?UTF-8?q?VC-HH:=20theo=20d=C3=B5i=20h=C3=A0ng=20quay=20v?=
+ =?UTF-8?q?=E1=BB=81=20+=20b=E1=BB=93i=20th=C6=B0=E1=BB=9Dng=20nh=C3=A0=20?=
+ =?UTF-8?q?xe,=20v=C3=A0=203=20l=C3=BD=20do=20k=E1=BA=BF=20to=C3=A1n?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Bàn giao với app ketoan: sự cố vận chuyển sinh ra việc GIẤY TỜ bên kế toán
+(phiếu trả hàng + hóa đơn thay thế/điều chỉnh). Phiếu sự cố phải cầm đủ
+thông tin để bên đó biết phải làm gì.
+
+1. loai_su_co nới từ 7 lên 10: thêm Hàng date / thời vụ · Giao nhầm ·
+   Hàng lỗi nhà sản xuất. Ba lý do này có mặt trong nghiệp vụ nhưng chưa có
+   chỗ chọn, nên đang bị dồn vào "Khác".
+
+2. ngay_phat_sinh thành BẮT BUỘC và đổi nhãn thành "Ngày xảy ra". Trước đây
+   cả hai modal tạo đều KHÔNG gửi ô này, nên nó luôn rỗng — mà đó là mốc để
+   tính tuổi việc. Nhà xe báo trễ vài ngày là thường; tính từ ngày nhập sẽ
+   giấu mất đúng phần chậm đó. Mặc định hôm nay, sửa lùi được.
+
+3. huong_xu_ly đưa vào CẢ HAI modal tạo. Nó là khóa chính quyết định chứng
+   từ kế toán phải làm ("Hủy đơn" chỉ tồn tại ở cột này, không phải ở
+   loai_su_co), mà trước đây không modal nào gửi.
+
+4. Nhóm HÀNG QUAY VỀ: hang_ve_trang_thai · ngay_du_kien_ve · ngay_hang_ve ·
+   stock_entry. Phiếu trả hàng bên ERPNext để update_stock = 0 nên hàng
+   KHÔNG tự vào kho — chưa có Stock Entry thì hàng vẫn nằm ngoài sổ.
+
+5. Bảng con Su Co Hang Ve giữ BA số lượng mỗi mã hàng: SL siêu thị trả /
+   SL thực về sân / SL lọc dùng được (+ SL hỏng). Phiếu trả hàng chỉ giữ số
+   đầu. Lệch giữa số 1 và số 2 là MẤT TRÊN ĐƯỜNG, và tiền đòi nhà xe SUY TỪ
+   lượng lệch × đơn giá chứ không gõ tay. Chỉ tính phần dương: SL về nhiều
+   hơn SL trả là gõ nhầm, để nó trừ ngược vào tổng là giấu một lỗi bằng một
+   lỗi khác.
+
+6. Nhóm BỒI THƯỜNG: boi_thuong_trang_thai · boi_thuong_so_tien ·
+   boi_thuong_ghi_chu. CHỈ THỐNG KÊ, đòi riêng — không sinh bút toán, không
+   trừ vào cước chuyến. Số đòi mặc định bằng số đo được nhưng cho sửa: nhà
+   xe đền một phần theo thỏa thuận thì số thỏa thuận mới là số phải theo.
+
+7. Lọc "Đang mở" chuyển sang SERVER (dang_mo) + phân trang. Bản cũ lấy 30
+   dòng mới nhất rồi lọc trên chính 30 dòng đó. Từ khi phiếu có vòng đời
+   hàng-về, một phiếu sống vài tuần chứ không vài ngày, nên số phiếu mở
+   vượt 30 là chắc chắn — và khi đó ĐÚNG những phiếu cũ nhất còn mở, nhóm
+   đáng lo nhất, rơi khỏi trang 1 mà pill vẫn hiện tổng đúng.
+
+8. _UPDATABLE và _READ_FIELDS gom thành hằng có cảnh báo: field không nằm
+   trong _UPDATABLE thì create/update BỎ QUA IM LẶNG — không lỗi, không
+   cảnh báo, chỉ là dữ liệu gõ xong bấm lưu rồi biến mất.
+
+Đã bump `modified` của DocType: không bump thì bench migrate bỏ qua re-import
+và cột mới không bao giờ được tạo.
+---
+ vanchuyen/api/su_co.py                        |  72 +++--
+ vanchuyen/public/vanchuyen/views/dieu-phoi.js |  14 +-
+ vanchuyen/public/vanchuyen/views/su-co.js     |  44 ++-
+ .../doctype/su_co_hang_ve/__init__.py         |   0
+ .../doctype/su_co_hang_ve/su_co_hang_ve.json  | 112 +++++++
+ .../doctype/su_co_hang_ve/su_co_hang_ve.py    |  22 ++
+ .../su_co_van_chuyen/su_co_van_chuyen.json    | 274 ++++++++++++++++--
+ .../su_co_van_chuyen/su_co_van_chuyen.py      |  24 +-
+ 8 files changed, 508 insertions(+), 54 deletions(-)
+ create mode 100644 vanchuyen/van_chuyen/doctype/su_co_hang_ve/__init__.py
+ create mode 100644 vanchuyen/van_chuyen/doctype/su_co_hang_ve/su_co_hang_ve.json
+ create mode 100644 vanchuyen/van_chuyen/doctype/su_co_hang_ve/su_co_hang_ve.py
+
+diff --git a/vanchuyen/api/su_co.py b/vanchuyen/api/su_co.py
+index 31b21c3..75d1bf8 100644
+--- a/vanchuyen/api/su_co.py
++++ b/vanchuyen/api/su_co.py
+@@ -14,11 +14,33 @@ from vanchuyen.api.guards import is_admin
+ # Hình thức KHÔNG phải đơn vị VC (tự ship / bốc tại kho / chưa gán) → loại khỏi pool sự cố.
+ SELF_FORMS = ("Tự vận chuyển", "Xe vào bốc", "Chưa phân công")
+ 
++# Trạng thái coi là ĐÃ ĐÓNG. Lấy từ controller để hai nơi không lệch nhau.
++from vanchuyen.van_chuyen.doctype.su_co_van_chuyen.su_co_van_chuyen import DONG as DONG_TRANG_THAI
++
++# ⚠ THÊM FIELD MỚI PHẢI THÊM VÀO ĐÂY. Field không có trong tuple này thì
++# `create_issue`/`update_issue` BỎ QUA IM LẶNG — không lỗi, không cảnh báo, chỉ
++# là dữ liệu người dùng gõ xong bấm lưu rồi biến mất.
+ _UPDATABLE = (
+ 	"loai_su_co", "trang_thai", "ngay_phat_sinh", "so_kien_anh_huong", "gia_tri_anh_huong",
+ 	"mo_ta", "huong_xu_ly", "nguoi_phu_trach", "ghi_chu_xu_ly",
++	# hàng quay về
++	"hang_ve_trang_thai", "ngay_du_kien_ve", "ngay_hang_ve", "stock_entry",
++	# bồi thường nhà xe — CHỈ THỐNG KÊ, đòi riêng, không sinh bút toán
++	"boi_thuong_trang_thai", "boi_thuong_so_tien", "boi_thuong_ghi_chu",
++)
++
++# Field đọc ra cho portal. Tách hằng để `_issue_dict` và `list_issues` không lệch
++# nhau — lệch một field là màn danh sách thiếu cột mà màn chi tiết vẫn có.
++_READ_FIELDS = (
++	"name", "sales_invoice", "customer", "hinh_thuc", "po", "tinh", "ngay_phat_sinh",
++	"loai_su_co", "trang_thai", "so_kien_anh_huong", "gia_tri_anh_huong", "mo_ta",
++	"dinh_kem", "huong_xu_ly", "nguoi_phu_trach", "ngay_dong", "ghi_chu_xu_ly",
++	"hang_ve_trang_thai", "ngay_du_kien_ve", "ngay_hang_ve", "stock_entry",
++	"tong_mat_duong", "boi_thuong_trang_thai", "boi_thuong_so_tien", "boi_thuong_ghi_chu",
+ )
+ 
++_DATE_FIELDS = ("ngay_phat_sinh", "ngay_dong", "ngay_du_kien_ve", "ngay_hang_ve")
++
+ 
+ def _require():
+ 	if not (frappe.has_permission("Sales Invoice", "write") or is_admin()):
+@@ -26,27 +48,41 @@ def _require():
+ 
+ 
+ def _issue_dict(name):
+-	d = frappe.db.get_value(
+-		"Su Co Van Chuyen", name,
+-		["name", "sales_invoice", "customer", "hinh_thuc", "po", "tinh", "ngay_phat_sinh",
+-		 "loai_su_co", "trang_thai", "so_kien_anh_huong", "gia_tri_anh_huong", "mo_ta",
+-		 "dinh_kem", "huong_xu_ly", "nguoi_phu_trach", "ngay_dong", "ghi_chu_xu_ly"],
+-		as_dict=True,
+-	)
++	d = frappe.db.get_value("Su Co Van Chuyen", name, list(_READ_FIELDS), as_dict=True)
+ 	if d:
+-		d["ngay_phat_sinh"] = str(d.ngay_phat_sinh) if d.ngay_phat_sinh else None
+-		d["ngay_dong"] = str(d.ngay_dong) if d.ngay_dong else None
++		for f in _DATE_FIELDS:
++			d[f] = str(d[f]) if d.get(f) else None
++		d["items"] = frappe.get_all(
++			"Su Co Hang Ve", filters={"parent": name, "parenttype": "Su Co Van Chuyen"},
++			fields=["name", "item_code", "item_name", "uom", "sl_tra", "sl_ve",
++				"sl_nhap_lai", "sl_hong", "don_gia", "tien_mat_duong", "idx"],
++			order_by="idx",
++		)
+ 	return d
+ 
+ 
+ @frappe.whitelist()
+-def list_issues(trang_thai=None, loai_su_co=None, hinh_thuc=None, tim=None, page=1, page_size=30):
+-	"""Danh sách sự cố, lọc theo trạng thái/loại/đơn vị VC + tìm theo đơn/khách/PO."""
++def list_issues(trang_thai=None, loai_su_co=None, hinh_thuc=None, tim=None, page=1, page_size=30,
++		dang_mo=None):
++	"""Danh sách sự cố, lọc theo trạng thái/loại/đơn vị VC + tìm theo đơn/khách/PO.
++
++	`dang_mo=1` lọc NGAY TRÊN SERVER các phiếu chưa đóng.
++
++	VÌ SAO phải lọc ở server: bản cũ trả 30 dòng mới nhất rồi để portal tự lọc
++	"đang mở" trên đúng 30 dòng đó. Từ khi phiếu có thêm vòng đời hàng-về (Chưa
++	về -> Đang về -> Đã về sân -> Đã lọc xong), một phiếu sống vài tuần chứ không
++	vài ngày, nên số phiếu đang mở vượt 30 là chắc chắn. Khi đó ĐÚNG những phiếu
++	CŨ NHẤT còn mở — nhóm đáng lo nhất, hàng đi lâu chưa về — rơi khỏi trang 1 và
++	không ai mở tới được, trong khi pill vẫn hiện tổng đúng. Lọc client trên một
++	trang là cách chắc chắn nhất để giấu mất việc.
++	"""
+ 	_require()
+ 	page = cint(page) or 1
+ 	page_size = min(cint(page_size) or 30, 100)
+ 	filters = {}
+-	if trang_thai:
++	if cint(dang_mo):
++		filters["trang_thai"] = ["not in", DONG_TRANG_THAI]
++	elif trang_thai:
+ 		filters["trang_thai"] = trang_thai
+ 	if loai_su_co:
+ 		filters["loai_su_co"] = loai_su_co
+@@ -61,9 +97,7 @@ def list_issues(trang_thai=None, loai_su_co=None, hinh_thuc=None, tim=None, page
+ 		]
+ 	rows = frappe.get_all(
+ 		"Su Co Van Chuyen", filters=filters, or_filters=or_filters,
+-		fields=["name", "sales_invoice", "customer", "hinh_thuc", "po", "tinh", "ngay_phat_sinh",
+-			"loai_su_co", "trang_thai", "so_kien_anh_huong", "gia_tri_anh_huong", "mo_ta",
+-			"dinh_kem", "huong_xu_ly", "nguoi_phu_trach", "ngay_dong", "ghi_chu_xu_ly"],
++		fields=list(_READ_FIELDS),
+ 		order_by="ngay_phat_sinh desc, modified desc",
+ 		start=(page - 1) * page_size, page_length=page_size,
+ 	)
+@@ -71,13 +105,15 @@ def list_issues(trang_thai=None, loai_su_co=None, hinh_thuc=None, tim=None, page
+ 	_rank = {"Mới": 0, "Đang xử lý": 1, "Đã xử lý": 2, "Đóng": 3}
+ 	rows.sort(key=lambda r: _rank.get(r.get("trang_thai"), 9))
+ 	for r in rows:
+-		r["ngay_phat_sinh"] = str(r["ngay_phat_sinh"]) if r.get("ngay_phat_sinh") else None
+-		r["ngay_dong"] = str(r["ngay_dong"]) if r.get("ngay_dong") else None
++		for f in _DATE_FIELDS:
++			r[f] = str(r[f]) if r.get(f) else None
+ 	total = frappe.db.count("Su Co Van Chuyen", filters or None)
++	has_more = (page - 1) * page_size + len(rows) < cint(total)
+ 	# Đếm theo trạng thái (cho pill filter).
+ 	counts = {c.trang_thai: cint(c.n) for c in frappe.db.sql(
+ 		"SELECT trang_thai, COUNT(*) AS n FROM `tabSu Co Van Chuyen` GROUP BY trang_thai", as_dict=True)}
+-	return {"rows": rows, "total": cint(total), "page": page, "counts": counts}
++	return {"rows": rows, "total": cint(total), "page": page, "page_size": page_size,
++		"has_more": has_more, "counts": counts}
+ 
+ 
+ @frappe.whitelist()
+diff --git a/vanchuyen/public/vanchuyen/views/dieu-phoi.js b/vanchuyen/public/vanchuyen/views/dieu-phoi.js
+index 39106d6..1a94cbb 100644
+--- a/vanchuyen/public/vanchuyen/views/dieu-phoi.js
++++ b/vanchuyen/public/vanchuyen/views/dieu-phoi.js
+@@ -1235,7 +1235,10 @@ function renderManagerView() {
+ }
+ 
+ // ── Modal ghi nhận sự cố gắn thẳng với đơn (tạo từ trang Điều hành) ──────────
+-const SUCO_LOAI = ["Hoàn hàng", "Giao một phần", "Hư hỏng, móp méo", "Chờ xử lý chứng từ", "Chậm, thất lạc", "Khách từ chối, sai địa chỉ", "Khác"];
++// ⚠ PHẢI KHỚP `LOAI` trong views/su-co.js và options `loai_su_co` của DocType.
++// Lệch một giá trị là điều phối chọn được ở màn này mà màn kia không hiện ra.
++const SUCO_LOAI = ["Hoàn hàng", "Giao một phần", "Hư hỏng, móp méo", "Chờ xử lý chứng từ", "Chậm, thất lạc", "Khách từ chối, sai địa chỉ", "Hàng date / thời vụ", "Giao nhầm", "Hàng lỗi nhà sản xuất", "Khác"];
++const SUCO_HUONG = ["", "Giao lại", "Hoàn toàn bộ", "Giao một phần", "Bồi thường", "Giảm trừ công nợ", "Hủy đơn", "Khác"];
+ function openSuCoModal(siName) {
+ 	const inv = allInvoices.find((i) => i.name === siName) || { name: siName };
+ 	let modal = document.getElementById("rvhg-suco-modal");
+@@ -1249,6 +1252,8 @@ function openSuCoModal(siName) {
+ 		});
+ 	}
+ 	const loaiOpts = SUCO_LOAI.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join("");
++	const huongOpts = SUCO_HUONG.map((h) => `<option value="${escapeHtml(h)}">${h ? escapeHtml(h) : "— chưa chọn —"}</option>`).join("");
++	const homNay = new Date().toISOString().slice(0, 10);
+ 	modal.innerHTML = `
+ 		<div class="rvhg-modal-inner" style="max-width:520px">
+ 			<div class="rvhg-detail-header"><div class="rvhg-detail-title">🚨 Ghi nhận sự cố</div><button class="rvhg-detail-close" type="button" data-suco-close>✕</button></div>
+@@ -1256,6 +1261,10 @@ function openSuCoModal(siName) {
+ 				<div class="rvhg-detail-value">${escapeHtml(siName)} — ${escapeHtml(inv.customer_name || inv.customer || "")}${inv.hinh_thuc ? " · " + escapeHtml(inv.hinh_thuc) : ""}</div></div>
+ 			<label class="rvhg-suco-label">Loại sự cố *</label>
+ 			<select id="rvhg-suco-loai" class="rvhg-suco-input">${loaiOpts}</select>
++			<label class="rvhg-suco-label">Hướng xử lý</label>
++			<select id="rvhg-suco-huong" class="rvhg-suco-input">${huongOpts}</select>
++			<label class="rvhg-suco-label">Ngày xảy ra *</label>
++			<input id="rvhg-suco-ngay" class="rvhg-suco-input" type="date" value="${homNay}" />
+ 			<div style="display:flex;gap:10px">
+ 				<div style="flex:1"><label class="rvhg-suco-label">Số kiện ảnh hưởng</label><input id="rvhg-suco-kien" class="rvhg-suco-input" type="number" min="0" step="1" /></div>
+ 				<div style="flex:1"><label class="rvhg-suco-label">Giá trị ảnh hưởng</label><input id="rvhg-suco-gt" class="rvhg-suco-input" type="number" min="0" step="1000" /></div>
+@@ -1280,8 +1289,11 @@ function openSuCoModal(siName) {
+ 			gia_tri_anh_huong: Number(v("rvhg-suco-gt")) || 0,
+ 			mo_ta: v("rvhg-suco-mota").trim(),
+ 			nguoi_phu_trach: v("rvhg-suco-npt").trim(),
++			huong_xu_ly: v("rvhg-suco-huong"),
++			ngay_phat_sinh: v("rvhg-suco-ngay"),
+ 			trang_thai: "Mới",
+ 		};
++		if (!payload.ngay_phat_sinh) { showToast("Chọn ngày xảy ra", "warning"); return; }
+ 		btn.disabled = true;
+ 		btn.textContent = "Đang lưu...";
+ 		try {
+diff --git a/vanchuyen/public/vanchuyen/views/su-co.js b/vanchuyen/public/vanchuyen/views/su-co.js
+index 9c6e88a..bf885bf 100644
+--- a/vanchuyen/public/vanchuyen/views/su-co.js
++++ b/vanchuyen/public/vanchuyen/views/su-co.js
+@@ -6,12 +6,13 @@ import { escapeHtml, formatDate, formatCurrency } from "../lib/format.js";
+ import { showToast } from "../components/toast.js";
+ import { showModal, closeModal } from "../components/modal.js";
+ 
+-const LOAI = ["Hoàn hàng", "Giao một phần", "Hư hỏng, móp méo", "Chờ xử lý chứng từ", "Chậm, thất lạc", "Khách từ chối, sai địa chỉ", "Khác"];
++const LOAI = ["Hoàn hàng", "Giao một phần", "Hư hỏng, móp méo", "Chờ xử lý chứng từ", "Chậm, thất lạc", "Khách từ chối, sai địa chỉ", "Hàng date / thời vụ", "Giao nhầm", "Hàng lỗi nhà sản xuất", "Khác"];
+ const TRANG_THAI = ["Mới", "Đang xử lý", "Đã xử lý", "Đóng"];
+ const HUONG = ["", "Giao lại", "Hoàn toàn bộ", "Giao một phần", "Bồi thường", "Giảm trừ công nợ", "Hủy đơn", "Khác"];
+ const LOAI_ICON = {
+ 	"Hoàn hàng": "↩️", "Giao một phần": "📦", "Hư hỏng, móp méo": "💥",
+-	"Chờ xử lý chứng từ": "📄", "Chậm, thất lạc": "🐢", "Khách từ chối, sai địa chỉ": "🚫", "Khác": "❔",
++	"Chờ xử lý chứng từ": "📄", "Chậm, thất lạc": "🐢", "Khách từ chối, sai địa chỉ": "🚫",
++	"Hàng date / thời vụ": "📅", "Giao nhầm": "🔀", "Hàng lỗi nhà sản xuất": "🏭", "Khác": "❔",
+ };
+ function ttBadge(tt) {
+ 	const c = tt === "Mới" ? "vc-badge-danger" : tt === "Đang xử lý" ? "vc-badge-warning" : "vc-badge-success";
+@@ -19,7 +20,7 @@ function ttBadge(tt) {
+ }
+ 
+ let ROOT = null;
+-const S = { filter: "open", tim: "", data: { rows: [], counts: {} }, selSi: null };
++const S = { filter: "open", tim: "", page: 1, data: { rows: [], counts: {} }, selSi: null };
+ 
+ export async function render({ container }) {
+ 	ROOT = container;
+@@ -44,6 +45,7 @@ export async function render({ container }) {
+ 		clearTimeout(t);
+ 		t = setTimeout(() => {
+ 			S.tim = e.target.value.trim();
++			S.page = 1;
+ 			load();
+ 		}, 300);
+ 	});
+@@ -57,10 +59,18 @@ function pill(label, key, n) {
+ async function load() {
+ 	const list = document.getElementById("sc-list");
+ 	list.innerHTML = skeleton(90, 3);
+-	const args = { tim: S.tim || undefined };
+-	if (S.filter !== "all" && S.filter !== "open") args.trang_thai = S.filter;
++	// Lọc "đang mở" đi qua SERVER (dang_mo), không lọc trên trang đã tải: từ khi
++	// phiếu có vòng đời hàng-về, số phiếu mở vượt 30 nên lọc client sẽ giấu mất
++	// đúng những phiếu cũ nhất — nhóm đáng lo nhất.
++	const args = { tim: S.tim || undefined, page: S.page, page_size: 30 };
++	if (S.filter === "open") args.dang_mo = 1;
++	else if (S.filter !== "all") args.trang_thai = S.filter;
+ 	try {
+-		S.data = await call("vanchuyen.api.su_co.list_issues", args);
++		const res = await call("vanchuyen.api.su_co.list_issues", args);
++		// Trang > 1 là NỐI THÊM, không thay. Nút ghi "Xem tiếp (đã hiện 30/47)"
++		// mà bấm vào lại mất 30 dòng đầu thì người dùng tưởng dữ liệu hỏng.
++		if (S.page > 1) res.rows = (S.data.rows || []).concat(res.rows || []);
++		S.data = res;
+ 	} catch (e) {
+ 		list.innerHTML = `<div class="vc-empty"><div class="vc-empty-icon">⚠️</div><div class="vc-empty-title">Không tải được</div><p class="vc-text-muted">${escapeHtml(errText(e))}</p></div>`;
+ 		return;
+@@ -81,21 +91,28 @@ function drawPills() {
+ 	box.querySelectorAll("[data-f]").forEach((b) =>
+ 		b.addEventListener("click", () => {
+ 			S.filter = b.dataset.f;
++			S.page = 1;
+ 			load();
+ 		})
+ 	);
+ }
+ 
+ function drawList() {
+-	let rows = S.data.rows || [];
+-	if (S.filter === "open") rows = rows.filter((r) => r.trang_thai === "Mới" || r.trang_thai === "Đang xử lý");
++	// KHÔNG lọc lại ở đây: server đã lọc. Lọc thêm một lần nữa trên trang đã tải
++	// là cách cũ, và nó làm pill hiện 47 trong khi chỉ vẽ 12 thẻ.
++	const rows = S.data.rows || [];
+ 	const list = document.getElementById("sc-list");
+ 	if (!rows.length) {
+ 		list.innerHTML = `<div class="vc-empty"><div class="vc-empty-icon">✅</div><div class="vc-empty-title">Không có sự cố${S.filter === "open" ? " đang mở" : ""}</div></div>`;
+ 		return;
+ 	}
+-	list.innerHTML = `<div class="vc-list">${rows.map(card).join("")}</div>`;
++	const more = S.data.has_more
++		? `<button class="vc-btn-ghost vc-btn-block vc-mt-2" id="sc-more">Xem tiếp (đã hiện ${rows.length}/${S.data.total})</button>`
++		: "";
++	list.innerHTML = `<div class="vc-list">${rows.map(card).join("")}</div>${more}`;
+ 	list.querySelectorAll("[data-upd]").forEach((b) => b.addEventListener("click", () => openUpdate(b.dataset.upd)));
++	const mb = document.getElementById("sc-more");
++	if (mb) mb.addEventListener("click", () => { S.page += 1; load(); });
+ }
+ 
+ function card(r) {
+@@ -129,12 +146,17 @@ function card(r) {
+ function openCreate() {
+ 	S.selSi = null;
+ 	const loaiOpts = LOAI.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join("");
++	const huongOpts = HUONG.map((h) => `<option value="${escapeHtml(h)}">${h ? escapeHtml(h) : "— chưa chọn —"}</option>`).join("");
+ 	const body = `
+ 		<div class="vc-field"><label>Tìm đơn (giao qua đơn vị VC)</label>
+ 			<input class="vc-input" id="sc-si-q" placeholder="Mã đơn / khách / PO..." autocomplete="off" /></div>
+ 		<div id="sc-si-res" class="vc-mb-2"></div>
+ 		<div id="sc-si-chosen" class="vc-mb-2"></div>
+ 		<div class="vc-field"><label>Loại sự cố *</label><select class="vc-input" id="sc-loai">${loaiOpts}</select></div>
++		<div class="vc-field"><label>Hướng xử lý</label><select class="vc-input" id="sc-huong">${huongOpts}</select>
++			<div class="vc-text-sm vc-text-muted vc-mt-1">Quyết định chứng từ kế toán phải làm. Để trống thì phiếu nằm ở rổ "chưa phân loại" bên kế toán.</div></div>
++		<div class="vc-field"><label>Ngày xảy ra *</label><input class="vc-input" id="sc-ngay" type="date" />
++			<div class="vc-text-sm vc-text-muted vc-mt-1">Ngày sự việc xảy ra ở điểm giao, KHÔNG phải hôm nay. Nhà xe báo trễ thì sửa lùi lại.</div></div>
+ 		<div class="vc-flex vc-gap-2" style="flex-wrap:wrap">
+ 			<div class="vc-field" style="flex:1;min-width:120px"><label>Số kiện ảnh hưởng</label><input class="vc-input" id="sc-kien" type="number" min="0" step="1" /></div>
+ 			<div class="vc-field" style="flex:1;min-width:120px"><label>Giá trị ảnh hưởng</label><input class="vc-input" id="sc-gt" type="number" min="0" step="1000" /></div>
+@@ -145,6 +167,7 @@ function openCreate() {
+ 	const content = showModal({ title: "Ghi nhận sự cố", body, footer });
+ 	if (!content) return;
+ 	const q = (id) => content.querySelector("#" + id);
++	q("sc-ngay").value = new Date().toISOString().slice(0, 10);
+ 
+ 	let tt = null;
+ 	q("sc-si-q").addEventListener("input", (e) => {
+@@ -182,8 +205,11 @@ function openCreate() {
+ 			gia_tri_anh_huong: Number(q("sc-gt").value) || 0,
+ 			mo_ta: q("sc-mota").value.trim(),
+ 			nguoi_phu_trach: q("sc-npt").value.trim(),
++			huong_xu_ly: q("sc-huong").value,
++			ngay_phat_sinh: q("sc-ngay").value,
+ 			trang_thai: "Mới",
+ 		};
++		if (!payload.ngay_phat_sinh) { showToast("Chọn ngày xảy ra", "warning"); return; }
+ 		const btn = q("sc-save");
+ 		btn.disabled = true;
+ 		try {
+diff --git a/vanchuyen/van_chuyen/doctype/su_co_hang_ve/__init__.py b/vanchuyen/van_chuyen/doctype/su_co_hang_ve/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/vanchuyen/van_chuyen/doctype/su_co_hang_ve/su_co_hang_ve.json b/vanchuyen/van_chuyen/doctype/su_co_hang_ve/su_co_hang_ve.json
+new file mode 100644
+index 0000000..45d38a8
+--- /dev/null
++++ b/vanchuyen/van_chuyen/doctype/su_co_hang_ve/su_co_hang_ve.json
+@@ -0,0 +1,112 @@
++{
++ "actions": [],
++ "allow_rename": 0,
++ "creation": "2026-08-31 00:00:00",
++ "doctype": "DocType",
++ "editable_grid": 1,
++ "engine": "InnoDB",
++ "field_order": [
++  "item_code",
++  "item_name",
++  "uom",
++  "col_sl",
++  "sl_tra",
++  "sl_ve",
++  "sl_nhap_lai",
++  "sl_hong",
++  "col_tien",
++  "don_gia",
++  "tien_mat_duong"
++ ],
++ "fields": [
++  {
++   "fieldname": "item_code",
++   "fieldtype": "Link",
++   "options": "Item",
++   "label": "Mã hàng",
++   "in_list_view": 1,
++   "reqd": 1,
++   "columns": 2
++  },
++  {
++   "fieldname": "item_name",
++   "fieldtype": "Data",
++   "label": "Tên hàng",
++   "fetch_from": "item_code.item_name",
++   "read_only": 1,
++   "in_list_view": 1,
++   "columns": 3
++  },
++  {
++   "fieldname": "uom",
++   "fieldtype": "Link",
++   "options": "UOM",
++   "label": "ĐVT",
++   "fetch_from": "item_code.stock_uom",
++   "read_only": 1
++  },
++  {
++   "fieldname": "col_sl",
++   "fieldtype": "Column Break"
++  },
++  {
++   "fieldname": "sl_tra",
++   "fieldtype": "Float",
++   "label": "SL siêu thị trả",
++   "in_list_view": 1,
++   "columns": 1,
++   "description": "Theo biên bản nhà xe / phiếu trả. Số này ghi giảm công nợ."
++  },
++  {
++   "fieldname": "sl_ve",
++   "fieldtype": "Float",
++   "label": "SL thực về sân",
++   "in_list_view": 1,
++   "columns": 1,
++   "description": "Lệch với SL siêu thị trả = MẤT TRÊN ĐƯỜNG → căn cứ đòi nhà xe."
++  },
++  {
++   "fieldname": "sl_nhap_lai",
++   "fieldtype": "Float",
++   "label": "SL lọc dùng được",
++   "in_list_view": 1,
++   "columns": 1
++  },
++  {
++   "fieldname": "sl_hong",
++   "fieldtype": "Float",
++   "label": "SL hỏng, bỏ",
++   "in_list_view": 1,
++   "columns": 1
++  },
++  {
++   "fieldname": "col_tien",
++   "fieldtype": "Column Break"
++  },
++  {
++   "fieldname": "don_gia",
++   "fieldtype": "Currency",
++   "label": "Đơn giá",
++   "description": "Lấy từ dòng hàng của hóa đơn gốc. Để quy phần mất trên đường ra tiền."
++  },
++  {
++   "fieldname": "tien_mat_duong",
++   "fieldtype": "Currency",
++   "label": "Tiền mất trên đường",
++   "read_only": 1,
++   "description": "(SL siêu thị trả − SL thực về) × đơn giá. Máy tính, không gõ tay."
++  }
++ ],
++ "index_web_pages_for_search": 1,
++ "istable": 1,
++ "links": [],
++ "modified": "2026-08-31 00:00:00",
++ "modified_by": "Administrator",
++ "module": "Van Chuyen",
++ "name": "Su Co Hang Ve",
++ "owner": "Administrator",
++ "permissions": [],
++ "sort_field": "modified",
++ "sort_order": "DESC",
++ "states": []
++}
+diff --git a/vanchuyen/van_chuyen/doctype/su_co_hang_ve/su_co_hang_ve.py b/vanchuyen/van_chuyen/doctype/su_co_hang_ve/su_co_hang_ve.py
+new file mode 100644
+index 0000000..3f97ece
+--- /dev/null
++++ b/vanchuyen/van_chuyen/doctype/su_co_hang_ve/su_co_hang_ve.py
+@@ -0,0 +1,22 @@
++"""Su Co Hang Ve — một mã hàng trong lần hàng quay về.
++
++BA số lượng, không phải một — và phiếu trả hàng bên ERPNext chỉ giữ số đầu:
++
++    sl_tra       siêu thị trả bao nhiêu  -> ghi giảm công nợ
++    sl_ve        thực về sân bao nhiêu   -> lệch = MẤT TRÊN ĐƯỜNG
++    sl_nhap_lai  lọc ra dùng được        -> + sl_hong phải bằng sl_ve
++
++Gộp ba số này làm một là mất đúng thông tin đáng tiền nhất: phần chênh giữa
++`sl_tra` và `sl_ve` là căn cứ đòi nhà xe, và KHÔNG chứng từ kế toán nào ghi nó.
++
++VÌ SAO BẢNG NÀY Ở `vanchuyen` CHỨ KHÔNG Ở `ketoan`: hai trong ba số lượng
++(`sl_ve`, `sl_nhap_lai`) chỉ điều phối và thủ kho biết, mà họ không vào được
++portal kế toán. Đặt bảng bên kia là bắt kế toán chép lại số của người khác —
++và việc chép lại thì hai tuần nữa sẽ không ai chép.
++"""
++
++from frappe.model.document import Document
++
++
++class SuCoHangVe(Document):
++	pass
+diff --git a/vanchuyen/van_chuyen/doctype/su_co_van_chuyen/su_co_van_chuyen.json b/vanchuyen/van_chuyen/doctype/su_co_van_chuyen/su_co_van_chuyen.json
+index 58317c3..634a5f1 100644
+--- a/vanchuyen/van_chuyen/doctype/su_co_van_chuyen/su_co_van_chuyen.json
++++ b/vanchuyen/van_chuyen/doctype/su_co_van_chuyen/su_co_van_chuyen.json
+@@ -24,6 +24,20 @@
+   "sec_mota",
+   "mo_ta",
+   "dinh_kem",
++  "sec_hang_ve",
++  "hang_ve_trang_thai",
++  "ngay_du_kien_ve",
++  "col_hang_ve",
++  "ngay_hang_ve",
++  "stock_entry",
++  "sec_items",
++  "items",
++  "tong_mat_duong",
++  "sec_boi_thuong",
++  "boi_thuong_trang_thai",
++  "boi_thuong_so_tien",
++  "col_bt",
++  "boi_thuong_ghi_chu",
+   "sec_xuly",
+   "huong_xu_ly",
+   "nguoi_phu_trach",
+@@ -32,40 +46,250 @@
+   "ghi_chu_xu_ly"
+  ],
+  "fields": [
+-  {"default": "SC-.YYYY.-.####", "fieldname": "naming_series", "fieldtype": "Select", "hidden": 1, "label": "Series", "options": "SC-.YYYY.-.####", "print_hide": 1, "set_only_once": 1},
+-  {"fieldname": "sales_invoice", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "Đơn hàng (SI)", "options": "Sales Invoice", "reqd": 1},
+-  {"fetch_from": "sales_invoice.customer_name", "fieldname": "customer", "fieldtype": "Data", "in_list_view": 1, "label": "Khách hàng", "read_only": 1},
+-  {"fieldname": "hinh_thuc", "fieldtype": "Data", "in_standard_filter": 1, "label": "Đơn vị vận chuyển", "read_only": 1},
+-  {"fieldname": "col_break_head", "fieldtype": "Column Break"},
+-  {"default": "Today", "fieldname": "ngay_phat_sinh", "fieldtype": "Date", "in_list_view": 1, "label": "Ngày phát sinh", "reqd": 1},
+-  {"fieldname": "loai_su_co", "fieldtype": "Select", "in_list_view": 1, "in_standard_filter": 1, "label": "Loại sự cố", "options": "Hoàn hàng\nGiao một phần\nHư hỏng, móp méo\nChờ xử lý chứng từ\nChậm, thất lạc\nKhách từ chối, sai địa chỉ\nKhác", "reqd": 1},
+-  {"default": "Mới", "fieldname": "trang_thai", "fieldtype": "Select", "in_list_view": 1, "in_standard_filter": 1, "label": "Trạng thái xử lý", "options": "Mới\nĐang xử lý\nĐã xử lý\nĐóng"},
+-  {"fieldname": "sec_ref", "fieldtype": "Section Break", "label": "Thông tin đơn"},
+-  {"fieldname": "po", "fieldtype": "Data", "label": "Số PO", "read_only": 1},
+-  {"fieldname": "tinh", "fieldtype": "Data", "label": "Tỉnh", "read_only": 1},
+-  {"fieldname": "col_break_ref", "fieldtype": "Column Break"},
+-  {"fieldname": "so_kien_anh_huong", "fieldtype": "Float", "label": "Số kiện ảnh hưởng"},
+-  {"fieldname": "gia_tri_anh_huong", "fieldtype": "Currency", "label": "Giá trị ảnh hưởng"},
+-  {"fieldname": "sec_mota", "fieldtype": "Section Break", "label": "Mô tả"},
+-  {"fieldname": "mo_ta", "fieldtype": "Small Text", "label": "Mô tả sự cố"},
+-  {"fieldname": "dinh_kem", "fieldtype": "Attach Image", "label": "Đính kèm (biên bản/ảnh)"},
+-  {"fieldname": "sec_xuly", "fieldtype": "Section Break", "label": "Xử lý"},
+-  {"fieldname": "huong_xu_ly", "fieldtype": "Select", "label": "Hướng xử lý", "options": "\nGiao lại\nHoàn toàn bộ\nGiao một phần\nBồi thường\nGiảm trừ công nợ\nHủy đơn\nKhác"},
+-  {"fieldname": "nguoi_phu_trach", "fieldtype": "Data", "label": "Người phụ trách"},
+-  {"fieldname": "col_break_xuly", "fieldtype": "Column Break"},
+-  {"fieldname": "ngay_dong", "fieldtype": "Date", "label": "Ngày đóng", "read_only": 1},
+-  {"fieldname": "ghi_chu_xu_ly", "fieldtype": "Small Text", "label": "Ghi chú xử lý"}
++  {
++   "default": "SC-.YYYY.-.####",
++   "fieldname": "naming_series",
++   "fieldtype": "Select",
++   "hidden": 1,
++   "label": "Series",
++   "options": "SC-.YYYY.-.####",
++   "print_hide": 1,
++   "set_only_once": 1
++  },
++  {
++   "fieldname": "sales_invoice",
++   "fieldtype": "Link",
++   "in_list_view": 1,
++   "in_standard_filter": 1,
++   "label": "Đơn hàng (SI)",
++   "options": "Sales Invoice",
++   "reqd": 1
++  },
++  {
++   "fetch_from": "sales_invoice.customer_name",
++   "fieldname": "customer",
++   "fieldtype": "Data",
++   "in_list_view": 1,
++   "label": "Khách hàng",
++   "read_only": 1
++  },
++  {
++   "fieldname": "hinh_thuc",
++   "fieldtype": "Data",
++   "in_standard_filter": 1,
++   "label": "Đơn vị vận chuyển",
++   "read_only": 1
++  },
++  {
++   "fieldname": "col_break_head",
++   "fieldtype": "Column Break"
++  },
++  {
++   "default": "Today",
++   "fieldname": "ngay_phat_sinh",
++   "fieldtype": "Date",
++   "in_list_view": 1,
++   "label": "Ngày xảy ra",
++   "reqd": 1,
++   "description": "Ngày sự việc XẢY RA ở điểm giao, KHÔNG phải ngày điều phối nhập. Nhà xe báo về trễ vài ngày là chuyện thường — tính tuổi từ ngày nhập sẽ giấu mất đúng phần chậm đó."
++  },
++  {
++   "fieldname": "loai_su_co",
++   "fieldtype": "Select",
++   "in_list_view": 1,
++   "in_standard_filter": 1,
++   "label": "Loại sự cố",
++   "options": "Hoàn hàng\nGiao một phần\nHư hỏng, móp méo\nChờ xử lý chứng từ\nChậm, thất lạc\nKhách từ chối, sai địa chỉ\nHàng date / thời vụ\nGiao nhầm\nHàng lỗi nhà sản xuất\nKhác",
++   "reqd": 1
++  },
++  {
++   "default": "Mới",
++   "fieldname": "trang_thai",
++   "fieldtype": "Select",
++   "in_list_view": 1,
++   "in_standard_filter": 1,
++   "label": "Trạng thái xử lý",
++   "options": "Mới\nĐang xử lý\nĐã xử lý\nĐóng"
++  },
++  {
++   "fieldname": "sec_ref",
++   "fieldtype": "Section Break",
++   "label": "Thông tin đơn"
++  },
++  {
++   "fieldname": "po",
++   "fieldtype": "Data",
++   "label": "Số PO",
++   "read_only": 1
++  },
++  {
++   "fieldname": "tinh",
++   "fieldtype": "Data",
++   "label": "Tỉnh",
++   "read_only": 1
++  },
++  {
++   "fieldname": "col_break_ref",
++   "fieldtype": "Column Break"
++  },
++  {
++   "fieldname": "so_kien_anh_huong",
++   "fieldtype": "Float",
++   "label": "Số kiện ảnh hưởng"
++  },
++  {
++   "fieldname": "gia_tri_anh_huong",
++   "fieldtype": "Currency",
++   "label": "Giá trị ảnh hưởng"
++  },
++  {
++   "fieldname": "sec_mota",
++   "fieldtype": "Section Break",
++   "label": "Mô tả"
++  },
++  {
++   "fieldname": "mo_ta",
++   "fieldtype": "Small Text",
++   "label": "Mô tả sự cố"
++  },
++  {
++   "fieldname": "dinh_kem",
++   "fieldtype": "Attach Image",
++   "label": "Đính kèm (biên bản/ảnh)"
++  },
++  {
++   "fieldname": "sec_hang_ve",
++   "fieldtype": "Section Break",
++   "label": "Hàng quay về"
++  },
++  {
++   "fieldname": "hang_ve_trang_thai",
++   "fieldtype": "Select",
++   "options": "Chưa về\nĐang về\nĐã về sân\nĐã lọc xong",
++   "label": "Trạng thái hàng về",
++   "default": "Chưa về",
++   "in_standard_filter": 1
++  },
++  {
++   "fieldname": "ngay_du_kien_ve",
++   "fieldtype": "Date",
++   "label": "Dự kiến về"
++  },
++  {
++   "fieldname": "col_hang_ve",
++   "fieldtype": "Column Break"
++  },
++  {
++   "fieldname": "ngay_hang_ve",
++   "fieldtype": "Date",
++   "label": "Ngày về sân"
++  },
++  {
++   "fieldname": "stock_entry",
++   "fieldtype": "Link",
++   "options": "Stock Entry",
++   "label": "Phiếu nhập lại kho",
++   "description": "Thủ kho lập sau khi lọc. Hàng trả KHÔNG tự vào kho (phiếu trả để update_stock = 0) — chưa có phiếu này thì hàng vẫn nằm ngoài sổ."
++  },
++  {
++   "fieldname": "sec_items",
++   "fieldtype": "Section Break",
++   "label": "Chi tiết mã hàng"
++  },
++  {
++   "fieldname": "items",
++   "fieldtype": "Table",
++   "options": "Su Co Hang Ve",
++   "label": "Mã hàng"
++  },
++  {
++   "fieldname": "tong_mat_duong",
++   "fieldtype": "Currency",
++   "label": "Tiền mất trên đường",
++   "read_only": 1,
++   "description": "Cộng từ bảng trên. Đây là số đi đòi nhà xe — SUY TỪ LƯỢNG LỆCH, không gõ tay."
++  },
++  {
++   "fieldname": "sec_boi_thuong",
++   "fieldtype": "Section Break",
++   "label": "Bồi thường nhà xe"
++  },
++  {
++   "fieldname": "boi_thuong_trang_thai",
++   "fieldtype": "Select",
++   "options": "\nChưa đòi\nĐã đòi\nĐã thu\nKhông đòi",
++   "label": "Trạng thái đòi bồi thường",
++   "in_standard_filter": 1
++  },
++  {
++   "fieldname": "boi_thuong_so_tien",
++   "fieldtype": "Currency",
++   "label": "Số tiền đòi",
++   "description": "Mặc định bằng tiền mất trên đường, CHO SỬA: nhà xe đền một phần theo thỏa thuận thì số thỏa thuận mới là số phải theo."
++  },
++  {
++   "fieldname": "col_bt",
++   "fieldtype": "Column Break"
++  },
++  {
++   "fieldname": "boi_thuong_ghi_chu",
++   "fieldtype": "Small Text",
++   "label": "Ghi chú đòi bồi thường"
++  },
++  {
++   "fieldname": "sec_xuly",
++   "fieldtype": "Section Break",
++   "label": "Xử lý"
++  },
++  {
++   "fieldname": "huong_xu_ly",
++   "fieldtype": "Select",
++   "label": "Hướng xử lý",
++   "options": "\nGiao lại\nHoàn toàn bộ\nGiao một phần\nBồi thường\nGiảm trừ công nợ\nHủy đơn\nKhác",
++   "description": "Quyết định chứng từ kế toán phải làm. Để trống thì phiếu rơi vào rổ 'chưa phân loại' bên portal kế toán, không mất nhưng không ai làm được gì."
++  },
++  {
++   "fieldname": "nguoi_phu_trach",
++   "fieldtype": "Data",
++   "label": "Người phụ trách"
++  },
++  {
++   "fieldname": "col_break_xuly",
++   "fieldtype": "Column Break"
++  },
++  {
++   "fieldname": "ngay_dong",
++   "fieldtype": "Date",
++   "label": "Ngày đóng",
++   "read_only": 1
++  },
++  {
++   "fieldname": "ghi_chu_xu_ly",
++   "fieldtype": "Small Text",
++   "label": "Ghi chú xử lý"
++  }
+  ],
+  "index_web_pages_for_search": 1,
+  "is_submittable": 0,
+  "links": [],
+- "modified": "2026-01-01 00:00:00",
++ "modified": "2026-08-31 00:00:00",
+  "module": "Van Chuyen",
+  "name": "Su Co Van Chuyen",
+  "naming_rule": "By \"Naming Series\" field",
+  "owner": "Administrator",
+  "permissions": [
+-  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1}
++  {
++   "create": 1,
++   "delete": 1,
++   "email": 1,
++   "export": 1,
++   "print": 1,
++   "read": 1,
++   "report": 1,
++   "role": "System Manager",
++   "share": 1,
++   "write": 1
++  }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+diff --git a/vanchuyen/van_chuyen/doctype/su_co_van_chuyen/su_co_van_chuyen.py b/vanchuyen/van_chuyen/doctype/su_co_van_chuyen/su_co_van_chuyen.py
+index 0fd4c37..c4364cf 100644
+--- a/vanchuyen/van_chuyen/doctype/su_co_van_chuyen/su_co_van_chuyen.py
++++ b/vanchuyen/van_chuyen/doctype/su_co_van_chuyen/su_co_van_chuyen.py
+@@ -6,7 +6,7 @@ trong màn Điều hành. KHÔNG đụng 2 trường custom_hình_thức/_trạn
+ 
+ import frappe
+ from frappe.model.document import Document
+-from frappe.utils import nowdate
++from frappe.utils import flt, nowdate
+ 
+ DONG = ("Đã xử lý", "Đóng")
+ 
+@@ -22,11 +22,33 @@ class SuCoVanChuyen(Document):
+ 			self.tinh = frappe.db.get_value("Sales Invoice", si, "custom_tỉnh")
+ 
+ 	def validate(self):
++		self._roll_hang_ve()
+ 		if self.trang_thai in DONG and not self.ngay_dong:
+ 			self.ngay_dong = nowdate()
+ 		elif self.trang_thai not in DONG:
+ 			self.ngay_dong = None
+ 
++	def _roll_hang_ve(self):
++		"""Tiền mất trên đường = (SL siêu thị trả − SL thực về) × đơn giá.
++
++		SUY TỪ LƯỢNG LỆCH, không cho gõ tay. Số đi đòi nhà xe mà gõ tay được thì
++		nó là ý kiến; suy từ lượng đo được thì nó là bằng chứng.
++
++		Chỉ tính phần DƯƠNG. SL về nhiều hơn SL trả không phải "nhà xe nợ mình số
++		âm" — đó là gõ nhầm số, và để nó trừ ngược vào tổng là giấu một lỗi nhập
++		liệu bằng một lỗi nhập liệu khác.
++		"""
++		tong = 0.0
++		for r in (self.items or []):
++			thieu = max(flt(r.sl_tra) - flt(r.sl_ve), 0.0)
++			r.tien_mat_duong = round(thieu * flt(r.don_gia), 2)
++			tong += r.tien_mat_duong
++		self.tong_mat_duong = round(tong, 2)
++		# Gợi ý số đòi = số đo được, nhưng CHO SỬA: nhà xe đền một phần theo thỏa
++		# thuận thì con số thỏa thuận mới là số phải theo dõi.
++		if not flt(self.boi_thuong_so_tien) and tong:
++			self.boi_thuong_so_tien = self.tong_mat_duong
++
+ 	def on_update(self):
+ 		_stamp_si(self.sales_invoice)
+ 
+-- 
+2.43.0
+
