@@ -107,6 +107,12 @@ FILTERS = (F_CHUA_NOI, F_LECH_TIEN, F_DA_KHOP)
 
 MAX_CANDIDATES = 6
 
+# Trần rổ ứng viên quét một lượt. Chạm trần thì màn hình PHẢI nói ra: rổ đầy
+# rồi lặng lẽ bỏ phần còn lại thì dòng nào không tìm được hóa đơn sẽ hiện
+# "chuỗi chưa gán khách, hoặc hóa đơn chưa ghi sổ" — hai nguyên nhân đều SAI,
+# và kế toán đi kiểm hai thứ hoàn toàn lành lặn.
+CAND_CAP = 4000
+
 
 def _tables():
     if not frappe.db.has_column(LINE, "variance_kind"):
@@ -148,12 +154,19 @@ def _candidates(chain, company, amounts):
 
     Chuỗi chưa gán khách nào -> rổ RỖNG, không phải "mọi hóa đơn": gợi ý lấy từ
     chuỗi khác là mời người dùng nối tiền LOTTE vào hóa đơn AEON.
+
+    Hóa đơn ĐÃ THU ĐỦ bị loại khỏi rổ (`pd.paid`). Một hóa đơn đã nhận đủ tiền
+    ở bảng kê tháng trước mà vẫn hiện lên như ứng viên "chắc chắn" cho một dòng
+    tháng này là mời ghi có hai lần trên cùng một khoản nợ — và vì hai dòng nằm
+    ở hai bảng kê khác nhau, không màn hình nào bày cả hai cạnh nhau để ai đó
+    kịp thấy. Trả GÓP thì KHÔNG bị loại: `pd.paid` mới bằng một phần, và
+    "một hóa đơn trả nhiều kỳ" là chuyện thường ở kênh này (Co.op tách 8 kỳ).
     """
     if not amounts:
-        return []
+        return [], False
     names = chain_customers(chain)
     if not names:
-        return []
+        return [], False
 
     p = {"company": company}
     keys = []
@@ -176,14 +189,25 @@ def _candidates(chain, company, amounts):
                {_si_col(SI_NO_FIELD)} AS inv_no,
                {ship} AS ship_to
         FROM `tabSales Invoice` si
+        LEFT JOIN (
+            SELECT l.sales_invoice AS si, SUM(ABS(l.total_amount)) AS paid
+            FROM `tab{LINE}` l
+            INNER JOIN `tab{ADVICE}` a ON a.name = l.parent
+            WHERE l.parenttype = %(pt)s AND l.row_kind = %(kind)s
+              AND a.docstatus < 2
+              AND l.sales_invoice IS NOT NULL AND l.sales_invoice != ''
+            GROUP BY l.sales_invoice
+        ) pd ON pd.si = si.name
         WHERE si.docstatus = 1 AND si.company = %(company)s
           AND si.is_return = 0
           AND ABS(si.grand_total) BETWEEN %(lo)s AND %(hi)s
+          AND IFNULL(pd.paid, 0) < ABS(si.grand_total) - %(tol)s
           AND {cus}
         ORDER BY si.posting_date DESC
-        LIMIT 4000
-    """, p, as_dict=True)
-    return rows
+        LIMIT %(cap)s
+    """, dict(p, cap=CAND_CAP + 1, pt=ADVICE, kind=KIND_PAYMENT,
+              tol=PAID_TOLERANCE), as_dict=True)
+    return rows[:CAND_CAP], len(rows) > CAND_CAP
 
 
 def _rank(line, invoices):
@@ -261,6 +285,28 @@ def get_statement_reconcile(advice, company=None, filter=None, page=1, page_size
           "pd": a.payment_date}, as_dict=True)
 
     linked = [cstr(l.sales_invoice) for l in lines if l.sales_invoice]
+    # Tiền ĐÃ TRẢ cho từng hóa đơn, cộng trên MỌI bảng kê — không chỉ bảng kê
+    # đang mở.
+    #
+    # ⚠ ĐÂY LÀ CHỖ BẢN ĐẦU SAI NẶNG NHẤT. Nó so MỘT dòng với TOÀN BỘ hóa đơn,
+    # trong khi cả app mô hình hóa "một hóa đơn được trả làm nhiều lần" là
+    # chuyện thường — `relink_line` ghi hẳn trong docstring: "Co.op tách 8 kỳ,
+    # LOTTE 2 ngày thanh toán". Hóa đơn 3.200.000 trả làm 8 kỳ 400.000 thì CẢ
+    # TÁM dòng bị chấm "lệch tiền 2.800.000", chip đếm 8 việc không có thật, và
+    # bấm "Giải trình" một dòng là ghi 2.800.000 vào ô phần lệch của một dòng
+    # không thiếu một đồng.
+    paid_map = {}
+    if linked:
+        for r in frappe.db.sql(f"""
+            SELECT l.sales_invoice AS si, SUM(ABS(l.total_amount)) AS paid
+            FROM `tab{LINE}` l
+            INNER JOIN `tab{ADVICE}` a ON a.name = l.parent
+            WHERE l.parenttype = %(pt)s AND l.row_kind = %(kind)s
+              AND a.docstatus < 2 AND l.sales_invoice IN %(n)s
+            GROUP BY l.sales_invoice
+        """, {"pt": ADVICE, "kind": KIND_PAYMENT,
+              "n": tuple(set(linked))}, as_dict=True):
+            paid_map[r.si] = flt(r.paid)
     si_map = {}
     if linked:
         ship = _si_col("shipping_address_name")
@@ -275,7 +321,7 @@ def get_statement_reconcile(advice, company=None, filter=None, page=1, page_size
             si_map[r.name] = r
 
     need = [abs(flt(l.total_amount)) for l in lines if not l.sales_invoice]
-    pool = _candidates(a.chain, company, need) if need else []
+    pool, pool_cut = _candidates(a.chain, company, need) if need else ([], False)
 
     rows, n_chua, n_lech, n_khop, n_auto = [], 0, 0, 0, 0
     for l in lines:
@@ -292,6 +338,7 @@ def get_statement_reconcile(advice, company=None, filter=None, page=1, page_size
             "variance_amount": flt(l.variance_amount),
             "variance_note": cstr(l.variance_note or ""),
             "candidates": [], "auto": None, "gap": None, "invoice": None,
+            "paid_total": None, "one_of_many": False,
         }
         if d["sales_invoice"]:
             si = si_map.get(d["sales_invoice"])
@@ -302,7 +349,15 @@ def get_statement_reconcile(advice, company=None, filter=None, page=1, page_size
                     "inv_no": cstr(si.inv_no or ""), "ship_to": cstr(si.ship_to or ""),
                     "customer_name": cstr(si.customer_name or ""),
                 }
-                d["gap"] = round(d["amount"] - flt(si.amount), 2)
+                # `gap` là của CẢ HÓA ĐƠN, và so hai GIÁ TRỊ TUYỆT ĐỐI.
+                #
+                # File của Central Retail / Emart mang số tiền ÂM cho dòng
+                # thanh toán; so thẳng số có dấu với `ABS(grand_total)` thì
+                # mọi dòng đã khớp đúng vẫn ra "lệch gấp đôi số tiền".
+                d["paid_total"] = flt(paid_map.get(d["sales_invoice"],
+                                                   abs(d["amount"])))
+                d["gap"] = round(d["paid_total"] - abs(flt(si.amount)), 2)
+                d["one_of_many"] = abs(d["paid_total"] - abs(d["amount"])) > PAID_TOLERANCE
             # LỆCH TIỀN chỉ tính khi CHƯA ai ghi nhãn. Ghi nhãn rồi thì nó
             # không còn là câu hỏi bỏ ngỏ — nhưng tiền vẫn thiếu, và phần thiếu
             # đó nằm ở công nợ chứ không nằm ở đây.
@@ -350,6 +405,10 @@ def get_statement_reconcile(advice, company=None, filter=None, page=1, page_size
         "matched": n_all - n_chua,
         "lines": n_all,
         "auto_ready": n_auto,
+        # Rổ ứng viên chạm trần -> "không tìm thấy" ở dưới có thể do CẮT chứ
+        # không do dữ liệu. Nói ra, đừng để người đi kiểm nhầm chỗ.
+        "pool_truncated": bool(pool_cut),
+        "pool_cap": CAND_CAP,
         "variance_kinds": list(VARIANCE_KINDS),
         "tolerance": PAID_TOLERANCE,
         "can_manage": is_chief(),
@@ -389,13 +448,23 @@ def bulk_link(advice, company=None):
     _load(advice, company)
 
     data = get_statement_reconcile(advice, company=company, page_size=100)
-    done, failed = [], []
+    done, failed, clashed = [], [], []
+    taken = set()
     while True:
         todo = [r for r in data["rows"] if r.get("auto")]
         for r in todo:
+            si = r["auto"]["sales_invoice"]
+            if si in taken:
+                # `_auto_ok` chỉ dám nói "dòng này có ĐÚNG MỘT hóa đơn ứng".
+                # Nó KHÔNG nói chiều ngược lại. Hai dòng bảng kê cùng chỉ về một
+                # hóa đơn mà nhận cả hai là ghi có hai lần trên một khoản nợ —
+                # đúng cái lỗ MT2-G. Dòng thứ hai để người xử lý tay.
+                clashed.append({"line": r["line"], "sales_invoice": si})
+                continue
             try:
-                link_statement_line(r["line"], r["auto"]["sales_invoice"])
-                done.append({"line": r["line"], "sales_invoice": r["auto"]["sales_invoice"]})
+                link_statement_line(r["line"], si)
+                done.append({"line": r["line"], "sales_invoice": si})
+                taken.add(si)
             except Exception as e:  # noqa: BLE001
                 # Một dòng hỏng KHÔNG được kéo theo cả lượt: phần còn lại vẫn
                 # nối được, và dòng hỏng phải hiện ra kèm lý do chứ không im.
@@ -405,9 +474,14 @@ def bulk_link(advice, company=None):
         data = get_statement_reconcile(advice, company=company,
                                        page=data["page"] + 1, page_size=100)
 
+    msg = _("Đã nối {0} dòng.").format(len(done))
+    if failed:
+        msg += _(" {0} dòng không nối được.").format(len(failed))
+    if clashed:
+        msg += _(" {0} dòng cùng chỉ về một hóa đơn đã nối — để lại cho bạn chọn.").format(
+            len(clashed))
     return {"linked": len(done), "rows": done, "failed": failed,
-            "message": _("Đã nối {0} dòng.").format(len(done))
-            + (_(" {0} dòng không nối được.").format(len(failed)) if failed else "")}
+            "clashed": clashed, "message": msg}
 
 
 @frappe.whitelist()
@@ -456,32 +530,64 @@ def explain_variance(line, deduction_type, note=None, company=None):
                              ["grand_total"], as_dict=True)
     if not si:
         frappe.throw(_("Không tìm thấy hóa đơn {0}").format(row.sales_invoice))
-    gap = round(abs(flt(si.grand_total)) - abs(flt(row.total_amount)), 2)
+
+    # ĐO TRÊN CẢ HÓA ĐƠN — cùng một phép với `get_statement_reconcile`. Một hóa
+    # đơn được chuỗi trả làm nhiều kỳ thì từng kỳ nhỏ hơn hóa đơn là bình
+    # thường; so một kỳ với cả tờ rồi ghi phần chênh vào ô "phần lệch" là ghi
+    # một con số không tồn tại.
+    paid = flt(frappe.db.sql(f"""
+        SELECT SUM(ABS(l.total_amount)) FROM `tab{LINE}` l
+        INNER JOIN `tab{ADVICE}` a ON a.name = l.parent
+        WHERE l.parenttype = %(pt)s AND l.row_kind = %(kind)s
+          AND a.docstatus < 2 AND l.sales_invoice = %(si)s
+    """, {"pt": ADVICE, "kind": KIND_PAYMENT, "si": row.sales_invoice})[0][0])
+
+    # MỘT QUY ƯỚC DẤU cho cả module: `gap = tiền chuỗi trả − tiền hóa đơn`.
+    # Âm = chuỗi trả THIẾU. Đúng dấu mà `get_statement_reconcile` trả ra và màn
+    # hình in ra. Ghi ngược dấu thì ô `variance_amount` trên Desk đọc +18.000
+    # trong khi màn hình ghi −18.000 cho cùng một dòng.
+    gap = round(paid - abs(flt(si.grand_total)), 2)
     if abs(gap) <= PAID_TOLERANCE:
         frappe.throw(_(
-            "Dòng này không lệch tiền (chênh {0}đ, trong sai số {1}đ) — không có gì "
-            "để giải trình.").format(gap, PAID_TOLERANCE))
+            "Hóa đơn {0} không lệch tiền: chuỗi đã trả {1}đ cho hóa đơn {2}đ (chênh "
+            "{3}đ, trong sai số {4}đ) — không có gì để giải trình."
+        ).format(row.sales_invoice, paid, abs(flt(si.grand_total)), gap, PAID_TOLERANCE))
 
     doc.db_set({"variance_kind": deduction_type,
                 "variance_amount": gap,
                 "variance_note": cstr(note or "") or None}, update_modified=False)
     return {"line": line, "variance_kind": deduction_type, "variance_amount": gap,
-            "message": _("Đã ghi nhận {0}: {1}đ. Khoản này VẪN còn trên công nợ cho "
-                         "tới khi có bút toán ở bước Bút toán.").format(deduction_type, gap)}
+            "message": _("Đã ghi nhận {0}: chuỗi trả {1} {2}đ cho hóa đơn {3}. Khoản này "
+                         "VẪN còn trên công nợ cho tới khi có bút toán ở bước Bút toán."
+                         ).format(deduction_type, _("thiếu") if gap < 0 else _("vượt"),
+                                  abs(gap), row.sales_invoice)}
 
 
 @frappe.whitelist()
-def commit_statement(advice, expected_hash=None, company=None):
-    """Chốt bảng kê và sinh bút toán NHÁP — hai bước, giữ nguyên chốt của B5.
+def commit_statement(advice, company=None):
+    """CHỐT bảng kê: đánh dấu ĐÃ ĐỐI CHIẾU. Bút toán do modal cũ sinh.
 
-    Không hash  -> đánh dấu đã đối chiếu và TRẢ VỀ bản xem trước + vân tay.
-    Có hash     -> ủy quyền `mt_je.create_journal_entries`.
+    ════════════════════════════════════════════════════════════════════════
+    VÌ SAO MỘT BƯỚC, KHÔNG PHẢI HAI
+    ════════════════════════════════════════════════════════════════════════
 
-    Giữ hai bước là có chủ đích: `create_journal_entries` đòi vân tay của bản
-    xem trước để chắc dữ liệu không đổi giữa chừng. Gộp thành một lời gọi rồi
-    tự tính hash ở server là tự ký thay cho người — đúng cái chốt đó sinh ra để
-    chặn. Và hệ **không bao giờ** submit: bút toán ra ở trạng thái nháp, chờ
-    người duyệt ở bước B5.
+    Bản đầu chia hai: gọi lần đầu trả bản xem trước, gọi lần hai kèm vân tay
+    thì mới ghi `reconciled = 1` và sinh bút toán. Nhưng màn hình chỉ gọi MỘT
+    lần rồi mở modal bút toán cũ — mà modal đó gọi thẳng
+    `mt_je.create_journal_entries`. Nhánh thứ hai **không bao giờ chạy**:
+
+      · bảng kê KHÔNG BAO GIỜ được đánh dấu đã đối chiếu;
+      · màn hình vừa hiện chữ "Đã chốt";
+      · modal bút toán mở ra ngay sau đó gắn nhãn "chưa tick đối chiếu khớp";
+      · và bảng kê ở lại nhóm "Bảng kê chưa đối chiếu" của hàng đợi việc vĩnh
+        viễn — đúng cái việc mà nút này sinh ra để đóng.
+
+    Bốn câu trái nhau trong một giây. Sửa cho khớp việc thật: **chốt là chốt** —
+    người vừa xem xong ba vế và khẳng định phần khớp đã xong, nên ghi ngay tại
+    đây. Bút toán vẫn do modal cũ sinh, vì chốt chặn vân tay của `mt_je` thuộc
+    về nó: người phải NHÌN bản xem trước rồi mới bấm sinh.
+
+    Hàm này KHÔNG sinh bút toán và KHÔNG bao giờ submit.
     """
     guard_manager()
     _require_tables()
@@ -489,28 +595,26 @@ def commit_statement(advice, expected_hash=None, company=None):
     company = _company(company)
     a = _load(advice, company)
 
-    from ketoan.api import mt_je
+    left = cint(frappe.db.sql(f"""
+        SELECT COUNT(*) FROM `tab{LINE}` l
+        WHERE l.parent = %(a)s AND l.parenttype = %(pt)s
+          AND l.row_kind = %(kind)s AND IFNULL(l.sales_invoice, '') = ''
+    """, {"a": a.name, "pt": ADVICE, "kind": KIND_PAYMENT})[0][0])
 
-    if not expected_hash:
-        left = frappe.db.sql(f"""
-            SELECT COUNT(*) FROM `tab{LINE}` l
-            WHERE l.parent = %(a)s AND l.parenttype = %(pt)s
-              AND l.row_kind = %(kind)s AND IFNULL(l.sales_invoice, '') = ''
-        """, {"a": a.name, "pt": ADVICE, "kind": KIND_PAYMENT})[0][0]
-        # Dòng chưa nối KHÔNG chặn việc chốt — có bảng kê mãi mãi còn một dòng
-        # không tìm được hóa đơn, và chặn cứng thì cả bảng kê treo. Nhưng phải
-        # NÓI RA số dòng bị bỏ lại, ngay trên nút bấm.
-        pre = mt_je.preview_journal_entries(a.name, company=company)
-        pre["unlinked"] = cint(left)
-        pre["advice"] = a.name
-        return pre
-
+    # Dòng chưa nối KHÔNG chặn việc chốt — có bảng kê mãi mãi còn một dòng không
+    # tìm được hóa đơn, và chặn cứng thì cả bảng kê treo. Nhưng phải NÓI RA số
+    # dòng bị bỏ lại: chúng không vào bút toán nào cả.
     frappe.db.set_value(ADVICE, a.name, {"reconciled": 1, "status": "Đã đối chiếu"},
                         update_modified=False)
-    out = mt_je.create_journal_entries(a.name, expected_hash=expected_hash,
-                                       company=company)
-    out["advice"] = a.name
-    return out
+    return {
+        "advice": a.name,
+        "advice_no": cstr(a.advice_no or "") or a.name,
+        "reconciled": 1,
+        "unlinked": left,
+        "message": _("Đã chốt bảng kê {0}.").format(cstr(a.advice_no or "") or a.name)
+        + (_(" Còn {0} dòng chưa nối hóa đơn — chúng KHÔNG vào bút toán.").format(left)
+           if left else ""),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
