@@ -188,11 +188,18 @@ def main():
           "custom_mt_credit_days" in dbt.get("due_expr", "")
           and "due_date > " in dbt.get("due_expr", ""))
     check("dòng cộng tính trên CẢ bộ lọc, không phải trang đang xem",
-          '{base}' in ip and 'SUM({_REMAIN})' in ip)
+          '{base}' in ip and '{_REMAIN} ELSE 0 END) AS remaining' in ip)
+    # Phiếu trả hàng CÓ trong danh sách nhưng KHÔNG có trong phép cộng: với một
+    # phiếu trả `_REMAIN` vẫn dương, nên cộng thẳng là dòng tổng ghi "còn nợ"
+    # đúng bằng số tiền của một lần bán đã bị hủy.
+    check("phiếu trả hàng không lọt vào phép cộng tiền phải thu",
+          'sale = "si.is_return = 0"' in ip and "WHEN {sale} THEN {_REMAIN}" in ip)
+    check("và vẫn ĐẾM RIÊNG để dòng tổng nói ra chúng có mặt",
+          "n_returns" in ip and "returns_amt" in ip)
     check("và cộng bằng ĐÚNG mệnh đề của danh sách (`base` dùng chung)",
           ip.count("{base}") >= 3, f"{ip.count('{base}')} lần dùng")
     check("phần QUÁ HẠN cộng riêng, dùng cùng biểu thức tuổi nợ",
-          "WHEN {od} > 0 THEN" in ip)
+          "{od} > 0 THEN {_REMAIN}" in ip)
     check("và đếm luôn số tờ CHƯA KHAI HẠN (không nằm trong cả hai vế)",
           "n_no_term" in ip)
 
@@ -248,10 +255,22 @@ def main():
     rb = func_bodies(os.path.join(API, "mt_reconcile.py"))
     check("nối dòng ỦY QUYỀN cho `mt.relink_line`, không viết lại",
           "relink_line" in rb.get("link_statement_line", ""))
-    check("sinh bút toán ỦY QUYỀN cho `mt_je`",
-          "mt_je.create_journal_entries" in rb.get("commit_statement", ""))
-    check("và giữ nguyên hai bước vân tay của `mt_je`",
-          "expected_hash" in rb.get("commit_statement", ""))
+    # CHỐT ≠ SINH BÚT TOÁN. `commit_statement` chỉ đánh dấu đã đối chiếu; bút
+    # toán vẫn do modal `mt_je` cũ sinh, vì chốt chặn vân tay hai bước thuộc về
+    # nó — người phải NHÌN bản xem trước rồi mới bấm. Sinh ở đây là sinh bút
+    # toán cho một bản xem trước chưa ai xem.
+    cs = rb.get("commit_statement", "")
+    check("`commit_statement` KHÔNG tự sinh bút toán",
+          "create_journal_entries" not in cs and "Journal Entry" not in cs)
+    check("và KHÔNG bao giờ submit gì",
+          ".submit(" not in cs and "docstatus" not in cs)
+    check("nhưng THẬT SỰ ghi `reconciled = 1` (bản đầu chốt xong vẫn chưa chốt)",
+          '"reconciled": 1' in cs and "set_value" in cs)
+    check("và nói ra số dòng bị bỏ lại — chúng không vào bút toán nào",
+          '"unlinked"' in cs and "COUNT(*)" in cs)
+    check("bút toán đi qua ĐÚNG modal `mt_je` cũ, không dựng bản thứ hai",
+          "openJePreview(" in js_body(js, "openJePreviewFor")
+          and "mtJePreview" not in js_body(js, "renderReconcile"))
     check("bút toán ra ở trạng thái NHÁP — màn hình nói rõ",
           "bút toán NHÁP" in js_body(js, "renderReconcile"))
     check("`Nhận hết` chỉ nhận gợi ý mức 1 và DUY NHẤT",
@@ -267,24 +286,50 @@ def main():
     check("`explain_variance` KHÔNG đụng `total_amount`",
           "total_amount" not in ev.split("gap = ")[-1].split("doc.db_set")[0]
           or "doc.db_set" in ev)
+    # MÁY SUY: chữ ký hàm KHÔNG có tham số số tiền, và giá trị ghi xuống là
+    # `gap` vừa tính. Cho gõ tay thì con số đi giải trình là một ý kiến.
+    import inspect
+    ev_args = list(inspect.signature(rec_mod.explain_variance).parameters)
     check("số tiền phần lệch MÁY SUY, không cho gõ tay",
-          "gap = round(abs(flt(si.grand_total)) - abs(flt(row.total_amount)), 2)" in ev)
+          not any(a in ev_args for a in ("amount", "variance_amount", "gap")),
+          ", ".join(ev_args))
+    check('và ô ghi xuống lấy ĐÚNG `gap` vừa tính',
+          '"variance_amount": gap' in ev and "gap = round(" in ev)
+    # ĐO TRÊN CẢ HÓA ĐƠN. So MỘT kỳ trả với CẢ tờ là ghi một con số không tồn
+    # tại: Co.op tách 8 kỳ thì kỳ nào cũng "lệch" bằng 7 phần còn lại.
+    check("phần lệch đo trên CẢ hóa đơn, không phải một dòng bảng kê",
+          "SUM(ABS(l.total_amount))" in ev and "l.sales_invoice = %(si)s" in ev)
+    check("và cùng QUY ƯỚC DẤU với màn hình (âm = chuỗi trả thiếu)",
+          "gap = round(paid - abs(flt(si.grand_total)), 2)" in ev)
     check("và màn hình NÓI RÕ khoản đó vẫn còn trên công nợ",
           "VẪN còn trên công nợ" in ev)
     rec_src = code_only(os.path.join(API, "mt_reconcile.py"))
     check("module đối soát KHÔNG nhắc `return_invoice` ở bất kỳ đâu",
           "return_invoice" not in rec_src)
     # Ba ô `variance_*` không được lọt vào một phép cộng tiền nào của cả app.
+    #
+    # Bản đầu gắt đến mức vô nghĩa: hễ một hàm vừa nhắc `variance_amount` vừa có
+    # chữ `SUM(` là báo đỏ — mà `get_statement_reconcile` phải làm cả hai (cộng
+    # tiền đã trả, và ĐỌC nhãn ra để hiện). Nên nó bắt đúng hàm lành. Ở đây bắt
+    # cái thật: `variance_amount` NẰM TRONG một biểu thức cộng tiền.
     money = []
+    var_money = [
+        r"SUM\s*\([^)]*variance_amount",                    # cộng thẳng trong SQL
+        r"variance_amount[^\n]*[-+]\s*(?:flt\(|paid|remaining|total_amount|grand_total)",
+        r"(?:paid|remaining|gap|total|due)\w*\s*[-+]?=[^\n=]*variance_amount",
+        r"variance_amount[^\n]*\bAS\s+(?:paid|remaining|amount|due)\b",
+    ]
     for fn in sorted(os.listdir(API)):
         if not fn.endswith(".py"):
             continue
         for name, body in func_bodies(os.path.join(API, fn)).items():
             if "variance_amount" not in body:
                 continue
-            if any(m in body for m in ("SUM(", "IFNULL(p.paid", "clawed_back")):
-                money.append(f"{fn}::{name}")
-    check("không hàm nào vừa cộng tiền vừa đọc `variance_amount`", not money,
+            for pat in var_money:
+                if re.search(pat, body):
+                    money.append(f"{fn}::{name}")
+                    break
+    check("không phép cộng tiền nào ăn vào `variance_amount`", not money,
           ", ".join(money) or "sạch")
 
     # ── 5b. Hai nút hàng loạt: một cái LÀM ĐƯỢC, một cái CỐ Ý KHÔNG ─────
@@ -314,6 +359,98 @@ def main():
     rvj = js_body(js, "renderReverseMatch")
     check("modal in câu 'vẫn còn nợ' cho hóa đơn không tìm được dòng nào",
           "vẫn còn nợ" in rvj)
+
+    # ── 5c. Vòng soát 2: những chỗ hai con số cùng nói về một thứ ───────
+    #
+    # Năm lỗi dưới đây có chung một hình dạng: hai bản ghi CÙNG một sự thật,
+    # rồi một bản đi trước bản kia. Không cái nào nổ ra lỗi — chúng chỉ hiện số
+    # cũ, và số cũ trông y hệt số mới.
+    print("-" * 82)
+    print("── 5c. Không hai bản ghi nào cùng nói về một sự thật ────────────────")
+
+    bl = rb.get("bulk_link", "")
+    check("`Nhận hết` không nối HAI dòng vào CÙNG một hóa đơn",
+          "taken" in bl and "clashed.append" in bl and "taken.add(" in bl)
+    check("và trả danh sách dòng bị bỏ lại để màn hình bày ra",
+          '"clashed": clashed' in bl)
+    check("màn hình ĐỌC danh sách đó, không lặng lẽ báo thành công",
+          "out.clashed" in js_body(js, "bindReconcile"))
+    cnd = rb.get("_candidates", "")
+    check("rổ ứng viên LOẠI hóa đơn đã thu đủ",
+          "pd.paid" in cnd and "ABS(si.grand_total) - %(tol)s" in cnd)
+    check("nhưng KHÔNG loại hóa đơn mới trả một phần (Co.op tách 8 kỳ)",
+          "IFNULL(pd.paid, 0) <" in cnd and "= ABS(si.grand_total)" not in cnd)
+
+    # Ngày mặc định: `toISOString()` là ngày Ở UTC. Việt Nam UTC+7 nên từ 00:00
+    # tới 07:00 mỗi ngày nó trả HÔM QUA — và `new Date(y, m, 1).toISOString()`
+    # ra ngày CUỐI THÁNG TRƯỚC, nên preset "Tháng này" không bao giờ khớp lại
+    # với chính nó để tô nút.
+    stray = []
+    for root, _d, files in os.walk(PORTAL):
+        for fn in files:
+            if not fn.endswith(".js"):
+                continue
+            fp = os.path.join(root, fn)
+            for i, ln in enumerate(open(fp, encoding="utf-8"), 1):
+                if "toISOString" in ln and not ln.lstrip().startswith("//"):
+                    stray.append(f"{fn}:{i}")
+    check("không file portal nào còn lấy ngày hôm nay theo giờ UTC", not stray,
+          ", ".join(stray) or "sạch")
+    fmt = open(os.path.join(PORTAL, "lib", "format.js"), encoding="utf-8").read()
+    check("`isoDate` dựng ngày từ getFullYear/getMonth/getDate của MÁY",
+          "getFullYear()" in fmt and "getDate()" in fmt and "isoDate" in fmt)
+    check("và màn MT dùng nó cho cả preset lẫn hai ô ngày",
+          "isoDate" in js and "const iso = isoDate" in js)
+
+    # Ô tích và bộ đếm phải được chốt CÙNG một lúc.
+    pf = js_body(js, "pickedFor")
+    check("rổ chọn chốt LÚC VẼ (`pickedFor`), không phải lúc gắn sự kiện",
+          "state.pickedKey" in pf and "new Set()" in pf)
+    check("và `invoiceTable` gọi nó trước khi vẽ dòng",
+          "pickedFor(state, res)" in js_body(js, "invoiceTable"))
+    check("`bindInvoiceTable` KHÔNG chốt lại (chốt lại là ô tích mà đếm 0)",
+          "state.pickedKey" not in bit)
+    check("ô 'cả trang' theo các ô con, kể cả trạng thái nửa vời",
+          "indeterminate" in bit)
+
+    # Hàng đợi việc: MỘT chuyến bay, và kết quả về muộn thì vứt.
+    ew = js_body(js, "ensureWorklist")
+    check("`ensureWorklist` nhớ cả CHUYẾN ĐANG BAY, không chỉ kết quả",
+          "state.wlPending) return state.wlPending" in ew)
+    check("và kết quả về sau một lần xóa hàng đợi thì bị VỨT",
+          "wlGen" in ew and "state.wlGen === gen" in ew)
+    iw = js_body(js, "invalidateWorklist")
+    check("xóa hàng đợi xóa cả chuyến đang bay",
+          "wlPending" in iw and "wlGen" in iw)
+    check("nối/gỡ tay cũng xóa hàng đợi (số trên thanh là số người tin nhất)",
+          "invalidateWorklist(state)" in js_body(js, "openRelinkModal"))
+
+    # Modal đối soát đổi dữ liệu -> màn phía sau phải theo kịp, dù đóng bằng
+    # lối nào.
+    md = open(os.path.join(PORTAL, "components", "modal.js"), encoding="utf-8").read()
+    check("`openModal` có `onClose`, chạy ĐÚNG MỘT LẦN cho cả ba lối đóng",
+          "if (onClose) onClose();" in md and "let closed = false" in md
+          and "if (closed) return;" in md)
+    orc = js_body(js, "openReconcile")
+    check("modal đối soát nạp lại màn phía sau khi CÓ thay đổi",
+          "onClose" in orc and "loadTab(container, state)" in orc)
+    check("và KHÔNG nạp lại khi người ta chỉ mở ra xem",
+          "if (!st.dirty) return" in orc)
+    brc = js_body(js, "bindReconcile")
+    check("mọi hành động đổi dữ liệu đều đánh dấu `dirty`",
+          brc.count("st.dirty = true") >= 5, f"{brc.count('st.dirty = true')} chỗ")
+    check("`Chọn tay` mở từ trong modal thì nạp lại MODAL, không phải nền",
+          "openRelinkModal(container, state, b.dataset.recfind, \"\", ()" in brc)
+
+    # Hai con số cách nhau 50px không được cùng mang một cái tên.
+    cshell = js_body(js, "chainShell")
+    wbar = js_body(js, "worklistBar")
+    check("số việc ở đầu màn nói rõ nó đếm MỌI BƯỚC",
+          "việc ở mọi bước" in cshell)
+    check("số việc trên thanh nói rõ nó đếm MỘT bước",
+          "việc ở bước Đối soát thanh toán" in wbar)
+    check("và không còn hai chỗ cùng ghi 'việc đang chờ'",
+          "việc đang chờ" not in cshell and "việc đang chờ" not in wbar)
 
     # ── 6. Điều hướng · tiền tố CSS ─────────────────────────────────────
     print("-" * 82)

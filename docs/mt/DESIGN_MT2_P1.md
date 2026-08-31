@@ -1029,6 +1029,58 @@ Panel thu về 300px dưới 1440px, và `table_width_check` có thêm mục **"
 trong bố cục hai cột"** — dựng lại đúng `.ktmt-split` rồi đo, để lần sau ai đổi
 bề rộng panel là biết ngay.
 
+#### Vòng soát: năm chỗ hai bản ghi cùng nói về MỘT sự thật
+
+Vòng soát đối kháng trên MT2-AO tìm ra một họ lỗi có chung hình dạng — hai chỗ
+cùng ghi lại một sự thật, rồi một chỗ đi trước chỗ kia. Không cái nào nổ ra lỗi.
+Chúng chỉ hiện số cũ, và **số cũ trông y hệt số mới**.
+
+| chỗ | hai bản ghi | hậu quả |
+|---|---|---|
+| `bulk_link` | `_auto_ok` chỉ xét *dòng → hóa đơn*, không xét chiều ngược | hai dòng bảng kê nhận cùng một hóa đơn: **ghi có hai lần trên một khoản nợ** |
+| `_candidates` | rổ ứng viên không hỏi hóa đơn đã thu đủ chưa | hóa đơn nhận đủ tiền tháng trước vẫn hiện là ứng viên "chắc chắn" tháng này |
+| `ensureWorklist` | `paint` gọi cho thanh, `loadTab` gọi cho panel | hai request, hai ảnh chụp, hai con số trên **cùng một màn hình** |
+| ô tích | `invoiceTable` đọc rổ cũ, `bindInvoiceTable` thay rổ sau đó | ô hiện ĐÃ TÍCH trong khi bộ đếm ghi "0 hóa đơn" và nút mờ đi |
+| modal đối soát | modal nạp lại, màn phía sau thì không | đóng modal ra vẫn thấy "12 dòng chưa nối" cho bảng kê vừa nối xong |
+
+`bulk_link` là cái đắt nhất: `_auto_ok` **chỉ dám nói** "dòng này có đúng một
+hóa đơn ứng". Nó không nói gì về chiều ngược lại, và nhận hàng loạt đọc lời hứa
+đó rộng hơn nó thật sự nói. Nay có `taken`, và dòng thứ hai ra `clashed` để
+người chọn — chứ không im.
+
+Bốn chỗ còn lại chữa bằng cách **cho một chỗ làm chủ**: rổ chọn chốt lúc VẼ
+(`pickedFor`), hàng đợi nhớ cả chuyến đang bay (`wlPending` + `wlGen`, kết quả
+về muộn hơn một lần xóa thì vứt), và `openModal` có `onClose` chạy đúng một lần
+cho cả ba lối đóng (nút X · bấm nền · Esc) — ba lối mà chỉ một lối gọi lại thì
+màn hình giữ số cũ đúng trong hai trường hợp kia.
+
+#### Ngày mặc định lấy theo giờ London
+
+`new Date().toISOString().slice(0, 10)` đọc như "hôm nay". Nó là hôm nay **ở
+UTC**. Việt Nam là UTC+7, nên từ 00:00 tới 07:00 mỗi ngày nó trả về HÔM QUA —
+lặng lẽ, và chỉ trong bảy tiếng đó, nên kiểm tay lúc chín giờ sáng không bao giờ
+thấy.
+
+Preset ngày dính nặng hơn: `new Date(y, m, 1)` là **nửa đêm giờ địa phương**,
+quy sang UTC ra 17:00 ngày hôm trước. "Tháng này" vì vậy bắt đầu từ ngày cuối
+tháng trước, và `activePreset` — vốn so lại đúng công thức ấy với hai ô ngày —
+không bao giờ khớp để tô nút.
+
+Cùng một dòng ấy được chép ở **tám** chỗ trong portal. Sửa mỗi `mt.js` thì bảy
+bản còn lại vẫn sai và lần sau ai đó chép tiếp từ bản sai, nên `isoDate()` về
+`lib/format.js` và cả tám chỗ gọi nó. `ui_mt_check` mục 5c quét toàn bộ portal:
+còn một chữ `toISOString` ngoài chú thích là đỏ.
+
+#### Hai con số cách nhau 50px không được cùng mang một cái tên
+
+Đầu màn chuỗi ghi "13 việc đang chờ" (`get_board`, cộng **mọi bước**). Ngay dưới
+đó, thanh việc ghi "8 việc đang chờ bạn" (`get_chain_worklist`, **một bước**).
+Cả hai đều đúng; đặt cạnh nhau với cùng một cái tên thì ít nhất một cái là nói
+dối, và người đọc không có cách nào biết cái nào.
+
+Nay đầu màn ghi **"việc ở mọi bước"** — cộng đúng bằng tổng các badge trên dãy
+tab, kiểm được bằng mắt — và thanh ghi **"việc ở bước Đối soát thanh toán"**.
+
 #### Điều KHÔNG được đổi, và đã có phép kiểm canh
 
 Khối **"Hai cách theo dõi công nợ"** + dòng **"Sổ cái TK 131 — số dư thật trên

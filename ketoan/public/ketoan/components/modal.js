@@ -1,7 +1,8 @@
 // modal.js — modal overlay tái dùng. openModal trả về {root, close, body}.
 import { setHTML } from "../lib/dom.js";
 
-export function openModal({ title = "", body = "", icon = "fa-circle-info", maxWidth = 520 } = {}) {
+export function openModal({ title = "", body = "", icon = "fa-circle-info", maxWidth = 520,
+                            onClose = null } = {}) {
   const overlay = document.createElement("div");
   overlay.className = "kt-modal-overlay is-show";
   overlay.innerHTML = `
@@ -16,9 +17,16 @@ export function openModal({ title = "", body = "", icon = "fa-circle-info", maxW
   const bodyEl = overlay.querySelector(".kt-modal-body");
   setHTML(bodyEl, body);
 
+  // `onClose` chạy ĐÚNG MỘT LẦN, dù đóng bằng nút X, bấm ra nền hay Esc. Ba lối
+  // đóng mà chỉ một lối gọi lại là màn hình phía sau giữ số cũ đúng trong hai
+  // trường hợp kia — và người dùng không có cách nào biết mình đang nhìn số cũ.
+  let closed = false;
   function close() {
+    if (closed) return;
+    closed = true;
     overlay.classList.remove("is-show");
     setTimeout(() => overlay.remove(), 180);
+    if (onClose) onClose();
   }
   overlay.querySelector(".kt-modal-close").addEventListener("click", close);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });

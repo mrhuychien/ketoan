@@ -820,7 +820,7 @@ function chainShell(state, board) {
           <i class="fas fa-store"></i> ${state.chain}
         </div>
         <div class="kt-sub">
-          ${c.todo ? `${c.todo} việc đang chờ` : "Không còn việc nào trong khoảng đang xem"} ·
+          ${c.todo ? `${c.todo} việc ở mọi bước` : "Không còn việc nào trong khoảng đang xem"} ·
           còn nợ ${formatVNDShort(c.debt)}${c.debt_overdue ? ` · quá hạn ${formatVNDShort(c.debt_overdue)}` : ""}
         </div>
       </div>
@@ -1585,10 +1585,28 @@ function bindPager(container, state) {
 // KHÔNG tự vẽ thanh chọn rổ ở đây: `loadTab` đã vẽ MỘT thanh chung cho cả bốn
 // rổ (kể cả "Khoản chuỗi trừ lại"). Bản cũ vẽ ở cả hai chỗ nên trên màn hình
 // có hai thanh chọn chồng nhau, mỗi thanh biết một phần sự thật.
+// Ô chọn theo TRANG. Giữ qua trang thì thanh ghi "3 hóa đơn" trong khi màn hình
+// không hiện tờ nào đang được chọn, và hành động hàng loạt chạy lên những tờ
+// người dùng không nhìn thấy. Trang/rổ đổi -> bỏ chọn.
+//
+// ⚠ Phải chốt Ở ĐÂY, trước khi vẽ. Bản cũ chốt trong `bindInvoiceTable`, tức là
+// SAU khi `invoiceRow` đã đọc rổ cũ để đặt `checked`: đổi trang là màn hình hiện
+// vài ô ĐÃ TÍCH trong khi bộ đếm nói "0 hóa đơn" và hai nút mờ đi. Người dùng
+// thấy ba ô tích và một nút không bấm được, không có gì giải thích.
+function pickedFor(state, res) {
+  const key = `${res.bucket}|${res.page}|${res.sort}|${res.total}`;
+  if (state.pickedKey !== key) {
+    state.picked = new Set();
+    state.pickedKey = key;
+  }
+  return state.picked;
+}
+
 function invoiceTable(state, res) {
   const tol = res.tolerance || 0;
   const t = res.totals || null;
-  const picked = state.picked || (state.picked = new Set());
+  const picked = pickedFor(state, res);
+  const allOn = res.rows.length > 0 && res.rows.every((r) => picked.has(r.name));
   return html`
     <div class="kt-card">
       ${!res.rows.length
@@ -1596,7 +1614,7 @@ function invoiceTable(state, res) {
             <p>Không có hóa đơn nào trong rổ này.</p></div></div>`
         : html`
           <div class="ktmt-bulkbar">
-            <input type="checkbox" id="inv-all" title="Chọn cả trang">
+            <input type="checkbox" id="inv-all" title="Chọn cả trang" ${allOn ? "checked" : ""}>
             <span>Chọn để <b id="inv-n">${picked.size || 0}</b> hóa đơn —
               <button class="kt-btn kt-btn--outline kt-btn--sm" id="inv-bulk-bk" disabled>Gán vào bảng kê</button>
               <button class="kt-btn kt-btn--outline kt-btn--sm" id="inv-bulk-paid" disabled>Đánh dấu đã thu</button>
@@ -1713,31 +1731,34 @@ function invoiceRow(r, tol, canManage, picked) {
 }
 
 function bindInvoiceTable(container, state, res) {
-  // Ô chọn theo TRANG. Giữ qua trang thì thanh ghi "3 hóa đơn" trong khi màn
-  // hình không hiện tờ nào đang được chọn, và hành động hàng loạt chạy lên
-  // những tờ người dùng không nhìn thấy. Trang/rổ đổi -> bỏ chọn.
-  const key = `${res.bucket}|${res.page}|${res.sort}|${res.total}`;
-  if (state.pickedKey !== key) {
-    state.picked = new Set();
-    state.pickedKey = key;
-  }
-  const picked = state.picked;
+  // Rổ chọn đã được `pickedFor` chốt lúc vẽ — ở đây KHÔNG chốt lại, vì chốt lại
+  // sau khi HTML đã đọc rổ cũ là đúng cái lệch "ô tích mà bộ đếm nói 0".
+  const picked = state.picked || (state.picked = new Set());
+  const boxes = [...container.querySelectorAll("input.inv-pick")];
   const nEl = container.querySelector("#inv-n");
+  const all = container.querySelector("#inv-all");
   const bulkBtns = ["#inv-bulk-bk", "#inv-bulk-paid"]
     .map((id) => container.querySelector(id)).filter(Boolean);   // chỉ để bật/tắt
   const sync = () => {
     if (nEl) nEl.textContent = String(picked.size);
     bulkBtns.forEach((b) => { b.disabled = !picked.size; });
+    // Ô "cả trang" phải theo các ô con, nếu không nó còn tích trong khi người
+    // dùng vừa bỏ tích một dòng — và cú bấm tiếp theo lên nó sẽ BỎ chọn hết
+    // thay vì chọn hết, ngược hẳn với cái nó đang hiện.
+    if (all) {
+      const on = boxes.filter((cb) => cb.checked).length;
+      all.checked = boxes.length > 0 && on === boxes.length;
+      all.indeterminate = on > 0 && on < boxes.length;
+    }
   };
-  container.querySelectorAll("input.inv-pick").forEach((cb) => {
+  boxes.forEach((cb) => {
     cb.addEventListener("change", () => {
       if (cb.checked) picked.add(cb.dataset.si); else picked.delete(cb.dataset.si);
       sync();
     });
   });
-  const all = container.querySelector("#inv-all");
   if (all) all.addEventListener("change", () => {
-    container.querySelectorAll("input.inv-pick").forEach((cb) => {
+    boxes.forEach((cb) => {
       cb.checked = all.checked;
       if (all.checked) picked.add(cb.dataset.si); else picked.delete(cb.dataset.si);
     });
@@ -1976,7 +1997,11 @@ function bindRelink(container, state) {
   });
 }
 
-function openRelinkModal(container, state, line, currentSI) {
+// `onDone` cho người gọi tự quyết nạp lại CÁI GÌ. Mở từ bảng thì nạp lại bảng;
+// mở từ trong modal đối soát thì nạp lại modal đó — nạp lại nền trong khi modal
+// vẫn mở là sửa một màn hình người dùng không nhìn thấy, còn màn họ đang nhìn
+// giữ nguyên số cũ.
+function openRelinkModal(container, state, line, currentSI, onDone) {
   const modal = openModal({
     title: "Chốt tay liên kết dòng bảng kê",
     icon: "fa-link",
@@ -2005,8 +2030,11 @@ function openRelinkModal(container, state, line, currentSI) {
     try {
       await api.mtRelinkLine(line, si || null, note());
       toast(si ? "Đã chốt liên kết" : "Đã gỡ liên kết", "success");
+      // Nối/gỡ đổi đúng những con số hàng đợi đang đếm. Quên chỗ này thì thanh
+      // trên đầu giữ số của lúc mở màn, và nó là con số người ta tin nhất.
+      invalidateWorklist(state);
       modal.close();
-      loadTab(container, state);
+      if (onDone) onDone(); else loadTab(container, state);
     } catch (e) {
       toast(e.message, "error");
       if (btn) btn.disabled = false;
@@ -7758,16 +7786,32 @@ const WL_GROUP_TONE = {
 async function ensureWorklist(state) {
   const key = `${state.chain}|${state.from}|${state.to}`;
   if (state.wlKey === key && state.wl) return state.wl;
-  try {
-    state.wl = await api.mtChainWorklist(state.chain, { from_date: state.from, to_date: state.to });
-    state.wlKey = key;
-  } catch (_e) {
-    // Thanh việc hỏng KHÔNG được chặn cả bàn làm việc: phần còn lại vẫn dùng
-    // được, chỉ mất một lối tắt.
-    state.wl = null;
-    state.wlKey = key;
-  }
-  return state.wl;
+  // ⚠ Phải nhớ cả CHUYẾN ĐANG BAY, không chỉ kết quả. `paint` gọi hàm này cho
+  // thanh trên đầu rồi gọi `loadTab` ngay, mà `loadTab` cũng gọi nó cho panel;
+  // cả hai xuất phát trước khi chuyến đầu về, nên bản cũ bắn HAI request và
+  // thanh với panel đọc hai ảnh chụp ở hai thời điểm — nối một dòng đúng lúc
+  // đó là hai con số lệch nhau ngay trên cùng một màn hình.
+  if (state.wlKey === key && state.wlPending) return state.wlPending;
+  state.wlKey = key;
+  const gen = (state.wlGen = (state.wlGen || 0) + 1);
+  state.wlPending = (async () => {
+    let wl = null;
+    try {
+      wl = await api.mtChainWorklist(state.chain, { from_date: state.from, to_date: state.to });
+    } catch (_e) {
+      // Thanh việc hỏng KHÔNG được chặn cả bàn làm việc: phần còn lại vẫn dùng
+      // được, chỉ mất một lối tắt.
+      wl = null;
+    }
+    // Về muộn hơn một lần `invalidateWorklist` thì VỨT: ghi đè bằng số chụp
+    // TRƯỚC cú nối là bày lại đúng con số vừa cũ đi.
+    if (state.wlGen === gen) {
+      state.wl = wl;
+      state.wlPending = null;
+    }
+    return wl;
+  })();
+  return state.wlPending;
 }
 
 function worklistBar(state, wl) {
@@ -7784,7 +7828,7 @@ function worklistBar(state, wl) {
   return html`<div class="ktmt-worklist">
     <div class="ktmt-worklist-icon"><i class="fas fa-triangle-exclamation"></i></div>
     <div>
-      <div class="ktmt-worklist-title">${wl.total} việc đang chờ bạn</div>
+      <div class="ktmt-worklist-title">${wl.total} việc ở bước Đối soát thanh toán</div>
       <div class="ktmt-worklist-hint">bấm một mục để nhảy thẳng vào danh sách đã lọc</div>
     </div>
     <div style="display:flex;gap:8px;flex-grow:1;flex-wrap:wrap">
@@ -7898,13 +7942,23 @@ const REC_FILTERS = [
 ];
 
 async function openReconcile(container, state, advice) {
+  // `dirty` để KHÔNG nạp lại khi người ta chỉ mở ra xem rồi đóng: nạp lại vô cớ
+  // là cuộn trang về đầu và mất chỗ đang đọc.
+  const st = { advice, filter: "", page: 1, dirty: false };
   const modal = openModal({
     title: "Đối soát bảng kê",
     icon: "fa-scale-balanced",
     maxWidth: 1080,
     body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+    // Nối/gỡ/chốt trong modal đổi cả hàng đợi lẫn bảng phía sau. Không nạp lại
+    // thì đóng modal ra là màn hình vẫn ghi "12 dòng chưa nối" cho một bảng kê
+    // vừa nối xong — số cũ trông y hệt số mới, nên không ai nghi ngờ.
+    onClose: () => {
+      if (!st.dirty) return;
+      invalidateWorklist(state);
+      loadTab(container, state);
+    },
   });
-  const st = { advice, filter: "", page: 1 };
   await renderReconcile(container, state, modal, st);
 }
 
@@ -8103,6 +8157,7 @@ function bindReconcile(container, state, modal, st, d) {
       try {
         await api.mtReconLink(b.dataset.reclink, b.dataset.si);
         toast("Đã nối " + b.dataset.si, "success");
+        st.dirty = true;
         invalidateWorklist(state);
         reload();
       } catch (e) { toast(e.message, "error"); b.disabled = false; }
@@ -8114,6 +8169,7 @@ function bindReconcile(container, state, modal, st, d) {
       try {
         await api.mtReconLink(b.dataset.recunlink, "");
         toast("Đã gỡ liên kết", "success");
+        st.dirty = true;
         invalidateWorklist(state);
         reload();
       } catch (e) { toast(e.message, "error"); b.disabled = false; }
@@ -8133,6 +8189,7 @@ function bindReconcile(container, state, modal, st, d) {
       try {
         const out = await api.mtReconExplain(b.dataset.recvar, kind);
         toast(out.message || "Đã ghi nhận", "success");
+        st.dirty = true;
         reload();
       } catch (e) { toast(e.message, "error"); b.disabled = false; }
     });
@@ -8142,7 +8199,10 @@ function bindReconcile(container, state, modal, st, d) {
       // Chọn tay đi qua ĐÚNG modal cũ (`openRelinkModal`), không dựng một ô
       // tìm kiếm thứ hai: modal đó đã mang sẵn cảnh báo "hóa đơn này đã có
       // dòng khác trỏ tới" và luật chỉ-dòng-Thanh-toán-mới-nối.
-      openRelinkModal(container, state, b.dataset.recfind, "");
+      openRelinkModal(container, state, b.dataset.recfind, "", () => {
+        st.dirty = true;
+        reload();
+      });
     });
   });
 
@@ -8153,6 +8213,7 @@ function bindReconcile(container, state, modal, st, d) {
       const out = await api.mtReconBulk(st.advice);
       const soft = (out.failed && out.failed.length) || (out.clashed && out.clashed.length);
       toast(out.message, soft ? "warning" : "success");
+      st.dirty = true;
       invalidateWorklist(state);
       reload();
     } catch (e) { toast(e.message, "error"); bulk.disabled = false; }
@@ -8164,6 +8225,7 @@ function bindReconcile(container, state, modal, st, d) {
     try {
       const out = await api.mtReconCommit(st.advice);
       toast(out.message, out.unlinked ? "warning" : "success");
+      st.dirty = true;
       invalidateWorklist(state);
       modal.close();
       // Bản xem trước đi qua ĐÚNG modal bút toán cũ — nó là chỗ đã có đủ cảnh
@@ -8190,6 +8252,8 @@ function openJePreviewFor(container, state, advice, _out) {
 function invalidateWorklist(state) {
   state.wl = null;
   state.wlKey = "";
+  state.wlPending = null;
+  state.wlGen = (state.wlGen || 0) + 1;   // chuyến đang bay về sẽ bị vứt
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
