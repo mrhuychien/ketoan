@@ -79,6 +79,7 @@ CT_KHONG_CAN = "Không cần chứng từ"
 class MTHangHoan(Document):
     def validate(self):
         self._check_one_row_per_su_co()
+        self._check_one_row_per_credit_note()
         self._check_credit_note()
         self._derive_paper_status()
 
@@ -103,6 +104,33 @@ class MTHangHoan(Document):
                 "Phiếu sự cố {0} đã có trong sổ hàng hoàn ({1}). Mỗi lần hàng về "
                 "chỉ một dòng."
             ).format(self.su_co, dup), frappe.DuplicateEntryError)
+
+    def _check_one_row_per_credit_note(self):
+        """MỘT phiếu trả -> MỘT dòng sổ. Đây là mặt còn lại của cùng một lỗ.
+
+        Hóa đơn SI-1 móp lúc giao tháng 6 và bị trả hàng date tháng 8 -> hai
+        dòng sổ, và mỗi dòng cần MỘT phiếu trả riêng. Nếu cả hai cùng nối vào
+        RET-1 thì cả hai cùng suy ra `misa_no` của RET-1, cùng nhảy sang "Đã đủ
+        chứng từ", hàng đợi sạch bong — còn lần trả tháng 8 thì không ai lập
+        phiếu nữa. Đúng cái hại mà docstring của bảng này đã gọi tên: "phiếu
+        thứ hai không bao giờ được lập, công nợ thừa vĩnh viễn, và không màn
+        hình nào kêu".
+
+        Màn hình có khóa sẵn ô đã dùng (`_phieu_tra_ung_vien.da_dung`), nhưng
+        đó là khóa VẼ LÚC MỞ TRANG: hai người cùng mở trước khi ai kịp lưu thì
+        cả hai đều thấy nó còn trống. Và Desk thì chỉ có một ô Link trần. Chốt
+        chặn phải nằm ở đây.
+        """
+        if not self.credit_note:
+            return
+        dup = frappe.db.get_value(
+            "MT Hang Hoan",
+            {"credit_note": self.credit_note, "name": ["!=", self.name]}, "name")
+        if dup:
+            frappe.throw(_(
+                "Phiếu trả {0} đã nối vào dòng {1}. Mỗi phiếu trả chỉ thuộc MỘT lần "
+                "hàng về — lần này cần phiếu trả riêng của nó."
+            ).format(self.credit_note, dup), frappe.DuplicateEntryError)
 
     def _check_credit_note(self):
         """Phiếu trả phải là PHIẾU TRẢ, ĐÃ GHI SỔ, và trả cho ĐÚNG hóa đơn gốc."""
@@ -154,7 +182,16 @@ class MTHangHoan(Document):
             self.ngay_xong_giay = None
             return
         else:
-            self.misa_no = self.misa_no or _doc_no_of(self.credit_note)
+            # SUY LẠI TỪ ĐẦU, không giữ số cũ.
+            #
+            # `self.misa_no or _doc_no_of(...)` giữ số của phiếu trả CŨ khi kế
+            # toán đổi sang phiếu khác — và đổi phiếu là thao tác bình thường ở
+            # đây, vì một hóa đơn có thể có nhiều phiếu trả và màn hình bày ra
+            # cả danh sách để chọn. Chọn nhầm rồi chọn lại là dòng mang số chứng
+            # từ của một lần trả hàng khác mà vẫn báo "Đã đủ chứng từ".
+            #
+            # Ô này `read_only` nên không ai gõ tay vào — không có gì để mà giữ.
+            self.misa_no = _doc_no_of(self.credit_note)
             self.trang_thai_giay = GIAY_XONG if self.misa_no else GIAY_CHUA_CT
 
         if self.trang_thai_giay == GIAY_XONG and not self.ngay_xong_giay:

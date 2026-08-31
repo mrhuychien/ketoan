@@ -257,6 +257,68 @@ def _su_co_items(su_co):
 # CHỨNG TỪ PHÍA SIÊU THỊ — ĐỌC, KHÔNG CỘNG (MT2-AK)
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _ct_thue_expr(cn="cn"):
+    """Mệnh đề SQL: phiếu trả này ĐÃ có chứng từ thuế chưa — HỎI CẢ HAI PHÍA.
+
+    Cùng luật với `mt_hang_hoan._doc_no_of`, viết lại dưới dạng SQL để lọc và
+    đếm được. Phía mình: số hóa đơn thay thế/điều chỉnh trên chính phiếu trả.
+    Phía siêu thị: dòng `Ghi giảm` của bảng kê đã trỏ về phiếu trả này.
+
+    ⚠ HÀM NÀY CŨNG KHÔNG ĐƯỢC CỘNG TIỀN — nó nhắc `return_invoice`, và luật
+    MT2-AK cấm mọi hàm vừa nhắc ô đó vừa mang dấu hiệu cộng tiền. Ở đây chỉ có
+    `EXISTS`, không cột tiền nào.
+
+    Site chưa có ô nào để hỏi thì trả `0` — "chưa biết" phải rơi vào nhánh
+    CHƯA CÓ, không được biến thành "đã đủ".
+    """
+    parts = []
+    if frappe.db.has_column("Sales Invoice", SI_NO_FIELD):
+        parts.append(f"IFNULL({cn}.`{SI_NO_FIELD}`, '') != ''")
+    if (frappe.db.table_exists("MT Payment Advice Line")
+            and frappe.db.has_column("MT Payment Advice Line", "return_invoice")):
+        parts.append(
+            "EXISTS (SELECT 1 FROM `tabMT Payment Advice Line` l "
+            "INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent "
+            f"WHERE l.return_invoice = {cn}.name AND a.docstatus < 2)")
+    return "(" + " OR ".join(parts) + ")" if parts else "0"
+
+
+def _trang_thai_expr(h="h", cn="cn"):
+    """Trạng thái giấy tờ SUY LÚC ĐỌC, không đọc cột `h.trang_thai_giay`.
+
+    ════════════════════════════════════════════════════════════════════════
+    VÌ SAO KHÔNG LỌC THEO CỘT ĐÃ LƯU
+    ════════════════════════════════════════════════════════════════════════
+
+    Cột đó chỉ được tính trong `validate()`, tức chỉ lúc có người BẤM LƯU. Mà
+    hai sự kiện quyết định nó thì đến SAU đó và **không đi qua bảng này**:
+
+      · `Sales Invoice.custom_misa_inv_no` trên phiếu trả — do luồng MISA ghi;
+      · `MT Payment Advice Line.return_invoice` — do lúc nạp bảng kê ghi.
+
+    Kế toán nối phiếu trả hôm nay, MISA trả số về ngày mai: việc đã xong từ
+    lâu mà dòng vẫn nằm trong "Chưa có chứng từ thuế" vĩnh viễn, thẻ chuỗi vẫn
+    đếm nó, và không ai bấm gì để nó tự thoát. Một hàng đợi có dòng không bao
+    giờ ra được là hàng đợi người ta thôi nhìn.
+
+    Không chọn đường "ghi lại lúc đọc": biến màn hình xem thành màn hình ghi
+    thì mọi lượt mở đều đụng vào chứng từ. Cột lưu vẫn còn — nó là ảnh chụp cho
+    Desk và bản in; portal thì luôn suy lại.
+    """
+    return (
+        f"CASE WHEN {h}.chung_tu_can = %(ct_khong_can)s THEN %(tt_xong)s "
+        f"WHEN IFNULL({h}.credit_note, '') = '' THEN %(tt_chua_tra)s "
+        f"WHEN {_ct_thue_expr(cn)} THEN %(tt_xong)s "
+        f"ELSE %(tt_chua_ct)s END")
+
+
+def _tt_params(p):
+    """Tham số ràng buộc cho `_trang_thai_expr`. MỘT chỗ khai, ba chỗ dùng."""
+    p.update({"ct_khong_can": CT_KHONG_CAN, "tt_xong": GIAY_XONG,
+              "tt_chua_tra": GIAY_CHUA_TRA, "tt_chua_ct": GIAY_CHUA_CT})
+    return p
+
+
 def _chung_tu_sieu_thi(credit_notes):
     """{phiếu trả: số hóa đơn siêu thị đã xuất} — lấy từ dòng `Ghi giảm` bảng kê.
 
@@ -312,14 +374,15 @@ def _counts(company, chain, params_base):
     Hiện đúng ô đang mở thì kế toán không biết còn gì ở ô khác, và cái ô người
     ta không biết là ô không ai mở.
     """
-    p = dict(params_base)
+    p = _tt_params(dict(params_base))
     where = ["h.company = %(company)s", _chain_filter(chain, p, alias="si")]
     rows = frappe.db.sql(f"""
-        SELECT h.trang_thai_giay AS tt, COUNT(*) AS n
+        SELECT {_trang_thai_expr()} AS tt, COUNT(*) AS n
         FROM `tab{DOCTYPE}` h
         INNER JOIN `tabSales Invoice` si ON si.name = h.sales_invoice
+        LEFT JOIN `tabSales Invoice` cn ON cn.name = h.credit_note
         WHERE {" AND ".join(where)}
-        GROUP BY h.trang_thai_giay
+        GROUP BY tt
     """, p, as_dict=True)
     by = {cstr(r.tt or ""): cint(r.n) for r in rows}
     out = {
@@ -400,13 +463,14 @@ def _ung_vien_rows(company, chain, search, limit, offset):
 
 
 def _so_rows(company, chain, statuses, search, limit, offset):
-    p = {"company": company, "limit": limit, "offset": offset}
+    p = _tt_params({"company": company, "limit": limit, "offset": offset})
     where = ["h.company = %(company)s", _chain_filter(chain, p, alias="si")]
     if statuses:
-        for i, s in enumerate(statuses):
-            p["tt%d" % i] = s
-        where.append("h.trang_thai_giay IN (%s)"
-                     % ", ".join("%%(tt%d)s" % i for i in range(len(statuses))))
+        for i, st in enumerate(statuses):
+            p["st%d" % i] = st
+        where.append("%s IN (%s)" % (
+            _trang_thai_expr(),
+            ", ".join("%%(st%d)s" % i for i in range(len(statuses)))))
     if cstr(search).strip():
         p["q"] = "%" + cstr(search).strip() + "%"
         where.append("(h.name LIKE %(q)s OR h.sales_invoice LIKE %(q)s "
@@ -417,13 +481,16 @@ def _so_rows(company, chain, statuses, search, limit, offset):
     total = cint(frappe.db.sql(f"""
         SELECT COUNT(*) FROM `tab{DOCTYPE}` h
         INNER JOIN `tabSales Invoice` si ON si.name = h.sales_invoice
+        LEFT JOIN `tabSales Invoice` cn ON cn.name = h.credit_note
         WHERE {w}
     """, p)[0][0])
     rows = frappe.db.sql(f"""
         SELECT h.name, h.su_co, h.sales_invoice, h.customer, h.customer_name,
                h.chain, h.po_no, h.ngay_xay_ra, h.ngay_bao,
                h.loai_su_co, h.huong_xu_ly, h.chung_tu_can, h.ghi_chu,
-               h.trang_thai_giay, h.credit_note, h.misa_no, h.ngay_xong_giay,
+               {_trang_thai_expr()} AS trang_thai_giay,
+               h.trang_thai_giay AS tt_luu,
+               h.credit_note, h.misa_no AS misa_no_luu, h.ngay_xong_giay,
                h.trang_thai_hang, h.ngay_hang_ve,
                si.posting_date, si.grand_total,
                {_si_col("custom_misa_relation", "cn")} AS cn_misa_relation,
@@ -458,8 +525,13 @@ def _decorate(rows):
                 if mine in DRIFT_WATCH and cstr(old or "") != cstr(new or ""):
                     changed.append({"field": mine, "cu": cstr(old or ""),
                                     "moi": cstr(new or "")})
-                if new not in (None, ""):
-                    d[mine] = new
+                # GHI ĐÈ KỂ CẢ KHI GIÁ TRỊ MỚI LÀ RỖNG. Điều hành xóa
+                # `huong_xu_ly` (ô đó không `reqd`, options mở đầu bằng một dòng
+                # trống) là một thay đổi thật — giữ bản chép cũ thì cảnh báo nói
+                # "đang hiện giá trị MỚI" trong khi màn hình hiện giá trị CŨ,
+                # và `sync_hoan` cũng không xóa được nên cảnh báo đó không bao
+                # giờ tắt. Cảnh báo không tắt được là cảnh báo bị bỏ qua.
+                d[mine] = new
             d["su_co_trang_thai"] = cstr(sc.get("trang_thai") or "")
             d["stock_entry"] = cstr(sc.get("stock_entry") or "")
             d["tong_mat_duong"] = flt(sc.get("tong_mat_duong"))
@@ -480,6 +552,14 @@ def _decorate(rows):
         cn = cstr(r.credit_note or "")
         t = theirs.get(cn) if cn else None
         d["chung_tu_sieu_thi"] = t or None
+        # SỐ CHỨNG TỪ CŨNG LẤY SỐNG. `h.misa_no` là ảnh chụp lúc bấm lưu; luồng
+        # MISA ghi số hóa đơn lên phiếu trả SAU đó, và dòng ghi giảm của bảng
+        # kê cũng chỉ trỏ về phiếu trả sau đó. Đọc ảnh chụp là dòng hiện "chưa
+        # có chứng từ" trong khi chứng từ đã về từ hôm kia.
+        d["misa_no"] = cstr(r.get("cn_misa_no") or "") or (t or {}).get("inv_no") or ""
+        # Ảnh chụp trên Desk lệch với sự thật thì NÓI RA, đừng để hai màn hình
+        # nói hai đằng mà không ai biết cái nào đúng. Lần lưu sau tự đồng bộ.
+        d["tt_lech"] = (cstr(r.get("tt_luu") or "") != cstr(d.get("trang_thai_giay") or ""))
         d["grand_total"] = flt(r.get("grand_total"))
         d["cn_amount"] = flt(r.get("cn_amount"))
         out.append(d)
@@ -550,7 +630,7 @@ def list_hoan(company=None, bucket=None, chain=None, search=None,
 # CHI TIẾT
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _le_cua_chuoi(chain):
+def _le_cua_chuoi(chain, company):
     """Chuỗi này TRƯỚC GIỜ dùng chứng từ gì — ĐẾM TRÊN CHỨNG TỪ CÓ THẬT.
 
     Không phải bảng gợi ý gõ tay. `chung_tu_can` là quyết định của kế toán
@@ -559,18 +639,25 @@ def _le_cua_chuoi(chain):
     phải một phỏng đoán — nói ra được mà không tự điền vào ô.
 
     Trả [] khi site chưa có ô quan hệ MISA: chưa biết thì không bịa.
+
+    ⚠ PHẢI BUỘC CÔNG TY. Khách hàng dùng CHUNG giữa các pháp nhân trên ERPNext,
+    nên "khách của chuỗi này" KHÔNG phải một ranh giới công ty. Và đây là
+    `frappe.db.sql` thô — nó không đi qua User Permission mà `_company()` vừa
+    kiểm. Thiếu mệnh đề công ty là đếm luôn phiếu trả của pháp nhân người dùng
+    không được phép đọc, rồi in con số đó lên màn hình của pháp nhân kia.
     """
     if not chain or not frappe.db.has_column("Sales Invoice", "custom_misa_relation"):
         return []
     names = chain_customers(chain)
     if not names:
         return []
-    p = {}
+    p = {"company": company}
     cus = _customer_in_clause(names, p, prefix="lc", alias="r")
     rows = frappe.db.sql(f"""
         SELECT r.custom_misa_relation AS quan_he, COUNT(*) AS n
         FROM `tabSales Invoice` r
-        WHERE r.is_return = 1 AND r.docstatus = 1
+        WHERE r.company = %(company)s
+          AND r.is_return = 1 AND r.docstatus = 1
           AND IFNULL(r.custom_misa_relation, '') != ''
           AND {cus}
         GROUP BY r.custom_misa_relation
@@ -579,7 +666,7 @@ def _le_cua_chuoi(chain):
     return [{"quan_he": cstr(r.quan_he), "n": cint(r.n)} for r in rows]
 
 
-def _phieu_tra_ung_vien(sales_invoice, current=None):
+def _phieu_tra_ung_vien(sales_invoice, company, current=None):
     """Phiếu trả ĐÃ GHI SỔ của hóa đơn gốc — để kế toán CHỌN, không gõ docname.
 
     Kèm cờ `da_dung`: phiếu đã được một dòng sổ khác nhận rồi. Không giấu nó đi
@@ -588,15 +675,26 @@ def _phieu_tra_ung_vien(sales_invoice, current=None):
     """
     if not sales_invoice:
         return []
+    # `current` PHẢI có mặt trong danh sách dù nó không còn là ứng viên hợp lệ.
+    #
+    # Phiếu trả bị hủy để amend (docstatus 2) rơi khỏi bộ lọc `docstatus = 1`,
+    # nên ô chọn trên màn hình không có dòng nào `selected` -> trình duyệt tự
+    # chọn dòng đầu ("— chưa lập —"), và lần bấm Lưu tiếp theo XÓA TRẮNG phiếu
+    # trả cùng số chứng từ, đẩy một dòng đã xong ngược về hàng đợi. Người dùng
+    # chỉ định vào sửa ghi chú.
+    p = {"si": sales_invoice, "company": company, "cur": cstr(current or "")}
+    keep_cur = "OR r.name = %(cur)s" if current else ""
     rows = frappe.db.sql(f"""
         SELECT r.name, r.posting_date, ABS(r.grand_total) AS amount,
                {_si_col("custom_misa_relation", "r")} AS misa_relation,
                {_si_col(SI_NO_FIELD, "r")} AS misa_no,
-               {_si_col("custom_misa_status", "r")} AS misa_status
+               {_si_col("custom_misa_status", "r")} AS misa_status,
+               r.docstatus, r.is_return, r.return_against
         FROM `tabSales Invoice` r
-        WHERE r.return_against = %(si)s AND r.docstatus = 1
+        WHERE r.company = %(company)s
+          AND ((r.return_against = %(si)s AND r.docstatus = 1) {keep_cur})
         ORDER BY r.posting_date, r.name
-    """, {"si": sales_invoice}, as_dict=True)
+    """, p, as_dict=True)
     if not rows:
         return []
     used = {
@@ -608,6 +706,8 @@ def _phieu_tra_ung_vien(sales_invoice, current=None):
     out = []
     for r in rows:
         boi = used.get(r.name)
+        hop_le = (cint(r.docstatus) == 1 and cint(r.is_return) == 1
+                  and cstr(r.return_against or "") == cstr(sales_invoice))
         out.append({
             "name": r.name,
             "posting_date": cstr(r.posting_date or ""),
@@ -617,6 +717,10 @@ def _phieu_tra_ung_vien(sales_invoice, current=None):
             "misa_status": cstr(r.misa_status or ""),
             "da_dung": bool(boi and boi != current),
             "dung_o": cstr(boi or "") if boi and boi != current else "",
+            # Dòng đang nối mà KHÔNG còn hợp lệ (bị hủy để amend chẳng hạn) vẫn
+            # phải hiện — nhưng phải hiện kèm lý do, không lặng lẽ nằm đó.
+            "hop_le": hop_le,
+            "la_hien_tai": bool(current and r.name == current),
         })
     return out
 
@@ -640,8 +744,8 @@ def get_hoan(name, company=None):
     d["items"] = _su_co_items(row.su_co)
     # `_su_co_items` chỉ có bảng mã hàng; `tong_mat_duong` đã do `_decorate` đọc
     # sống từ phiếu sự cố, không cộng lại ở đây — cộng lại là hai nguồn.
-    d["phieu_tra_ung_vien"] = _phieu_tra_ung_vien(row.sales_invoice, row.credit_note)
-    d["le_cua_chuoi"] = _le_cua_chuoi(row.chain)
+    d["phieu_tra_ung_vien"] = _phieu_tra_ung_vien(row.sales_invoice, company, row.credit_note)
+    d["le_cua_chuoi"] = _le_cua_chuoi(row.chain, company)
     d["chung_tu_options"] = list(CHUNG_TU_OPTIONS)
     d["trang_thai_hang_options"] = list(TRANG_THAI_HANG)
     d["can_manage"] = is_chief()
@@ -691,10 +795,12 @@ def _stamp_from_si(doc, sales_invoice, chain_map=None):
 
 def _stamp_from_su_co(doc, sc):
     """Chép các cột điều hành sang bản của mình. MỘT bảng khai ở `COPIED`."""
+    # Cùng luật với `_decorate`: phiếu sự cố còn sống thì giá trị bên đó LÀ giá
+    # trị, kể cả khi nó bị xóa trắng. Bỏ qua giá trị rỗng là bản chép không bao
+    # giờ đuổi kịp, và "Chép lại vào sổ" thành một cái nút không làm gì.
     for mine, theirs in COPIED:
         v = sc.get(theirs)
-        if v not in (None, ""):
-            doc.set(mine, v)
+        doc.set(mine, v if v not in (None, "") else None)
     if sc.get("creation"):
         doc.ngay_bao = getdate(sc.get("creation"))
     if not doc.po_no and sc.get("po"):
@@ -921,13 +1027,18 @@ def board_counts(company, chain_map=None):
         return out.setdefault(cstr(ch or ""), {
             "hoan_chua_tra": 0, "hoan_chua_ct": 0, "hoan_chua_vao_so": 0})
 
+    # Trạng thái SUY LÚC ĐỌC, y như màn hình (`_trang_thai_expr`). Đọc cột đã
+    # lưu ở đây là thẻ chuỗi đếm một đằng còn màn hình đếm một nẻo — đúng thứ
+    # hàm này sinh ra để tránh.
+    tp = _tt_params({"company": company, "t1": GIAY_CHUA_TRA, "t2": GIAY_CHUA_CT})
     rows = frappe.db.sql(f"""
-        SELECT h.customer, h.trang_thai_giay AS tt, COUNT(*) AS n
+        SELECT h.customer, {_trang_thai_expr()} AS tt, COUNT(*) AS n
         FROM `tab{DOCTYPE}` h
+        LEFT JOIN `tabSales Invoice` cn ON cn.name = h.credit_note
         WHERE h.company = %(company)s
-          AND h.trang_thai_giay IN (%(t1)s, %(t2)s)
-        GROUP BY h.customer, h.trang_thai_giay
-    """, {"company": company, "t1": GIAY_CHUA_TRA, "t2": GIAY_CHUA_CT}, as_dict=True)
+        GROUP BY h.customer, tt
+        HAVING tt IN (%(t1)s, %(t2)s)
+    """, tp, as_dict=True)
     for r in rows:
         b = bucket(mapping.get(r.customer))
         key = "hoan_chua_tra" if r.tt == GIAY_CHUA_TRA else "hoan_chua_ct"

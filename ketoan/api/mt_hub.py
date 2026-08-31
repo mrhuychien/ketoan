@@ -377,9 +377,20 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
     # và danh sách phải nói về cùng một tập, nên nhóm này được cộng vào tổng và
     # hiện thành một dòng riêng trong bảng — đúng như màn Công nợ đến hạn vẫn làm.
     ua = debt.get("") or {}
+    # Việc HÀNG HOÀN của khách chưa gán chuỗi cũng thuộc dòng này, cùng một lý
+    # do với công nợ ở trên: `out` chỉ chạy qua `MT_CHAINS`, nên nhóm chuỗi rỗng
+    # không lọt vào thẻ chuỗi nào. Còn màn "Hàng hoàn chờ xử lý" mở từ chính
+    # bảng này lại KHÔNG lọc chuỗi, nên nó đếm cả nhóm đó. Bỏ ra ngoài là hai
+    # màn hình nói hai con số về một tập — và phần bị giấu đúng là phần chưa ai
+    # nhìn thấy.
+    uh = hoan.get("") or {}
     unassigned = {
         "chain": "",
         "unassigned": True,
+        "hoan_chua_tra": cint(uh.get("hoan_chua_tra")),
+        "hoan_chua_ct": cint(uh.get("hoan_chua_ct")),
+        "hoan_open": cint(uh.get("hoan_open")),
+        "hoan_chua_vao_so": cint(uh.get("hoan_chua_vao_so")),
         "debt": flt(ua.get("amount")),
         "debt_invoices": cint(ua.get("count")),
         "debt_overdue": flt(ua.get("overdue")),
@@ -394,9 +405,14 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
         "debt_no_einv_oldest": cstr(ua.get("einv_pending_oldest") or "") or None,
         "einv_deadline": None,
     }
-    # Chỉ đưa vào phép cộng khi nó THẬT SỰ có tiền. Không thì mọi site sạch sẽ
-    # đều mọc thêm một dòng rỗng chẳng nói gì.
-    totals_rows = out + ([unassigned] if unassigned["debt_invoices"] else [])
+    # Chỉ đưa vào phép cộng khi nó THẬT SỰ có gì để nói — tiền CÒN NỢ hoặc việc
+    # hàng hoàn. Không thì mọi site sạch sẽ đều mọc thêm một dòng rỗng chẳng nói
+    # gì. (Trước đây chỉ hỏi tiền, nên nhóm chưa gán chuỗi có 7 phiếu sự cố chưa
+    # ai nhận mà không nợ đồng nào thì biến mất khỏi bảng.)
+    unassigned_todo = unassigned["hoan_open"] + unassigned["hoan_chua_vao_so"]
+    unassigned["todo"] = unassigned_todo
+    has_unassigned = bool(unassigned["debt_invoices"] or unassigned_todo)
+    totals_rows = out + ([unassigned] if has_unassigned else [])
 
     return {
         "company": company,
@@ -406,9 +422,11 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
         "steps": list(STEPS),
         "chains": out,
         "orphan_advices": n_orphan,
-        "unassigned_debt": unassigned if unassigned["debt_invoices"] else None,
+        "unassigned_debt": unassigned if has_unassigned else None,
         "totals": {
-            "todo": sum(r["todo"] for r in out),
+            # CỘNG CẢ nhóm chưa gán chuỗi: việc của nó là việc thật, và nó là
+            # phần duy nhất không nằm trong thẻ chuỗi nào.
+            "todo": sum(r["todo"] for r in out) + unassigned_todo,
             # CỘNG TRÊN `totals_rows`, không phải `out` — xem chú thích ở trên.
             "debt": sum(r["debt"] for r in totals_rows),
             "debt_overdue": sum(r["debt_overdue"] for r in totals_rows),

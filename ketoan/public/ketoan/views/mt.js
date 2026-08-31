@@ -353,6 +353,30 @@ function boardShell(state, board) {
           </div></div>`
       : ""}
 
+    ${(board.unassigned_debt && board.unassigned_debt.todo)
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+          <div class="kt-card-body">
+            <div style="font-weight:600;color:var(--kt-warning)">
+              <i class="fas fa-rotate-left"></i>
+              ${board.unassigned_debt.todo} việc hàng hoàn của khách CHƯA GÁN CHUỖI
+            </div>
+            <div class="kt-sub" style="margin-top:6px">
+              Không thẻ chuỗi nào ở dưới đếm chúng — thẻ chỉ chạy qua danh sách chuỗi đã
+              khai. Màn <b>Hàng hoàn chờ xử lý</b> thì có, vì nó không lọc chuỗi; nên nếu
+              không nói ra ở đây thì hai màn hình sẽ ra hai con số cho cùng một tập.
+              ${board.unassigned_debt.hoan_chua_vao_so
+                ? html`<b>${board.unassigned_debt.hoan_chua_vao_so}</b> trong đó còn chưa
+                    vào sổ kế toán.`
+                : ""}
+              Gán chuỗi cho khách ở <b>Công nợ theo khách hàng</b> để việc về đúng thẻ.
+            </div>
+            <button class="kt-btn kt-btn--outline kt-btn--sm" data-global="g-hang-hoan"
+                    style="margin-top:8px">
+              <i class="fas fa-rotate-left"></i> Mở màn Hàng hoàn
+            </button>
+          </div></div>`
+      : ""}
+
     <div class="kt-ws-sections kt-mb">
       ${chains.map((c) => chainCard(c))}
     </div>
@@ -398,6 +422,11 @@ function chainCard(c) {
   if (c.sheets_draft) jobs.push({ n: c.sheets_draft, t: "bảng kê chiết khấu chưa chốt", tone: "warning" });
   if (c.sheets_await_invoice) jobs.push({ n: c.sheets_await_invoice, t: "bảng kê chờ ghi số hóa đơn CK", tone: "warning" });
   if (c.dossiers_draft) jobs.push({ n: c.dossiers_draft, t: "hồ sơ Win chưa nộp", tone: "warning" });
+  // Hai dòng RIÊNG, không gộp: "chưa vào sổ" là việc còn nằm bên app vận chuyển,
+  // "chưa xong giấy tờ" là việc đã nằm trên bàn kế toán. Gộp lại thì kế toán
+  // không biết nên đi nhận việc hay đi lập chứng từ.
+  if (c.hoan_chua_vao_so) jobs.push({ n: c.hoan_chua_vao_so, t: "lần hàng về chưa vào sổ", tone: "danger" });
+  if (c.hoan_open) jobs.push({ n: c.hoan_open, t: "lần hàng về chưa xong giấy tờ", tone: "warning" });
 
   return html`
     <div class="kt-card kt-chain-card" data-chain="${c.chain}" style="cursor:pointer">
@@ -6863,7 +6892,15 @@ function hoanRowSo(r) {
     <td class="kt-col-mid">${r.trang_thai_hang
       ? html`<span class="kt-badge kt-badge--${HOAN_HANG_TONE[r.trang_thai_hang] || "gray"}">${r.trang_thai_hang}</span>`
       : html`<span class="kt-sub">—</span>`}
-      ${r.su_co && !r.su_co_con
+      ${r.tt_lech
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-border)">
+          <div class="kt-card-body kt-sub">Trạng thái ở đây <b>suy lại lúc đọc</b> từ chứng
+            từ hiện có, nên nó có thể khác cột đã lưu trên Desk — số hóa đơn MISA và dòng
+            ghi giảm của bảng kê thường về SAU lần lưu cuối. Bấm Lưu một lần là cột kia
+            đuổi kịp.</div></div>`
+      : ""}
+
+    ${r.su_co && !r.su_co_con
         ? html`<div class="kt-sub" style="color:var(--kt-warning)">mất phiếu sự cố</div>`
         : ""}</td>
   </tr>`;
@@ -6886,6 +6923,15 @@ async function loadHangHoan(container, state) {
     return;
   }
   state.hoanBucket = d.bucket;
+
+  // Nhận dòng cuối của trang 2 thì trang 2 hết dòng, và màn hình sẽ in
+  // "mọi phiếu sự cố đều đã vào sổ" ngay dưới một cái thẻ đang ghi 50. Cùng
+  // cái kẹp mà danh sách hóa đơn đã dùng — việc bấm xong một dòng không được
+  // biến thành một câu kết luận sai về cả hàng đợi.
+  if (!(d.rows || []).length && (d.total || 0) > 0 && state.page > 1) {
+    state.page = d.pages || 1;
+    return loadHangHoan(container, state);
+  }
 
   const rows = d.rows || [];
   const ungVien = d.bucket === "chua_vao_so";
@@ -7094,6 +7140,14 @@ async function openHoanDetail(container, state, name) {
           </div></div>`
       : ""}
 
+    ${r.tt_lech
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-border)">
+          <div class="kt-card-body kt-sub">Trạng thái ở đây <b>suy lại lúc đọc</b> từ chứng
+            từ hiện có, nên nó có thể khác cột đã lưu trên Desk — số hóa đơn MISA và dòng
+            ghi giảm của bảng kê thường về SAU lần lưu cuối. Bấm Lưu một lần là cột kia
+            đuổi kịp.</div></div>`
+      : ""}
+
     ${r.su_co && !r.su_co_con
       ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
           <div class="kt-card-body kt-sub">Không còn đọc được phiếu sự cố <b>${r.su_co}</b>
@@ -7117,8 +7171,14 @@ async function openHoanDetail(container, state, name) {
         <select class="kt-input" id="hd-cn">
           <option value="">— chưa lập —</option>
           ${cands.map((c) => html`<option value="${c.name}" ${r.credit_note === c.name ? "selected" : ""}
-            ${c.da_dung ? "disabled" : ""}>${c.name} · ${formatVND(c.amount)}${c.da_dung ? ` (đã dùng ở ${c.dung_o})` : ""}</option>`)}
+            ${c.da_dung ? "disabled" : ""}>${c.name} · ${formatVND(c.amount)}${c.da_dung ? ` (đã dùng ở ${c.dung_o})` : ""}${c.hop_le === false ? " — KHÔNG còn hợp lệ" : ""}</option>`)}
         </select>
+        ${cands.some((c) => c.la_hien_tai && c.hop_le === false)
+          ? html`<div class="kt-sub" style="color:var(--kt-danger)">
+              Phiếu trả đang nối <b>${r.credit_note}</b> không còn hợp lệ — đã hủy, hoặc
+              không còn trả cho hóa đơn này. Chọn phiếu thay thế rồi Lưu; bỏ trống là gỡ
+              hẳn, và dòng quay lại "Chưa lập phiếu trả".</div>`
+          : ""}
         ${!cands.length
           ? html`<div class="kt-sub" style="color:var(--kt-warning)">Hóa đơn gốc chưa có phiếu
               trả nào ĐÃ GHI SỔ. Lập phiếu trả trên ERPNext (khai Return Against), ghi sổ,
