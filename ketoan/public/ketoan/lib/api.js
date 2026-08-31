@@ -281,6 +281,10 @@ export const api = {
   mtReconBulk: (advice) => callMethod(NS + "mt_reconcile.bulk_link", withCompany({ advice })),
   mtReconExplain: (line, deduction_type, note) =>
     callMethod(NS + "mt_reconcile.explain_variance", withCompany({ line, deduction_type, note })),
+  // Chiều NGƯỢC lại: chọn vài hóa đơn còn nợ rồi tìm dòng tiền của chúng trên
+  // các bảng kê đã nạp. KHÔNG phải "đánh dấu đã thu" — xem docstring backend.
+  mtReconForInvoices: (invoices) =>
+    callMethod(NS + "mt_reconcile.suggest_for_invoices", withCompany({ invoices })),
   mtReconCommit: (advice, expected_hash) =>
     callMethod(NS + "mt_reconcile.commit_statement", withCompany({ advice, expected_hash })),
   mtChainDesk: (chain, a) => callMethod(NS + "mt_hub.get_chain", withCompany({ chain, ...a })),

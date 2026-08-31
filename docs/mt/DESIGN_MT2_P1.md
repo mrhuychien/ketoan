@@ -995,6 +995,23 @@ Vì vậy `variance_amount` **máy suy** đúng bằng phần còn thiếu, khô
 và `ui_mt_check` quét mọi hàm trong `api/` để chắc không hàm nào vừa cộng tiền
 vừa đọc ba ô `variance_*`.
 
+#### Hai nút hàng loạt: một cái làm được, một cái CỐ Ý không
+
+Brief xin `Gán vào bảng kê` và `Đánh dấu đã thu`.
+
+**Gán vào bảng kê** dựng được, và nó là chiều NGƯỢC của màn đối soát: cầm vài
+hóa đơn còn nợ rồi tìm dòng tiền của chúng trên các bảng kê đã nạp. Chiều này
+kế toán dùng nhiều hơn — nhìn danh sách còn nợ, thấy vài tờ đáng lẽ đã được trả.
+Hóa đơn không có dòng nào khớp thì không nối gì cả; nó vẫn còn nợ, vì nó thật sự
+còn nợ, và câu đó in ngay trên đầu modal.
+
+**Đánh dấu đã thu KHÔNG dựng**, và nút nói ra vì sao thay vì im lặng không phản
+ứng. Kênh MT không tạo Payment Entry — mọi khoản trừ công nợ đi bằng **bút toán
+do người duyệt** (SOP §1, và cả tầng `mt_je` dựng quanh đúng luật đó). Một cái
+tick trừ được công nợ là trừ tiền mà không có chứng từ nào đứng sau, và nó sẽ
+trừ đúng những tờ khó đòi nhất — những tờ người ta muốn cho khuất mắt. Đây là
+chỗ duy nhất trong màn này cố ý không có đường tắt.
+
 #### Phép ĐO bắt một lỗi mà phép kiểm cũ không thấy
 
 `table_width_check` dựng mỗi bảng ĐỨNG RIÊNG, chiếm trọn `.kt-main`. Nhưng bảng

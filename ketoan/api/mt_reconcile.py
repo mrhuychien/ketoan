@@ -511,3 +511,112 @@ def commit_statement(advice, expected_hash=None, company=None):
                                        company=company)
     out["advice"] = a.name
     return out
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NỐI NGƯỢC: TỪ HÓA ĐƠN TÌM DÒNG BẢNG KÊ
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Màn đối soát đi từ BẢNG KÊ: cầm một file của chuỗi rồi tìm hóa đơn cho từng
+# dòng. Nhưng kế toán cũng làm chiều ngược lại — nhìn danh sách hóa đơn còn nợ,
+# thấy vài tờ đáng lẽ đã được trả, và muốn biết tiền của chúng nằm ở dòng nào.
+#
+# ⚠ ĐÂY KHÔNG PHẢI "ĐÁNH DẤU ĐÃ THU". Nó chỉ nối hóa đơn với một dòng tiền CÓ
+# THẬT trên một bảng kê ĐÃ NẠP. Không có dòng nào khớp thì không nối gì cả —
+# hóa đơn vẫn còn nợ, vì nó thật sự còn nợ.
+
+MAX_REVERSE = 50
+
+
+@frappe.whitelist()
+def suggest_for_invoices(invoices, company=None):
+    """Với mỗi hóa đơn được chọn: những dòng bảng kê CHƯA NỐI có thể là tiền của nó."""
+    guard_mt()
+    _require_tables()
+    _tables()
+    company = _company(company)
+
+    if isinstance(invoices, str):
+        import json as _json
+        try:
+            invoices = _json.loads(invoices)
+        except ValueError:
+            invoices = [x.strip() for x in invoices.split(",") if x.strip()]
+    names = [cstr(x).strip() for x in (invoices or []) if cstr(x).strip()]
+    if not names:
+        frappe.throw(_("Chưa chọn hóa đơn nào."))
+    if len(names) > MAX_REVERSE:
+        frappe.throw(_(
+            "Chọn tối đa {0} hóa đơn một lượt. Nhiều hơn thì mỗi dòng bảng kê phải so "
+            "với quá nhiều tờ, và gợi ý mất hết ý nghĩa."
+        ).format(MAX_REVERSE))
+
+    ship = _si_col("shipping_address_name")
+    sis = frappe.db.sql(f"""
+        SELECT si.name, si.posting_date, ABS(si.grand_total) AS amount,
+               si.customer, si.customer_name, {ship} AS ship_to
+        FROM `tabSales Invoice` si
+        WHERE si.name IN %(n)s AND si.company = %(c)s
+          AND si.docstatus = 1 AND si.is_return = 0
+    """, {"n": tuple(names), "c": company}, as_dict=True)
+    if not sis:
+        frappe.throw(_("Không hóa đơn nào trong danh sách đã chọn thuộc công ty này."))
+
+    lo = min(flt(s.amount) for s in sis) - PAID_TOLERANCE
+    hi = max(flt(s.amount) for s in sis) + PAID_TOLERANCE
+    lines = frappe.db.sql(f"""
+        SELECT l.name AS line, l.parent AS advice, a.advice_no, a.chain,
+               l.total_amount, l.store_name, l.store_code, l.description,
+               IFNULL(l.payment_date, a.payment_date) AS payment_date
+        FROM `tab{LINE}` l
+        INNER JOIN `tab{ADVICE}` a ON a.name = l.parent
+        WHERE l.parenttype = %(pt)s AND a.company = %(c)s
+          AND l.row_kind = %(kind)s
+          AND IFNULL(l.sales_invoice, '') = ''
+          AND ABS(l.total_amount) BETWEEN %(lo)s AND %(hi)s
+        ORDER BY payment_date DESC
+        LIMIT 2000
+    """, {"pt": ADVICE, "c": company, "kind": KIND_PAYMENT,
+          "lo": lo, "hi": hi}, as_dict=True)
+
+    out = []
+    for si in sis:
+        amt = flt(si.amount)
+        store = norm_text(si.ship_to) or ""
+        cands = []
+        for ln in lines:
+            if abs(abs(flt(ln.total_amount)) - amt) > PAID_TOLERANCE:
+                continue
+            ls = norm_text(ln.store_name) or norm_text(ln.store_code) or ""
+            same = bool(ls) and bool(store) and (ls in store or store in ls)
+            cands.append({
+                "line": ln.line, "advice": ln.advice,
+                "advice_no": cstr(ln.advice_no or "") or ln.advice,
+                "chain": cstr(ln.chain or ""),
+                "amount": flt(ln.total_amount),
+                "payment_date": cstr(ln.payment_date or ""),
+                "store_name": cstr(ln.store_name or "") or cstr(ln.store_code or ""),
+                "level": SUG_CHAC_CHAN if same else SUG_KHAC_DIEM,
+                "level_label": SUGGEST_LABEL[SUG_CHAC_CHAN if same else SUG_KHAC_DIEM],
+            })
+        cands.sort(key=lambda x: (0 if x["level"] == SUG_CHAC_CHAN else 1,
+                                  x["payment_date"]), reverse=False)
+        out.append({
+            "sales_invoice": si.name,
+            "posting_date": cstr(si.posting_date or ""),
+            "amount": amt,
+            "customer_name": cstr(si.customer_name or ""),
+            "ship_to": cstr(si.ship_to or ""),
+            "candidates": cands[:MAX_CANDIDATES],
+            "auto": _auto_ok(cands[:MAX_CANDIDATES]),
+        })
+    return {
+        "rows": out,
+        "auto_ready": sum(1 for r in out if r["auto"]),
+        "can_manage": is_chief(),
+        # NÓI RA điều màn hình này KHÔNG làm: một danh sách "gợi ý nối" rất dễ
+        # bị đọc thành "đánh dấu đã thu".
+        "note": _(
+            "Chỉ nối hóa đơn với dòng tiền CÓ THẬT trên bảng kê đã nạp. Hóa đơn không "
+            "có dòng nào khớp thì vẫn còn nợ — đây không phải chỗ đánh dấu đã thu."),
+    }

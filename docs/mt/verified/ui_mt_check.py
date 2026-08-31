@@ -287,6 +287,34 @@ def main():
     check("không hàm nào vừa cộng tiền vừa đọc `variance_amount`", not money,
           ", ".join(money) or "sạch")
 
+    # ── 5b. Hai nút hàng loạt: một cái LÀM ĐƯỢC, một cái CỐ Ý KHÔNG ─────
+    #
+    # "Gán vào bảng kê" đi chiều ngược màn đối soát và nối được thật.
+    # "Đánh dấu đã thu" thì KHÔNG, và phải nói ra vì sao: kênh MT không tạo
+    # Payment Entry — mọi khoản trừ công nợ đi bằng bút toán do người duyệt.
+    # Một cái tick trừ được công nợ sẽ trừ đúng những tờ khó đòi nhất.
+    print("-" * 82)
+    print("── 5b. Nút hàng loạt: nối được thì nối, không được thì NÓI RA ───────")
+
+    rvb = rb.get("suggest_for_invoices", "")
+    check("`Gán vào bảng kê` có tầng dưới thật", bool(rvb))
+    check("và chỉ tìm dòng CHƯA NỐI trên bảng kê ĐÃ NẠP",
+          "IFNULL(l.sales_invoice, '') = ''" in rvb and "row_kind = %(kind)s" in rvb)
+    check("buộc công ty (SQL thô không đi qua permission)",
+          "si.company = %(c)s" in rvb and "a.company = %(c)s" in rvb)
+    check("có trần số hóa đơn chọn một lượt", "MAX_REVERSE" in rvb)
+    check("và NÓI RA rằng đây không phải chỗ đánh dấu đã thu",
+          "không phải chỗ đánh dấu đã thu" in rvb)
+    bit = js_body(js, "bindInvoiceTable")
+    check("nút `Gán vào bảng kê` gọi tầng đó", "openReverseMatch" in bit)
+    check("nút `Đánh dấu đã thu` KHÔNG gọi API nào", "inv-bulk-paid" in bit
+          and "mtReconLink" not in bit.split("inv-bulk-paid")[1][:400])
+    check("và giải thích bằng BÚT TOÁN, không im lặng",
+          "BÚT TOÁN" in bit and "Payment Entry" in bit)
+    rvj = js_body(js, "renderReverseMatch")
+    check("modal in câu 'vẫn còn nợ' cho hóa đơn không tìm được dòng nào",
+          "vẫn còn nợ" in rvj)
+
     # ── 6. Điều hướng · tiền tố CSS ─────────────────────────────────────
     print("-" * 82)
     print("── 6. Thanh điều hướng gọn lại, và không class nào thiếu tiền tố ────")

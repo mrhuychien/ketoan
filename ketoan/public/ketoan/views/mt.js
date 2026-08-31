@@ -226,6 +226,7 @@ export async function render({ container, query }) {
     pageSize: 20,
     sort: "tuoi",
     picked: new Set(),
+    pickedKey: "",
     // Hàng đợi việc của chuỗi, nạp một lần cho mỗi (chuỗi, khoảng ngày).
     wl: null,
     wlKey: "",
@@ -1710,10 +1711,18 @@ function invoiceRow(r, tol, canManage, picked) {
 }
 
 function bindInvoiceTable(container, state, res) {
-  const picked = state.picked || (state.picked = new Set());
+  // Ô chọn theo TRANG. Giữ qua trang thì thanh ghi "3 hóa đơn" trong khi màn
+  // hình không hiện tờ nào đang được chọn, và hành động hàng loạt chạy lên
+  // những tờ người dùng không nhìn thấy. Trang/rổ đổi -> bỏ chọn.
+  const key = `${res.bucket}|${res.page}|${res.sort}|${res.total}`;
+  if (state.pickedKey !== key) {
+    state.picked = new Set();
+    state.pickedKey = key;
+  }
+  const picked = state.picked;
   const nEl = container.querySelector("#inv-n");
   const bulkBtns = ["#inv-bulk-bk", "#inv-bulk-paid"]
-    .map((id) => container.querySelector(id)).filter(Boolean);
+    .map((id) => container.querySelector(id)).filter(Boolean);   // chỉ để bật/tắt
   const sync = () => {
     if (nEl) nEl.textContent = String(picked.size);
     bulkBtns.forEach((b) => { b.disabled = !picked.size; });
@@ -1734,17 +1743,29 @@ function bindInvoiceTable(container, state, res) {
   });
   sync();
 
-  // HAI THAO TÁC HÀNG LOẠT CHƯA CÓ TẦNG DƯỚI, và nút phải NÓI RA điều đó thay
-  // vì im lặng không làm gì. "Gán vào bảng kê" cần biết gán vào bảng kê NÀO và
-  // theo số tiền nào — đó là màn Đối soát, không phải một nút; "Đánh dấu đã
-  // thu" thì đụng thẳng vào công nợ mà không có chứng từ nào đứng sau, nên nó
-  // phải là một bút toán chứ không phải một cái tick.
-  bulkBtns.forEach((b) => b.addEventListener("click", () => {
-    toast(b.id === "inv-bulk-bk"
-      ? "Gán hàng loạt vào bảng kê làm ở màn Đối soát bảng kê — ở đó mới biết gán vào bảng kê nào và khớp theo số tiền nào."
-      : "Đánh dấu đã thu phải đi bằng BÚT TOÁN (bước Bút toán), không phải một cái tick: trừ công nợ mà không có chứng từ nào đứng sau là mất dấu tiền.",
-      "info");
-  }));
+  // "GÁN VÀO BẢNG KÊ" đi chiều NGƯỢC với màn đối soát: cầm vài hóa đơn còn nợ
+  // rồi tìm dòng tiền của chúng trên các bảng kê ĐÃ NẠP. Hóa đơn không có dòng
+  // nào khớp thì không nối gì cả — nó vẫn còn nợ, vì nó thật sự còn nợ.
+  const bk = container.querySelector("#inv-bulk-bk");
+  if (bk) bk.addEventListener("click", () => {
+    if (!picked.size) return;
+    openReverseMatch(container, state, [...picked]);
+  });
+
+  // "ĐÁNH DẤU ĐÃ THU" CỐ Ý KHÔNG LÀM ĐƯỢC, và nút phải nói ra vì sao thay vì
+  // im lặng không phản ứng.
+  //
+  // Kênh MT không tạo Payment Entry — mọi khoản trừ công nợ đi bằng BÚT TOÁN
+  // do người duyệt (SOP §1, và cả tầng `mt_je` dựng quanh luật đó). Một cái
+  // tick trừ được công nợ là trừ tiền mà không có chứng từ nào đứng sau, và
+  // nó sẽ trừ đúng những tờ khó đòi nhất — những tờ người ta muốn cho khuất
+  // mắt. Nên đây là chỗ DUY NHẤT trong màn này không có đường tắt.
+  const mp = container.querySelector("#inv-bulk-paid");
+  if (mp) mp.addEventListener("click", () => {
+    toast("Trừ công nợ phải đi bằng BÚT TOÁN ở bước Bút toán, không bằng một cái tick: "
+      + "kênh MT không tạo Payment Entry, nên đánh dấu đã thu ở đây là trừ tiền mà "
+      + "không có chứng từ nào đứng sau.", "warning");
+  });
 
   const sortSel = container.querySelector("#inv-sort");
   if (sortSel) sortSel.addEventListener("change", () => {
@@ -8032,8 +8053,9 @@ function reconRight(d, r) {
             r.variance_note ? ` — ${r.variance_note}` : ""}.
           <b>Khoản này VẪN còn trên công nợ</b> cho tới khi có bút toán.</div>`
       : (r.state === "lech_tien"
-        ? html`<div class="ktmt-rec-sub" style="color:var(--kt-danger)">Chuỗi trả thiếu ${
-            formatVND(Math.abs(r.gap || 0))} — chọn khoản trừ để ghi nhận</div>
+        ? html`<div class="ktmt-rec-sub" style="color:var(--kt-danger)">Chuỗi trả ${
+            (r.gap || 0) < 0 ? "thiếu" : "vượt"} ${formatVND(Math.abs(r.gap || 0))}
+            — chọn khoản trừ để ghi nhận</div>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px">
             ${(d.variance_kinds || []).map((k) => html`<button class="ktmt-chip ktmt-chip--plain"
               data-recvar="${r.line}" data-kind="${k}">${k}</button>`)}
@@ -8151,4 +8173,91 @@ function openJePreviewFor(container, state, advice, pre) {
 function invalidateWorklist(state) {
   state.wl = null;
   state.wlKey = "";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NỐI NGƯỢC: TỪ HÓA ĐƠN ĐÃ CHỌN TÌM DÒNG BẢNG KÊ
+//
+// Màn đối soát đi từ BẢNG KÊ. Đây là chiều ngược lại, và nó là chiều kế toán
+// hay dùng hơn: nhìn danh sách còn nợ, thấy vài tờ đáng lẽ đã được trả, muốn
+// biết tiền của chúng nằm ở dòng nào.
+//
+// ⚠ ĐÂY KHÔNG PHẢI "ĐÁNH DẤU ĐÃ THU". Nó chỉ nối hóa đơn với một dòng tiền CÓ
+// THẬT trên một bảng kê ĐÃ NẠP; hóa đơn không có dòng nào khớp thì vẫn còn nợ.
+// Câu đó in ngay trên đầu modal chứ không nằm trong tooltip.
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function openReverseMatch(container, state, invoices) {
+  const modal = openModal({
+    title: `Tìm dòng bảng kê cho ${invoices.length} hóa đơn`,
+    icon: "fa-link",
+    maxWidth: 900,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  await renderReverseMatch(container, state, modal, invoices);
+}
+
+async function renderReverseMatch(container, state, modal, invoices) {
+  let d;
+  try {
+    d = await api.mtReconForInvoices(invoices);
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+  const rows = d.rows || [];
+  const hit = rows.filter((r) => r.candidates.length);
+
+  setHTML(modal.body, html`
+    <div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+      <div class="kt-card-body kt-sub">${d.note}</div></div>
+
+    ${!hit.length
+      ? html`<div class="kt-empty"><i class="fas fa-magnifying-glass"></i>
+          <p>Không hóa đơn nào trong ${rows.length} tờ đã chọn tìm được dòng tiền chưa nối
+            khớp số tiền. Chúng vẫn còn nợ.</p></div>`
+      : html`<div class="kt-table-wrap"><table class="kt-table">
+          <thead><tr>
+            <th>Hóa đơn</th><th class="num">Số tiền</th>
+            <th class="kt-col-wide">Dòng bảng kê khớp</th><th class="kt-col-role"></th>
+          </tr></thead>
+          <tbody>${hit.map((r) => html`<tr>
+            <td><a target="_blank" href="/desk/sales-invoice/${q(r.sales_invoice)}">${r.sales_invoice}</a>
+              <div class="kt-sub">${r.posting_date ? formatDate(r.posting_date) : ""}</div></td>
+            <td class="num">${formatVND(r.amount)}</td>
+            <td class="kt-col-wide">${r.candidates.map((c) => html`
+              <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:4px">
+                <b>${c.advice_no}</b>
+                <span class="kt-sub">${c.payment_date ? formatDate(c.payment_date) : ""}${
+                  c.store_name ? ` · ${c.store_name}` : ""}</span>
+                <span class="kt-badge kt-badge--${c.level === "chac_chan" ? "green" : "yellow"}">${c.level_label}</span>
+                ${d.can_manage
+                  ? html`<button class="kt-btn kt-btn--outline kt-btn--sm"
+                      data-rmlink="${c.line}" data-si="${r.sales_invoice}">Nối</button>`
+                  : ""}
+              </div>`)}</td>
+            <td class="kt-col-role">${r.auto && d.can_manage
+              ? html`<button class="kt-btn kt-btn--success kt-btn--sm"
+                  data-rmlink="${r.auto.line}" data-si="${r.sales_invoice}">Nối ✓</button>`
+              : ""}</td>
+          </tr>`)}</tbody>
+        </table></div>
+        ${rows.length - hit.length
+          ? html`<div class="kt-sub" style="margin-top:8px">${rows.length - hit.length} hóa đơn
+              còn lại không có dòng tiền nào khớp — chúng vẫn còn nợ.</div>`
+          : ""}`}
+  `);
+
+  modal.body.querySelectorAll("button[data-rmlink]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        await api.mtReconLink(b.dataset.rmlink, b.dataset.si);
+        toast("Đã nối " + b.dataset.si, "success");
+        invalidateWorklist(state);
+        await renderReverseMatch(container, state, modal, invoices);
+        loadTab(container, state);
+      } catch (e) { toast(e.message, "error"); b.disabled = false; }
+    });
+  });
 }

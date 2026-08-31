@@ -386,6 +386,10 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
   background: var(--kt-bg-card); border-radius: var(--kt-r-lg); border: 1px solid var(--kt-border);
   border-left: 4px solid var(--kt-danger); box-shadow: var(--kt-shadow); margin-bottom: 14px; }
 .ktmt-worklist--done { border-left-color: var(--kt-success); }
+/* Trên mobile `.kt-nav` chuyển xuống ĐÁY màn hình, nên mốc `top: 128px` (chiều
+   cao header + nav ở desktop) không còn nghĩa gì — thanh sẽ dính ở một khoảng
+   trắng giữa trang. Bỏ dính, để nó cuộn theo nội dung. */
+@media (max-width: 720px) { .ktmt-worklist { position: static; } }
 .ktmt-worklist-icon { width: 30px; height: 30px; border-radius: 9px; background: #fef2f2;
   display: flex; align-items: center; justify-content: center; color: var(--kt-danger); flex: none; }
 .ktmt-worklist--done .ktmt-worklist-icon { background: #f0fdf4; color: var(--kt-success); }
