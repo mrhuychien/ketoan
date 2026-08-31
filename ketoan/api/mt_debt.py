@@ -136,6 +136,52 @@ def _resolve_due(row, as_of):
     return None, DUE_NONE, False
 
 
+def due_expr(si="si", cus="c"):
+    """Mệnh đề SQL cho NGÀY ĐẾN HẠN — bản song sinh của `_resolve_due`.
+
+    ════════════════════════════════════════════════════════════════════════
+    VÌ SAO CÓ HAI BẢN, VÀ VÌ SAO KHÔNG SAO CHÉP LUẬT
+    ════════════════════════════════════════════════════════════════════════
+
+    `_resolve_due` chạy trên từng dòng ĐÃ LẤY VỀ, nên nó trả lời được cả
+    "nguồn của hạn" và "hai nguồn có lệch nhau không" — thứ màn công nợ cần.
+    Nhưng màn đối soát thanh toán phải **XẾP THEO TUỔI NỢ và CỘNG phần quá
+    hạn trên CẢ bộ lọc**, tức phải làm trong SQL: kéo hàng nghìn hóa đơn về
+    rồi tính trong Python chỉ để xếp một trang 20 dòng là treo máy kế toán.
+
+    Nên có bản SQL này. Nó KHÔNG được phép nói khác `_resolve_due` — hai màn
+    hình cùng gọi một hóa đơn là quá hạn 40 ngày và 0 ngày thì kế toán mất
+    lòng tin vào cả hai. `debt_due_check` chạy CẢ HAI trên cùng một ma trận
+    trường hợp và bắt mọi chỗ lệch.
+
+    Luật, y hệt `_resolve_due`:
+
+        khai `custom_mt_credit_days` > 0   ->  posting + N ngày
+        không khai, `due_date` > posting   ->  due_date
+        còn lại                            ->  NULL (chưa biết hạn)
+
+    `due_date = posting_date` là ERPNext lấy tạm khi KHÔNG có Payment Terms —
+    đó là "không biết hạn", không phải "hạn ngay hôm nay".
+    """
+    term = (f"IFNULL({cus}.custom_mt_credit_days, 0)"
+            if _has_credit_days() else "0")
+    return (
+        f"CASE WHEN {term} > 0 "
+        f"THEN DATE_ADD({si}.posting_date, INTERVAL {term} DAY) "
+        f"WHEN {si}.due_date IS NOT NULL AND {si}.due_date > {si}.posting_date "
+        f"THEN {si}.due_date ELSE NULL END")
+
+
+def overdue_days_expr(si="si", cus="c", as_of="%(aging_as_of)s"):
+    """Số ngày QUÁ HẠN tính tới `as_of`. NULL khi chưa khai hạn.
+
+    Dương = đã quá hạn bấy nhiêu ngày; âm = còn bấy nhiêu ngày nữa mới tới hạn.
+    NULL phải đi tới màn hình thành "chưa khai hạn", KHÔNG thành 0 — 0 đọc là
+    "đến hạn hôm nay", một kết luận về việc chưa ai khai.
+    """
+    return f"DATEDIFF({as_of}, {due_expr(si, cus)})"
+
+
 def _fetch(company, as_of, chain=None, customer=None, search=None):
     """Mọi hóa đơn MT còn nợ tính tới `as_of`, kèm số đã trả theo bảng kê.
 

@@ -159,7 +159,12 @@ def main():
           f"đang lọc mà thật ra hiện cả hai vế — con số đọc ra sai gấp đôi")
     bad += not ok
 
-    pg = src.split("def _invoice_page")[1].split("\ndef ")[0]
+    # Mệnh đề lọc của danh sách đã tách sang `_invoice_where` (dùng chung cho
+    # ĐẾM · LẤY TRANG · CỘNG TỔNG). Soi CẢ HAI hàm: luật không đổi, chỗ ở của
+    # nó thì có — và một phép kiểm ghim vào tên hàm sẽ đỏ vì một lần dọn dẹp
+    # thay vì vì một lỗi thật.
+    pg = (src.split("def _invoice_page")[1].split("\ndef ")[0]
+          + src.split("def _invoice_where")[1].split("\ndef ")[0])
     ok = "einvoice_issued_expr()" in pg and '"NOT "' in pg
     print(f"  {'✅' if ok else '❌'} danh sách lọc bằng CHÍNH biểu thức dùng để cộng số — "
           f"một định nghĩa, không hai")

@@ -38,38 +38,47 @@ const q = encodeURIComponent;
 // Ẩn bước chuỗi KHÔNG có là điều đúng: hiện bước "lập bảng kê chiết khấu" cho
 // Saigon Co.op là mời kế toán xuất một hóa đơn mình không được phép xuất
 // (Co.op trừ 17,75% tại nguồn và CO.OP xuất hóa đơn).
+// THỨ TỰ = VÒNG ĐỜI THÁNG, và số bước in ra ngay trên tab.
+//
+// Bản cũ render B3 · B1 · B2 · B4 · B4 · B5 — đúng chức năng, sai trình tự.
+// Người mới vào không đọc được nên làm cái nào trước, còn người quen thì vẫn
+// phải quét cả hàng để tìm bước mình cần vì vị trí không nói lên thứ tự.
+//
+// `no` là số bước của vòng đời (B1 xuất hóa đơn → B6 công nợ đến hạn). Hai tab
+// KHÔNG mang số — "Hàng hoàn" và "Hồ sơ nộp" — vì chúng là việc TREO BÊN vòng
+// đời chứ không phải một chặng mọi chuỗi đều đi qua: hồ sơ nộp chỉ Win có, còn
+// hàng hoàn chỉ phát sinh khi có hàng quay về. Đánh số cho chúng là nói dối về
+// một trình tự không tồn tại.
+//
+// `need` = cờ năng lực ở `mt_hub.get_board` phải bật thì bước mới hiện.
+// Ẩn bước chuỗi KHÔNG có là điều đúng: hiện bước "lập bảng kê chiết khấu" cho
+// Saigon Co.op là mời kế toán xuất một hóa đơn mình không được phép xuất
+// (Co.op trừ 17,75% tại nguồn và CO.OP xuất hóa đơn).
 const STEPS = [
-  { key: "chiet-khau", no: "3", label: "Chiết khấu mình xuất", icon: "fa-file-signature",
-    need: "we_issue_discount", count: ["sheets_draft", "sheets_await_invoice"],
-    hint: "Nạp file doanh số/TBCK → lập bảng kê BKCK → chốt lấy số → xuất hóa đơn CK trên MISA → ghi số về → sinh bút toán." },
-  // Đứng TRƯỚC "Hồ sơ nộp" vì nó đứng trước trong thực tế: giao hàng → Win nhận
-  // → xuất hóa đơn → mới gom hồ sơ nộp.
   { key: "cho-xuat-hd", no: "1", label: "Chờ xuất hóa đơn", icon: "fa-truck",
     need: "has_dossier", count: [],
     hint: "Hàng ĐÃ GIAO nhưng CHƯA xuất hóa đơn — Win chỉ cho xuất sau khi có phiếu nhập kho của họ. Đây CHƯA phải công nợ, nên không nằm trong số còn nợ." },
-  // BƯỚC 2 của vòng đời tháng. Trước đây bước này được ghi là "không thuộc
-  // portal" — chứng từ vẫn lập trên ERPNext/MISA, nhưng VIỆC CÒN THIẾU thì
-  // không màn hình nào theo, và đó mới là phần bị bỏ quên.
-  { key: "hang-hoan", no: "2", label: "Hàng hoàn chờ xử lý", icon: "fa-rotate-left",
-    need: null, count: ["hoan_chua_vao_so", "hoan_open"],
-    hint: "Mỗi LẦN HÀNG QUAY VỀ một dòng: nhận phiếu sự cố bên vận chuyển vào sổ → lập phiếu trả hàng ERPNext → hóa đơn thay thế/điều chỉnh. Một hóa đơn có thể có hai lần hàng về, và mỗi lần cần một phiếu trả riêng." },
-  { key: "ho-so", no: "", label: "Hồ sơ nộp", icon: "fa-folder-open",
-    need: "has_dossier", count: ["dossiers_draft"],
-    hint: "Bảng kê Excel + PDF hóa đơn đặt ĐÚNG TÊN. Win không xử lý thanh toán khi hồ sơ sai tên." },
-  // SỔ THEO DÕI — chỗ LÀM VIỆC quen thuộc, không phải một báo cáo.
-  //
-  // Đứng TRƯỚC "Đối soát thanh toán" vì đây là màn kế toán mở suốt ngày: nó
-  // thay cuốn Excel. Các bước kia là việc theo đợt; cuốn này là việc hằng ngày.
+  // SỔ THEO DÕI — chỗ LÀM VIỆC quen thuộc, không phải một báo cáo. Nó thay
+  // cuốn Excel kế toán vẫn mở suốt ngày.
   { key: "so-theo-doi", no: "2", label: "Sổ theo dõi hóa đơn", icon: "fa-book-open",
     need: null, count: [],
     hint: "Một dòng mỗi hóa đơn: hàng đã đi → hóa đơn MISA → tiền về → còn lại. Bấm một dòng để xem đợt thanh toán nào trả nó và đợt đó bị trừ những gì." },
+  { key: "hang-hoan", no: "", label: "Hàng hoàn chờ xử lý", icon: "fa-rotate-left",
+    need: null, count: ["hoan_chua_vao_so", "hoan_open"],
+    hint: "Mỗi LẦN HÀNG QUAY VỀ một dòng: nhận phiếu sự cố bên vận chuyển vào sổ → lập phiếu trả hàng ERPNext → hóa đơn thay thế/điều chỉnh. Một hóa đơn có thể có hai lần hàng về, và mỗi lần cần một phiếu trả riêng." },
+  { key: "chiet-khau", no: "3", label: "Chiết khấu mình xuất", icon: "fa-file-signature",
+    need: "we_issue_discount", count: ["sheets_draft", "sheets_await_invoice"],
+    hint: "Nạp file doanh số/TBCK → lập bảng kê BKCK → chốt lấy số → xuất hóa đơn CK trên MISA → ghi số về → sinh bút toán." },
+  { key: "ho-so", no: "", label: "Hồ sơ nộp", icon: "fa-folder-open",
+    need: "has_dossier", count: ["dossiers_draft"],
+    hint: "Bảng kê Excel + PDF đặt ĐÚNG TÊN. Win không xử lý thanh toán khi hồ sơ sai tên." },
   { key: "thanh-toan", no: "4", label: "Đối soát thanh toán", icon: "fa-money-check-dollar",
     need: null, count: ["advices_unreconciled", "lines_unmatched", "lines_review"],
     hint: "Nạp bảng kê của chuỗi → hệ khớp từng dòng với hóa đơn → xử lý dòng chưa khớp và dòng cần review." },
-  { key: "but-toan", no: "4", label: "Bút toán", icon: "fa-file-invoice-dollar",
+  { key: "but-toan", no: "5", label: "Bút toán", icon: "fa-file-invoice-dollar",
     need: null, count: ["draft_je"],
     hint: "Sinh bút toán NHÁP từ bảng kê rồi duyệt từng cái. Hệ thống không bao giờ tự ghi sổ." },
-  { key: "cong-no", no: "5", label: "Công nợ đến hạn", icon: "fa-clock",
+  { key: "cong-no", no: "6", label: "Công nợ đến hạn", icon: "fa-clock",
     need: null, count: [],
     hint: "Hóa đơn của chuỗi này còn nợ, xếp theo tuổi nợ tính từ hạn khai trên khách." },
 ];
@@ -212,6 +221,15 @@ export async function render({ container, query }) {
     einvOptsFor: null,
     // Trục HĐĐT trên danh sách hóa đơn (`mt.get_invoices`) — khác màn, khác ô.
     einvoice: "",
+    // Cỡ trang và cách xếp của bảng hóa đơn. Mặc định xếp theo TUỔI NỢ giảm
+    // dần — đó là thứ tự đi đòi; backend khai khóa ở `mt.SORTS`.
+    pageSize: 20,
+    sort: "tuoi",
+    picked: new Set(),
+    // Hàng đợi việc của chuỗi, nạp một lần cho mỗi (chuỗi, khoảng ngày).
+    wl: null,
+    wlKey: "",
+    wlFocus: "",
     board: null,
   };
 
@@ -251,6 +269,14 @@ async function paint(container, state) {
   }
   setHTML(container, chainShell(state, board));
   bindShellCommon(container, state);
+  // Thanh việc nạp SONG SONG với nội dung tab, không chặn: nó là lối tắt, còn
+  // bàn làm việc là thứ người ta vào để xem.
+  ensureWorklist(state).then((wl) => {
+    const slot = container.querySelector("#mt-worklist");
+    if (!slot) return;
+    setHTML(slot, worklistBar(state, wl));
+    bindWorklistBar(container, state);
+  });
   await loadTab(container, state);
   // Cuốn sổ thứ ba nạp SAU và KHÔNG chặn: nó quét `tabGL Entry`, nặng hơn hẳn
   // phần còn lại. `await` nó trước `loadTab` là bắt cả bàn làm việc chờ theo.
@@ -278,8 +304,45 @@ function syncHash(state) {
 }
 
 // ── Thanh ngày, dùng chung mọi tầng ────────────────────────────────────────
+// Ba mốc kế toán MT thật sự dùng. Hai ô ngày vẫn còn nguyên — preset chỉ là
+// lối tắt, không thay thế: kỳ thanh toán của chuỗi không bao giờ trùng tháng
+// dương lịch, nên bịt hai ô ngày lại là khóa mất đúng thứ họ cần nhất.
+const DATE_PRESETS = [
+  { key: "thang", label: "Tháng này" },
+  { key: "quy", label: "Quý này" },
+  { key: "ba-thang", label: "3 tháng" },
+];
+
+function presetRange(key) {
+  const now = new Date();
+  const iso = (d) => d.toISOString().slice(0, 10);
+  if (key === "thang") {
+    return [iso(new Date(now.getFullYear(), now.getMonth(), 1)), todayISO()];
+  }
+  if (key === "quy") {
+    return [iso(new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1)), todayISO()];
+  }
+  return [monthsAgo(3), todayISO()];
+}
+
+// Preset nào đang khớp khoảng ngày hiện tại. Không khớp cái nào -> không tô
+// cái nào: tô bừa một cái là nói với người dùng rằng khoảng đang xem là khoảng
+// đó, trong khi họ vừa gõ tay một khoảng khác.
+function activePreset(state) {
+  for (const p of DATE_PRESETS) {
+    const [f, t] = presetRange(p.key);
+    if (f === state.from && t === state.to) return p.key;
+  }
+  return "";
+}
+
 function dateBar(state) {
+  const on = activePreset(state);
   return html`
+    <span class="ktmt-preset">
+      ${DATE_PRESETS.map((p) => html`<button data-preset="${p.key}"
+        class="${on === p.key ? "is-on" : ""}">${p.label}</button>`)}
+    </span>
     <input type="date" class="kt-input kt-input--sm" id="mt-from" value="${state.from}">
     <span class="kt-sub">→</span>
     <input type="date" class="kt-input kt-input--sm" id="mt-to" value="${state.to}">`;
@@ -311,11 +374,24 @@ function boardShell(state, board) {
     </div>
 
     <div class="kt-stats kt-mb">
-      <div class="kt-stat">
-        <div class="kt-stat-label"><i class="fas fa-list-check"></i> Việc đang chờ</div>
-        <div class="kt-stat-value ${t.todo ? "warn" : ""}">${t.todo || 0}</div>
-        <div class="kt-stat-sub">trên ${chains.filter((c) => c.todo).length} chuỗi</div>
-      </div>
+      ${(() => {
+        // Việc dồn vào ĐÚNG MỘT chuỗi thì ô đếm này là một lối vào, không phải
+        // một con số để nhìn: bấm là vào thẳng chuỗi đó. Từ hai chuỗi trở lên
+        // thì không có "chuỗi đó" nào để mà vào — giữ nguyên là ô đếm.
+        const busy = chains.filter((c) => c.todo);
+        const one = busy.length === 1 ? busy[0] : null;
+        return html`<div class="kt-stat ${one ? "is-link" : ""}"
+            ${one ? html`data-gochain="${one.chain}"` : ""}>
+          <div class="kt-stat-label"><i class="fas fa-list-check"></i> Việc đang chờ</div>
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <div class="kt-stat-value ${t.todo ? "warn" : ""}">${t.todo || 0}</div>
+            ${one ? html`<b style="font-size:12px;color:var(--kt-primary)">→ ${one.chain}</b>` : ""}
+          </div>
+          <div class="kt-stat-sub">${one
+            ? "tất cả nằm trên 1 chuỗi — bấm để vào thẳng"
+            : `trên ${busy.length} chuỗi`}</div>
+        </div>`;
+      })()}
       <div class="kt-stat">
         <div class="kt-stat-label"><i class="fas fa-file-invoice-dollar"></i> Bút toán nháp</div>
         <div class="kt-stat-value ${t.draft_je ? "warn" : ""}">${t.draft_je || 0}</div>
@@ -353,6 +429,21 @@ function boardShell(state, board) {
           </div></div>`
       : ""}
 
+    ${(board.unassigned_debt && board.unassigned_debt.debt_invoices)
+      ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
+          <div class="kt-card-body" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+            <i class="fas fa-triangle-exclamation" style="color:var(--kt-warning);font-size:20px"></i>
+            <div style="flex-grow:1;min-width:220px">
+              <div style="font-weight:700;color:#0f172a">
+                ${formatVNDShort(board.unassigned_debt.debt)} đang treo ở khách chưa khai chuỗi</div>
+              <div class="kt-sub" style="margin-top:2px">
+                ${board.unassigned_debt.debt_invoices} hóa đơn — chừng nào chưa gán chuỗi thì không
+                chuỗi nào “xong” thật, và tiền này không nằm trong thẻ chuỗi nào.</div>
+            </div>
+            <button class="kt-btn kt-btn--sm" data-setup="assign">Gán chuỗi cho khách</button>
+          </div></div>`
+      : ""}
+
     ${(board.unassigned_debt && board.unassigned_debt.todo)
       ? html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-warning)">
           <div class="kt-card-body">
@@ -377,42 +468,119 @@ function boardShell(state, board) {
           </div></div>`
       : ""}
 
-    <div class="kt-ws-sections kt-mb">
-      ${chains.map((c) => chainCard(c))}
-    </div>
+    ${chainSplit(state, chains)}
 
-    <div class="kt-card kt-mb"><div class="kt-card-body">
-      <div style="font-weight:600;margin-bottom:4px"><i class="fas fa-layer-group"></i> Việc trên toàn kênh</div>
-      <div class="kt-sub" style="margin-bottom:10px">
-        Các việc dưới đây làm một lượt cho mọi chuỗi, không tách theo chuỗi.
-        <b>Số dư đầu kỳ</b> làm MỘT LẦN lúc chuyển từ Excel sang phần mềm.
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        ${GLOBAL_VIEWS.map((g) => html`
-          <button class="kt-btn kt-btn--outline kt-btn--sm" data-global="${g.key}">
-            <i class="fas ${g.icon}"></i> ${g.label}
-          </button>`)}
-        <button class="kt-btn kt-btn--outline kt-btn--sm" data-setup="stores">
-          <i class="fas fa-shop"></i> Điểm siêu thị
-        </button>
-        <button class="kt-btn kt-btn--outline kt-btn--sm" data-setup="assign">
-          <i class="fas fa-link"></i> Gán chuỗi cho khách
-        </button>
-        ${state.canManage
-          ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" data-setup="accounts">
-              <i class="fas fa-sliders"></i> Tài khoản hạch toán
-            </button>
-            <button class="kt-btn kt-btn--outline kt-btn--sm" data-setup="terms">
-              <i class="fas fa-calendar-day"></i> Hạn thanh toán
-            </button>`
-          : ""}
-      </div>
-    </div></div>
+    ${globalWork(state, board)}
   `;
 }
 
 // Một thẻ chuỗi. Chỉ liệt kê VIỆC PHẢI LÀM, không liệt kê hiện trạng: thẻ nào
 // cũng đầy số thì không thẻ nào nổi lên được.
+// ── CHUỖI CẦN LÀM vs CHUỖI ĐÃ XONG ────────────────────────────────────────
+//
+// Bản cũ vẽ TÁM thẻ lớn bằng nhau, và bảy trong tám chỉ để nói "không còn việc
+// nào trong khoảng đang xem". Bảy thẻ đó chiếm hai phần ba màn hình đầu tiên
+// để trả lời một câu không ai hỏi, còn chuỗi DUY NHẤT có việc thì nằm lẫn giữa
+// chúng, cùng cỡ, cùng màu.
+//
+// Chuỗi hết việc VẪN phải hiện — biến mất khỏi màn hình thì không phân biệt
+// được với "chuỗi này chưa bao giờ có dữ liệu" — nhưng một dòng là đủ, vì câu
+// hỏi về chúng chỉ còn là "còn nợ bao nhiêu".
+function chainSplit(state, chains) {
+  const busy = chains.filter((c) => c.todo);
+  const done = chains.filter((c) => !c.todo);
+  const nTodo = busy.reduce((a, c) => a + (c.todo || 0), 0);
+  return html`
+    ${busy.length
+      ? html`<div style="display:flex;align-items:center;gap:10px;margin:0 0 10px 2px">
+            <div style="font-size:14px;font-weight:800;color:#0f172a">Chuỗi cần làm</div>
+            <span class="ktmt-chip ktmt-chip--rose" style="cursor:default">${busy.length} chuỗi · ${nTodo} việc</span>
+          </div>
+          <div class="kt-ws-sections kt-mb">${busy.map((c) => chainCard(c))}</div>`
+      : html`<div class="kt-card kt-mb" style="border-left:4px solid var(--kt-success)">
+          <div class="kt-card-body">
+            <b style="color:var(--kt-success)"><i class="fas fa-check"></i> Không chuỗi nào còn việc</b>
+            <div class="kt-sub" style="margin-top:4px">trong khoảng đang xem. Các chuỗi vẫn còn nợ —
+              xem dải bên dưới, hoặc đổi khoảng ngày để soát kỳ khác.</div>
+          </div></div>`}
+
+    ${done.length
+      ? html`<div style="display:flex;align-items:center;gap:10px;margin:0 0 10px 2px">
+            <div style="font-size:14px;font-weight:800;color:#0f172a">Chuỗi đã xong việc</div>
+            <span class="ktmt-chip" style="color:var(--kt-success);background:#f0fdf4;cursor:default">${done.length} chuỗi</span>
+          </div>
+          <div class="kt-card kt-mb" style="padding:6px 0">
+            <div class="ktmt-donegrid">${done.map((c) => html`
+              <div class="ktmt-doneitem" data-gochain="${c.chain}">
+                <i class="fas fa-check"></i>
+                <b>${c.chain}</b>
+                <span class="kt-sub">${formatVNDShort(c.debt)}${c.debt_overdue
+                  ? html` · qh <b style="color:var(--kt-danger)">${formatVNDShort(c.debt_overdue)}</b>`
+                  : ""}</span>
+              </div>`)}</div>
+          </div>`
+      : ""}`;
+}
+
+// ── VIỆC TOÀN KÊNH — chia nhóm thay vì một tường chín nút ─────────────────
+//
+// Chín nút phẳng cùng cỡ cùng màu thì không cái nào nổi lên, và ba loại việc
+// rất khác nhau bị trộn: việc HẰNG NGÀY (duyệt bút toán, đòi nợ), việc KHAI
+// BÁO (gán chuỗi, điểm siêu thị, hạn thanh toán, tài khoản hạch toán) và một
+// việc CHỈ LÀM MỘT LẦN (số dư đầu kỳ) — cái cuối nguy hiểm nhất nếu ai đó mở
+// lại sau khi đã chốt, nên nó đứng riêng và viền đứt.
+function globalWork(state, board) {
+  const ua = board.unassigned_debt || null;
+  const daily = GLOBAL_VIEWS.filter((g) => g.key !== "g-so-du");
+  const once = GLOBAL_VIEWS.filter((g) => g.key === "g-so-du");
+  return html`<div class="kt-card kt-mb"><div class="kt-card-body">
+    <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:3px">
+      <i class="fas fa-layer-group"></i> Việc trên toàn kênh</div>
+    <div class="kt-sub" style="margin-bottom:14px">Làm một lượt cho mọi chuỗi, không tách theo chuỗi.</div>
+    <div class="ktmt-groups">
+      <div>
+        <div class="ktmt-kicker" style="margin-bottom:9px">Hằng ngày / hằng tuần</div>
+        <div style="display:flex;flex-direction:column;gap:7px">
+          ${daily.map((g) => html`<button class="ktmt-linkbtn" data-global="${g.key}"
+            title="${g.hint}"><i class="fas ${g.icon}"></i> ${g.label}</button>`)}
+          <button class="ktmt-linkbtn" data-goroute="/cong-no/mt"
+            title="Công nợ kênh MT + tuổi nợ — màn chung của mọi kênh">
+            <i class="fas fa-file-invoice-dollar"></i> Công nợ kênh MT (màn chung)</button>
+          <button class="ktmt-linkbtn" data-goroute="/hoa-don-vat"
+            title="Đối soát hóa đơn VAT với MISA">
+            <i class="fas fa-receipt"></i> Hóa đơn VAT</button>
+        </div>
+      </div>
+      <div>
+        <div class="ktmt-kicker" style="margin-bottom:9px">Khai báo &amp; danh mục</div>
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <button class="ktmt-linkbtn" data-setup="assign"><i class="fas fa-link"></i> Gán chuỗi cho khách
+            ${ua && ua.debt_invoices
+              ? html`<span class="ktmt-linkbtn-tag">${ua.debt_invoices}</span>`
+              : ""}</button>
+          <button class="ktmt-linkbtn" data-setup="stores"><i class="fas fa-shop"></i> Điểm siêu thị</button>
+          ${state.canManage
+            ? html`<button class="ktmt-linkbtn" data-setup="terms">
+                  <i class="fas fa-calendar-day"></i> Hạn thanh toán</button>
+                <button class="ktmt-linkbtn" data-setup="accounts">
+                  <i class="fas fa-sliders"></i> Tài khoản hạch toán</button>`
+            : ""}
+        </div>
+      </div>
+      <div>
+        <div class="ktmt-kicker" style="margin-bottom:9px">Chỉ làm một lần</div>
+        <div style="display:flex;flex-direction:column;gap:7px">
+          ${once.map((g) => html`<button class="ktmt-linkbtn ktmt-linkbtn--once"
+            data-global="${g.key}" title="${g.hint}"><i class="fas ${g.icon}"></i> ${g.label}</button>`)}
+        </div>
+        <div class="kt-sub" style="margin-top:9px;line-height:1.7">Làm MỘT LẦN lúc chuyển từ Excel
+          sang phần mềm. Chốt xong, hóa đơn trước ngày đó mà không có trong danh sách coi như đã
+          thanh toán — nên mở lại là đụng vào một kết luận đã ký.</div>
+      </div>
+    </div>
+  </div></div>`;
+}
+
 function chainCard(c) {
   const jobs = [];
   if (c.advices_unreconciled) jobs.push({ n: c.advices_unreconciled, t: "bảng kê chưa đối chiếu", tone: "danger" });
@@ -453,7 +621,9 @@ function chainCard(c) {
             </div>`
           : html`<div class="kt-sub" style="margin-top:10px">Không còn việc nào trong khoảng đang xem.</div>`}
 
-        <div class="kt-sub" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--kt-border)">
+        <div class="kt-sub" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--kt-border);
+                    display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <div style="flex-grow:1;min-width:0">
           Còn nợ <b>${formatVNDShort(c.debt)}</b>
           ${c.debt_overdue
             ? html` · quá hạn <b style="color:var(--kt-danger)">${formatVNDShort(c.debt_overdue)}</b>`
@@ -474,6 +644,11 @@ function chainCard(c) {
                   : ""}
               </div>`
             : ""}
+          </div>
+          ${c.todo
+            ? html`<button class="kt-btn kt-btn--sm" data-gochain="${c.chain}"
+                style="align-self:center">Vào làm →</button>`
+            : ""}
         </div>
       </div>
     </div>`;
@@ -490,16 +665,32 @@ function bindBoard(container, state) {
   });
 
   bindDates(container, state);
+  // MỘT đường vào chuỗi, ba chỗ bấm: cả thẻ chuỗi, nút "Vào làm →", và dòng
+  // trong dải "đã xong". Ba handler riêng thì sớm muộn một chỗ quên xóa bộ lọc
+  // của chuỗi trước, và người dùng vào chuỗi mới mà thấy danh sách chuỗi cũ.
+  const goChain = (chain) => {
+    if (!chain) return;
+    state.chain = chain;
+    state.view = "chuoi";
+    state.step = "";
+    state.page = 1;
+    state.customer = "";   // bộ lọc khách của chuỗi trước không còn nghĩa
+    state.search = "";
+    state.picked = new Set();
+    state.wl = null;       // hàng đợi việc là của CHUỖI — không mang theo
+    state.wlKey = "";
+    syncHash(state);
+    paint(container, state);
+  };
   container.querySelectorAll(".kt-chain-card").forEach((el) => {
-    el.addEventListener("click", () => {
-      state.chain = el.dataset.chain;
-      state.view = "chuoi";
-      state.step = "";
-      state.page = 1;
-      state.customer = "";   // bộ lọc khách của chuỗi trước không còn nghĩa
-      state.search = "";
-      syncHash(state);
-      paint(container, state);
+    el.addEventListener("click", () => goChain(el.dataset.chain));
+  });
+  container.querySelectorAll("[data-gochain]").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      // Nút nằm TRONG thẻ chuỗi — chặn nổi bọt, không thì một cú bấm chạy hai
+      // lần và `paint` vẽ lại giữa chừng.
+      e.stopPropagation();
+      goChain(el.dataset.gochain);
     });
   });
   container.querySelectorAll("button[data-global]").forEach((b) => {
@@ -511,6 +702,9 @@ function bindBoard(container, state) {
       syncHash(state);
       paint(container, state);
     });
+  });
+  container.querySelectorAll("[data-goroute]").forEach((b) => {
+    b.addEventListener("click", () => { location.hash = "#" + b.dataset.goroute; });
   });
   bindSetup(container, state);
 }
@@ -573,7 +767,6 @@ function bindSetup(container, state) {
 function bindDates(container, state) {
   const from = container.querySelector("#mt-from");
   const to = container.querySelector("#mt-to");
-  if (!from || !to) return;
   const onDate = () => {
     state.from = from.value;
     state.to = to.value;
@@ -581,8 +774,22 @@ function bindDates(container, state) {
     syncHash(state);
     paint(container, state);
   };
-  from.addEventListener("change", onDate);
-  to.addEventListener("change", onDate);
+  if (from) from.addEventListener("change", onDate);
+  if (to) to.addEventListener("change", onDate);
+
+  container.querySelectorAll(".ktmt-preset button[data-preset]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const [f, t] = presetRange(b.dataset.preset);
+      state.from = f;
+      state.to = t;
+      state.page = 1;
+      // Khoảng ngày đổi -> hàng đợi việc cũ nói về một kỳ khác.
+      state.wl = null;
+      state.wlKey = "";
+      syncHash(state);
+      paint(container, state);
+    });
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -624,6 +831,8 @@ function chainShell(state, board) {
       </div>
     </div>
 
+    <div id="mt-worklist"></div>
+
     ${twoBooksChain(c)}
 
     ${!c.n_customers
@@ -650,11 +859,12 @@ function chainShell(state, board) {
           </div></div>`
       : ""}
 
-    <div class="kt-segment kt-mb" id="mt-steps">
+    <div class="ktmt-steps" id="mt-steps">
       ${steps.map((s) => {
         const n = (s.count || []).reduce((a, k) => a + (c[k] || 0), 0);
-        return html`<button data-step="${s.key}" class="${state.step === s.key ? "is-active" : ""}">
-          ${s.no ? html`<span class="kt-sub">B${s.no}</span> ` : ""}${s.label}${n ? ` (${n})` : ""}
+        return html`<button data-step="${s.key}" class="ktmt-step ${state.step === s.key ? "is-on" : ""}">
+          ${s.no ? html`<span class="ktmt-step-no">B${s.no}</span>` : ""}${s.label}
+          ${n ? html`<span class="ktmt-step-todo">${n}</span>` : ""}
         </button>`;
       })}
     </div>
@@ -725,6 +935,8 @@ function bindShellCommon(container, state) {
   const back = container.querySelector("#mt-back");
   if (back) back.addEventListener("click", () => {
     state.view = "bang";
+    state.wl = null;
+    state.wlKey = "";
     state.chain = "";
     state.global = "";
     state.page = 1;
@@ -814,9 +1026,10 @@ async function loadTab(container, state) {
   try {
     res = await api.mtInvoices(bucket, {
       from_date: state.from, to_date: state.to, search: state.search,
-      page: state.page, chain: state.chain || undefined,
+      page: state.page, page_size: state.pageSize, chain: state.chain || undefined,
       customer: state.customer || undefined,
       einvoice: state.einvoice || undefined,
+      sort: state.sort || undefined,
     });
   } catch (e) {
     setHTML(body, html`<div class="kt-empty kt-empty--error"><i class="fas fa-circle-exclamation"></i><p>${e.message}</p></div>`);
@@ -830,11 +1043,20 @@ async function loadTab(container, state) {
     return loadTab(container, state);
   }
 
+  // Panel việc CHỈ có nghĩa trong bàn làm việc của một chuỗi: hàng đợi là của
+  // một chuỗi, còn ở màn liên chuỗi thì "13 việc" không trỏ vào ai.
+  const wl = state.view === "chuoi" ? await ensureWorklist(state) : null;
+
+  const cnt = res.counts || {};
   const head = html`
-    <div class="kt-card kt-mb"><div class="kt-card-body" style="display:flex;gap:8px;flex-wrap:wrap">
+    <div class="kt-card kt-mb"><div class="kt-card-body" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       ${PAY_VIEWS.map((v) => html`<button
-        class="kt-btn kt-btn--sm ${state.bucket === v.key ? "" : "kt-btn--outline"}"
-        data-payview="${v.key}">${v.label}</button>`)}
+        class="ktmt-chip ${state.bucket === v.key ? "is-on ktmt-chip--indigo" : "ktmt-chip--plain"}"
+        data-payview="${v.key}">${v.label}${cnt[v.key] == null ? "" : html` · <b>${cnt[v.key]}</b>`}</button>`)}
+      ${state.canManage && res.source === "erp"
+        ? html`<button class="kt-btn kt-btn--outline kt-btn--sm" id="mt-export" style="margin-left:auto">
+            <i class="fas fa-download"></i> Xuất Excel</button>`
+        : ""}
     </div></div>
 
     ${state.einvoice
@@ -849,12 +1071,25 @@ async function loadTab(container, state) {
           </div></div>`
       : ""}`;
 
-  if (bucket === "chiet_khau") {
-    setHTML(body, html`${head}${customerFilterBar(state)}${deductionTable(state, res)}`);
-  } else {
-    setHTML(body, html`${head}${customerFilterBar(state)}${invoiceTable(state, res)}`);
-    bindRelink(container, state);
-  }
+  const main = bucket === "chiet_khau"
+    ? html`${customerFilterBar(state)}${deductionTable(state, res)}`
+    : html`${customerFilterBar(state)}${invoiceTable(state, res)}`;
+
+  // HAI CỘT chỉ khi có hàng đợi để bày. Ở màn liên chuỗi hoặc khi chuỗi hết
+  // việc thì một cột trống 380px chỉ để nói "không còn gì" là ăn mất một phần
+  // ba bề ngang của bảng.
+  const split = wl && wl.total;
+  setHTML(body, html`${head}${split
+    ? html`<div class="ktmt-split">
+        <div>${queuePanel(state, wl)}</div>
+        <div>${main}</div>
+      </div>`
+    : main}`);
+
+  if (bucket !== "chiet_khau") bindRelink(container, state);
+  if (split) bindQueuePanel(container, state);
+  bindInvoiceTable(container, state, res);
+
   container.querySelectorAll("button[data-payview]").forEach((b) => {
     b.addEventListener("click", () => {
       state.bucket = b.dataset.payview;
@@ -862,6 +1097,7 @@ async function loadTab(container, state) {
       // ra đang xem một lát cắt của nó, không có gì trên màn hình nói ra điều đó.
       state.einvoice = "";
       state.page = 1;
+      state.picked = new Set();
       loadTab(container, state);
     });
   });
@@ -873,6 +1109,17 @@ async function loadTab(container, state) {
     state.einvoice = "";
     state.page = 1;
     loadTab(container, state);
+  });
+  const ex = container.querySelector("#mt-export");
+  if (ex) ex.addEventListener("click", async () => {
+    ex.disabled = true;
+    try {
+      await api.mtInvoicesExport(bucket, {
+        from_date: state.from, to_date: state.to, search: state.search,
+        chain: state.chain || undefined, customer: state.customer || undefined,
+        einvoice: state.einvoice || undefined, sort: state.sort || undefined,
+      });
+    } catch (e) { toast(e.message, "error"); } finally { ex.disabled = false; }
   });
   bindCustomerFilter(container, state);
   bindPager(container, state);
@@ -917,10 +1164,16 @@ function twoBooks(t, board) {
   //
   // Nhóm "chưa gán chuỗi" là MỘT DÒNG NGANG HÀNG, vì `totals` đã cộng nó. Để nó
   // ra ngoài bảng thì các dòng không cộng lại bằng con số ghi ngay trên đầu.
+  // Nhóm "chưa gán chuỗi" KHÔNG còn nằm lẫn như một dòng chuỗi: nó không phải
+  // một chuỗi, và để chung thì mắt đọc nó như chuỗi thứ chín. Nó lên DẢI CẢNH
+  // BÁO phía trên (có nút xử) và xuống TFOOT như một dòng tổng phụ — nhờ vậy
+  // `Tổng kênh MT` vẫn khớp `totals.debt`, đúng lý do nó được cộng vào tổng.
+  const ua = board.unassigned_debt && board.unassigned_debt.debt_invoices
+    ? board.unassigned_debt : null;
   const rows = (board.chains || [])
-    .concat(board.unassigned_debt ? [board.unassigned_debt] : [])
     .sort((a, b) => (b.debt_no_einv || 0) - (a.debt_no_einv || 0)
                     || (b.debt || 0) - (a.debt || 0));
+  const sum = (k) => rows.reduce((a, c) => a + (c[k] || 0), 0);
 
   return html`
     <div class="kt-card kt-mb"><div class="kt-card-body">
@@ -954,14 +1207,40 @@ function twoBooks(t, board) {
       </div>
 
       ${rows.length
-        ? html`<div class="kt-table-wrap" style="margin-top:12px"><table class="kt-table">
+        ? html`<div class="kt-table-wrap" style="margin-top:12px"><table class="kt-table ktmt-table">
             <thead><tr>
               <th class="kt-col-mid">Chuỗi</th>
               <th class="num">Còn nợ</th>
               <th class="num">Đòi được<div class="kt-sub">đã xuất HĐĐT</div></th>
               <th class="num">Chưa đòi được<div class="kt-sub">chưa xuất HĐĐT</div></th>
+              <th class="num">Việc</th>
             </tr></thead>
             <tbody>${rows.map((c) => twoBooksRow(c))}</tbody>
+            <tfoot>
+              <tr>
+                <td><b>Cộng ${rows.length} chuỗi</b></td>
+                <td class="num">${formatVND(sum("debt"))}</td>
+                <td class="num" style="color:var(--kt-success)">${formatVND(sum("debt_einv"))}</td>
+                <td class="num" style="color:var(--kt-danger)">${formatVND(sum("debt_no_einv"))}</td>
+                <td class="num">${sum("todo") || html`<span class="kt-sub">—</span>`}</td>
+              </tr>
+              ${ua ? html`<tr>
+                <td style="color:#92400e">Khách chưa khai chuỗi</td>
+                <td class="num" style="color:#92400e">${formatVND(ua.debt)}</td>
+                <td class="num" style="color:#92400e">${formatVND(ua.debt_einv || 0)}
+                  <span class="kt-sub">· ${ua.debt_einv_count || 0} HĐ</span></td>
+                <td class="num" style="color:#92400e">${formatVND(ua.debt_no_einv || 0)}
+                  <span class="kt-sub">· ${ua.debt_no_einv_count || 0} HĐ</span></td>
+                <td class="num" style="color:#92400e">${ua.todo || html`<span class="kt-sub">—</span>`}</td>
+              </tr>` : ""}
+              <tr style="background:var(--kt-bg-soft)">
+                <td><b>Tổng kênh MT</b></td>
+                <td class="num"><b>${formatVND(t.debt)}</b></td>
+                <td class="num" style="color:var(--kt-success)"><b>${formatVND(t.debt_einv || 0)}</b></td>
+                <td class="num" style="color:var(--kt-danger)"><b>${formatVND(t.debt_no_einv || 0)}</b></td>
+                <td class="num"><b>${t.todo || 0}</b></td>
+              </tr>
+            </tfoot>
           </table></div>`
         : ""}
 
@@ -994,6 +1273,9 @@ function twoBooksRow(c) {
     return html`<tr>
       <td class="kt-col-mid">${c.chain || html`<span class="kt-sub">(chưa gán chuỗi)</span>`}</td>
       <td class="num kt-sub" colspan="3">không còn nợ</td>
+      <td class="num">${c.todo
+        ? html`<span class="ktmt-state ktmt-state--qua-han">${c.todo}</span>`
+        : html`<span class="kt-sub">—</span>`}</td>
     </tr>`;
   }
   return html`<tr class="tb-chain" data-chain="${c.chain}" style="cursor:pointer"
@@ -1022,6 +1304,9 @@ function twoBooksRow(c) {
               c.debt_no_einv_oldest ? html` · từ ${formatDate(c.debt_no_einv_oldest)}` : ""}</div>
             ${deadlineNote(c)}`
         : html`<span class="kt-sub">—</span>`}</td>
+    <td class="num">${c.todo
+      ? html`<span class="ktmt-state ktmt-state--qua-han">${c.todo}</span>`
+      : html`<span class="kt-sub">—</span>`}</td>
   </tr>`;
 }
 
@@ -1234,10 +1519,13 @@ function deadlineNote(c) {
 // Ba rổ đầu là HÓA ĐƠN, rổ cuối là DÒNG BẢNG KÊ: khoản chuỗi trừ lại phần lớn
 // không gắn với hóa đơn nào (phí hỗ trợ, chiết khấu tháng, NET OFF) nên không
 // đếm thành hóa đơn được. Cùng một file, hai mặt.
+// MẶC ĐỊNH là `chua_thanh_toan` — xem `state.bucket` ở `render()`. Rổ "Tất cả"
+// là nơi hóa đơn đã thu đủ nằm lẫn với việc còn phải làm; mở màn ra mà thấy
+// 194 dòng trong đó 87 dòng không còn gì để làm thì việc thật bị pha loãng.
 const PAY_VIEWS = [
-  { key: "chua_thanh_toan", label: "Hóa đơn chưa thu đủ" },
-  { key: "da_thanh_toan", label: "Hóa đơn đã thu đủ" },
-  { key: "tat_ca", label: "Tất cả hóa đơn" },
+  { key: "chua_thanh_toan", label: "Chưa thu đủ" },
+  { key: "da_thanh_toan", label: "Đã thu đủ" },
+  { key: "tat_ca", label: "Tất cả" },
   { key: "chiet_khau", label: "Khoản chuỗi trừ lại" },
 ];
 
@@ -1296,23 +1584,99 @@ function bindPager(container, state) {
 // có hai thanh chọn chồng nhau, mỗi thanh biết một phần sự thật.
 function invoiceTable(state, res) {
   const tol = res.tolerance || 0;
+  const t = res.totals || null;
+  const picked = state.picked || (state.picked = new Set());
   return html`
-    <div class="kt-card"><div class="kt-card-body">
+    <div class="kt-card">
       ${!res.rows.length
-        ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i><p>Không có hóa đơn nào trong rổ này.</p></div>`
-        : html`<div class="kt-table-wrap"><table class="kt-table">
+        ? html`<div class="kt-card-body"><div class="kt-empty"><i class="fas fa-circle-check"></i>
+            <p>Không có hóa đơn nào trong rổ này.</p></div></div>`
+        : html`
+          <div class="ktmt-bulkbar">
+            <input type="checkbox" id="inv-all" title="Chọn cả trang">
+            <span>Chọn để <b id="inv-n">${picked.size || 0}</b> hóa đơn —
+              <button class="kt-btn kt-btn--outline kt-btn--sm" id="inv-bulk-bk" disabled>Gán vào bảng kê</button>
+              <button class="kt-btn kt-btn--outline kt-btn--sm" id="inv-bulk-paid" disabled>Đánh dấu đã thu</button>
+            </span>
+            <span style="margin-left:auto">Sắp xếp:
+              <select class="kt-input kt-input--sm" id="inv-sort" style="width:auto;display:inline-block">
+                ${(res.sorts || []).map((x) => html`<option value="${x.key}"
+                  ${res.sort === x.key ? "selected" : ""}>${x.label}</option>`)}
+              </select></span>
+          </div>
+          <div class="kt-table-wrap"><table class="kt-table ktmt-table">
             <thead><tr>
-              <th>Hóa đơn</th><th>Ngày</th><th>Khách</th><th>Ký hiệu · Số HĐ</th>
+              <th class="kt-col-role"></th>
+              <th>Hóa đơn</th><th>Ngày</th><th class="kt-col-wide">Khách</th>
+              <th>Ký hiệu · Số HĐ</th>
               <th class="num">Tổng tiền</th><th class="num">Đã nhận</th><th class="num">Còn lại</th>
-              <th>Bảng kê đã trả</th>
+              <th class="num">Tuổi nợ</th><th>Trạng thái</th>
             </tr></thead>
-            <tbody>${res.rows.map((r) => invoiceRow(r, tol, state.canManage))}</tbody>
+            <tbody>${res.rows.map((r) => invoiceRow(r, tol, state.canManage, picked))}</tbody>
+            ${t ? invoiceFoot(t) : ""}
           </table></div>
-          ${pager(res, "hóa đơn")}`}
-    </div></div>`;
+          <div class="kt-card-body" style="padding-top:0">
+            ${pageSizeBar(state, res)}
+            ${pager(res, "hóa đơn")}
+          </div>`}
+    </div>`;
 }
 
-function invoiceRow(r, tol, canManage) {
+// Dòng CỘNG của cả bộ lọc, không phải của trang đang xem — xem `_invoice_page`.
+// Ô "quá hạn" nói thêm số tờ CHƯA KHAI HẠN: chúng không nằm trong quá hạn mà
+// cũng không nằm trong chưa-đến-hạn, nên nếu không nói ra thì con số quá hạn
+// trông như đã bao trọn cả rổ.
+function invoiceFoot(t) {
+  return html`<tfoot><tr>
+    <td></td>
+    <td colspan="4"><b>Cộng ${t.count} hóa đơn của bộ lọc</b></td>
+    <td class="num">${formatVND(t.invoiced)}</td>
+    <td class="num">${formatVND(t.paid)}</td>
+    <td class="num"><b>${formatVND(t.remaining)}</b></td>
+    <td class="num">${t.overdue
+      ? html`<span style="color:var(--kt-danger)">qh ${formatVNDShort(t.overdue)}</span>`
+      : html`<span class="kt-sub">—</span>`}</td>
+    <td>${t.no_term
+      ? html`<span class="kt-sub" title="Không tính được tuổi nợ vì khách chưa khai hạn thanh toán">${t.no_term} tờ chưa khai hạn</span>`
+      : ""}</td>
+  </tr></tfoot>`;
+}
+
+const PAGE_SIZES = [20, 50, 100, 200];
+
+function pageSizeBar(state, res) {
+  return html`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
+    <span class="kt-sub">Số dòng mỗi trang</span>
+    <select class="kt-input kt-input--sm" id="inv-size" style="width:auto">
+      ${PAGE_SIZES.map((n) => html`<option value="${n}"
+        ${(res.page_size || 20) === n ? "selected" : ""}>${n}</option>`)}
+    </select>
+  </div>`;
+}
+
+const STATE_CLASS = {
+  "Quá hạn": "ktmt-state--qua-han",
+  "Phát hành lại": "ktmt-state--phat-hanh-lai",
+  "Cần xác nhận": "ktmt-state--can-xac-nhan",
+  "Chờ bảng kê": "ktmt-state--cho-bang-ke",
+  "Đã khớp": "ktmt-state--da-khop",
+};
+
+// Tuổi nợ. "Chưa khai hạn" KHÔNG được vẽ thành 0 ngày — 0 đọc là "đến hạn hôm
+// nay", một kết luận về việc chưa ai khai. Số âm là CÒN bao nhiêu ngày nữa.
+function ageCell(r) {
+  const d = r.days_overdue;
+  if (d === null || d === undefined) {
+    return html`<span class="kt-sub" title="Khách chưa khai hạn thanh toán">chưa khai hạn</span>`;
+  }
+  if (d > 0) {
+    const tone = d >= 30 ? "danger" : "warning";
+    return html`<b style="color:var(--kt-${tone})">${d} ngày</b>`;
+  }
+  return html`<span class="kt-sub">còn ${-d} ngày</span>`;
+}
+
+function invoiceRow(r, tol, canManage, picked) {
   const total = Math.abs(r.grand_total || 0);
   const paid = r.paid || 0;
   const remaining = r.remaining || 0;
@@ -1320,8 +1684,11 @@ function invoiceRow(r, tol, canManage) {
   // Nới rộng sai số ở giao diện là tự tay dán nhãn "đủ" cho hóa đơn còn thiếu tiền.
   const done = paid > 0 && remaining <= tol;
   const over = paid - total > tol;
+  const st = r.status || "";
 
   return html`<tr>
+    <td class="kt-col-role"><input type="checkbox" class="inv-pick" data-si="${r.name}"
+      ${picked && picked.has(r.name) ? "checked" : ""}></td>
     <td><a target="_blank" href="/desk/sales-invoice/${q(r.name)}">${r.name}</a>
       ${r.is_return ? html` <span class="kt-badge kt-badge--yellow">trả hàng</span>` : ""}</td>
     <td>${formatDate(r.posting_date)}</td>
@@ -1333,8 +1700,64 @@ function invoiceRow(r, tol, canManage) {
     <td class="num">${done
       ? html`<span class="kt-badge kt-badge--green">đủ</span>`
       : html`<b>${formatVND(remaining)}</b>`}</td>
-    <td>${paymentCell(r, canManage)}</td>
+    <td class="num">${ageCell(r)}</td>
+    <td>${st
+      ? html`<span class="ktmt-state ${STATE_CLASS[st] || ""}">${st}${
+          r.status_ref ? ` ${r.status_ref}` : ""}</span>`
+      : html`<span class="kt-sub">—</span>`}
+      ${(r.payments || []).length ? paymentCell(r, canManage) : ""}</td>
   </tr>`;
+}
+
+function bindInvoiceTable(container, state, res) {
+  const picked = state.picked || (state.picked = new Set());
+  const nEl = container.querySelector("#inv-n");
+  const bulkBtns = ["#inv-bulk-bk", "#inv-bulk-paid"]
+    .map((id) => container.querySelector(id)).filter(Boolean);
+  const sync = () => {
+    if (nEl) nEl.textContent = String(picked.size);
+    bulkBtns.forEach((b) => { b.disabled = !picked.size; });
+  };
+  container.querySelectorAll("input.inv-pick").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      if (cb.checked) picked.add(cb.dataset.si); else picked.delete(cb.dataset.si);
+      sync();
+    });
+  });
+  const all = container.querySelector("#inv-all");
+  if (all) all.addEventListener("change", () => {
+    container.querySelectorAll("input.inv-pick").forEach((cb) => {
+      cb.checked = all.checked;
+      if (all.checked) picked.add(cb.dataset.si); else picked.delete(cb.dataset.si);
+    });
+    sync();
+  });
+  sync();
+
+  // HAI THAO TÁC HÀNG LOẠT CHƯA CÓ TẦNG DƯỚI, và nút phải NÓI RA điều đó thay
+  // vì im lặng không làm gì. "Gán vào bảng kê" cần biết gán vào bảng kê NÀO và
+  // theo số tiền nào — đó là màn Đối soát, không phải một nút; "Đánh dấu đã
+  // thu" thì đụng thẳng vào công nợ mà không có chứng từ nào đứng sau, nên nó
+  // phải là một bút toán chứ không phải một cái tick.
+  bulkBtns.forEach((b) => b.addEventListener("click", () => {
+    toast(b.id === "inv-bulk-bk"
+      ? "Gán hàng loạt vào bảng kê làm ở màn Đối soát bảng kê — ở đó mới biết gán vào bảng kê nào và khớp theo số tiền nào."
+      : "Đánh dấu đã thu phải đi bằng BÚT TOÁN (bước Bút toán), không phải một cái tick: trừ công nợ mà không có chứng từ nào đứng sau là mất dấu tiền.",
+      "info");
+  }));
+
+  const sortSel = container.querySelector("#inv-sort");
+  if (sortSel) sortSel.addEventListener("change", () => {
+    state.sort = sortSel.value;
+    state.page = 1;
+    loadTab(container, state);
+  });
+  const sizeSel = container.querySelector("#inv-size");
+  if (sizeSel) sizeSel.addEventListener("change", () => {
+    state.pageSize = parseInt(sizeSel.value, 10) || 20;
+    state.page = 1;
+    loadTab(container, state);
+  });
 }
 
 // Một hóa đơn có thể được chuỗi trả LÀM NHIỀU LẦN (Co.op tách 8 kỳ trong một file,
@@ -7285,4 +7708,447 @@ async function openHoanDetail(container, state, name) {
       loadTab(container, state);
     } catch (e) { toast(e.message, "error"); del.disabled = false; }
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THANH VIỆC CẦN LÀM + PANEL "CẦN BẠN XỬ LÝ"
+//
+// Badge trên tab ghi 13. Mở tab ra là 194 hóa đơn, và 13 việc thật nằm lẫn
+// trong đó không có gì đánh dấu. Con số 13 chỉ tồn tại ở màn "Mọi chuỗi" rồi
+// biến mất đúng lúc người dùng vào chuỗi để làm.
+//
+// Hai chỗ sửa: một THANH dính trên đầu nói còn bao nhiêu việc và bấm được vào
+// từng nhóm, và một PANEL bên trái liệt kê đúng những dòng đó kèm nút hành
+// động. Số trên thanh, số trên badge và số dòng trong panel lấy từ CÙNG một
+// endpoint (`mt_hub.get_chain_worklist`) — ba con số tự cộng lấy ở ba nơi thì
+// sớm muộn cũng lệch, và lệch một lần là hết tin cả ba.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const WL_TONE = { amber: "ktmt-chip--amber", rose: "ktmt-chip--rose", indigo: "ktmt-chip--indigo" };
+const WL_GROUP_TONE = {
+  amber: "ktmt-queue-group--amber", rose: "ktmt-queue-group--rose",
+  indigo: "ktmt-queue-group--indigo",
+};
+
+// Nạp MỘT LẦN cho mỗi (chuỗi, khoảng ngày). Panel và thanh dùng chung kết quả:
+// gọi hai lần là hai ảnh chụp ở hai thời điểm, và chúng có quyền khác nhau.
+async function ensureWorklist(state) {
+  const key = `${state.chain}|${state.from}|${state.to}`;
+  if (state.wlKey === key && state.wl) return state.wl;
+  try {
+    state.wl = await api.mtChainWorklist(state.chain, { from_date: state.from, to_date: state.to });
+    state.wlKey = key;
+  } catch (_e) {
+    // Thanh việc hỏng KHÔNG được chặn cả bàn làm việc: phần còn lại vẫn dùng
+    // được, chỉ mất một lối tắt.
+    state.wl = null;
+    state.wlKey = key;
+  }
+  return state.wl;
+}
+
+function worklistBar(state, wl) {
+  if (!wl) return "";
+  if (!wl.total) {
+    return html`<div class="ktmt-worklist ktmt-worklist--done">
+      <div class="ktmt-worklist-icon"><i class="fas fa-check"></i></div>
+      <div>
+        <div class="ktmt-worklist-title">Không còn việc nào ở bước đối soát</div>
+        <div class="ktmt-worklist-hint">trong khoảng đang xem — đổi khoảng ngày để soát lại kỳ khác</div>
+      </div>
+    </div>`;
+  }
+  return html`<div class="ktmt-worklist">
+    <div class="ktmt-worklist-icon"><i class="fas fa-triangle-exclamation"></i></div>
+    <div>
+      <div class="ktmt-worklist-title">${wl.total} việc đang chờ bạn</div>
+      <div class="ktmt-worklist-hint">bấm một mục để nhảy thẳng vào danh sách đã lọc</div>
+    </div>
+    <div style="display:flex;gap:8px;flex-grow:1;flex-wrap:wrap">
+      ${(wl.groups || []).filter((g) => g.count).map((g) => html`<button
+        class="ktmt-chip ${WL_TONE[g.tone] || "ktmt-chip--plain"}" data-wl="${g.key}"
+        title="Mở bước Đối soát thanh toán và cuộn tới nhóm này">
+        <b>${g.count}</b> ${g.label.toLowerCase()}
+      </button>`)}
+    </div>
+    <button class="ktmt-chip ktmt-chip--plain" data-wl="open">Mở hàng đợi →</button>
+  </div>`;
+}
+
+function bindWorklistBar(container, state) {
+  container.querySelectorAll("#mt-worklist button[data-wl]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.step = "thanh-toan";
+      state.wlFocus = b.dataset.wl === "open" ? "" : b.dataset.wl;
+      state.page = 1;
+      syncHash(state);
+      paint(container, state);
+    });
+  });
+}
+
+// ── Panel "Cần bạn xử lý" ─────────────────────────────────────────────────
+function queuePanel(state, wl) {
+  if (!wl) {
+    return html`<div class="kt-card"><div class="kt-card-body kt-sub">
+      Không đọc được hàng đợi việc của chuỗi này. Danh sách hóa đơn bên phải vẫn dùng
+      bình thường.</div></div>`;
+  }
+  const groups = (wl.groups || []).filter((g) => g.count);
+  return html`<div class="kt-card">
+    <div class="ktmt-queue-head">
+      <div style="font-size:13px;font-weight:700;color:#0f172a">Cần bạn xử lý</div>
+      <div class="kt-sub" style="margin-top:2px">${wl.total
+        ? `${wl.total} việc · làm hết là chuỗi này “xong”`
+        : "không còn việc nào trong khoảng đang xem"}</div>
+    </div>
+    ${!groups.length
+      ? html`<div class="kt-empty" style="padding:28px 16px">
+          <i class="fas fa-circle-check"></i><p>Hết việc ở bước này.</p></div>`
+      : groups.map((g) => html`
+          <div class="ktmt-queue-group ${WL_GROUP_TONE[g.tone] || ""}"
+               id="wl-${g.key}">${g.label} · ${g.count}</div>
+          ${g.rows.map((r) => queueItem(g, r))}
+          ${g.more
+            ? html`<div class="ktmt-queue-more">+ ${g.more} dòng nữa — mở bảng kê để xem hết</div>`
+            : ""}
+        `)}
+  </div>`;
+}
+
+function queueItem(g, r) {
+  if (g.key === "bang_ke_chua_doi_chieu") {
+    return html`<div class="ktmt-queue-item">
+      <div class="ktmt-queue-main">
+        <div class="ktmt-queue-line1">${r.advice_no}${r.payment_date ? ` · ${formatDate(r.payment_date)}` : ""}</div>
+        <div class="ktmt-queue-line2">${r.n_lines} dòng · ${formatVNDShort(r.amount)}${
+          r.n_unmatched ? ` · ${r.n_unmatched} chưa nối` : " · đã nối hết"}</div>
+      </div>
+      <button class="kt-btn kt-btn--sm" data-recon="${r.advice}">Đối chiếu</button>
+    </div>`;
+  }
+  if (g.key === "dong_tien_chua_noi") {
+    return html`<div class="ktmt-queue-item">
+      <div class="ktmt-queue-main">
+        <div class="ktmt-queue-line1">${formatVND(r.amount)}${r.payment_date ? ` · ${formatDate(r.payment_date)}` : ""}</div>
+        <div class="ktmt-queue-line2">${r.store_name || r.description || "—"}${
+          r.advice_no ? ` · ${r.advice_no}` : ""}</div>
+      </div>
+      <button class="kt-btn kt-btn--outline kt-btn--sm" data-recon="${r.advice}">Nối</button>
+    </div>`;
+  }
+  return html`<div class="ktmt-queue-item">
+    <div class="ktmt-queue-main">
+      <div class="ktmt-queue-line1">${r.sales_invoice || r.inv_no || formatVND(r.amount)}</div>
+      <div class="ktmt-queue-line2">${r.confidence || "—"}${
+        r.advice_no ? ` · ${r.advice_no}` : ""} · ${formatVND(r.amount)}</div>
+    </div>
+    <button class="kt-btn kt-btn--outline kt-btn--sm" data-recon="${r.advice}">Xem</button>
+  </div>`;
+}
+
+function bindQueuePanel(container, state) {
+  container.querySelectorAll("button[data-recon]").forEach((b) => {
+    b.addEventListener("click", () => openReconcile(container, state, b.dataset.recon));
+  });
+  if (state.wlFocus) {
+    const el = container.querySelector("#wl-" + state.wlFocus);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    state.wlFocus = "";
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MÀN ĐỐI SOÁT MỘT BẢNG KÊ — ba vế trên cùng một hàng
+//
+// ⚠ MỖI BẢN GHI LÀ MỘT HÀNG GRID GỒM ĐÚNG BA Ô CON, không phải ba cột độc lập
+// đặt cạnh nhau. Ba cột rời thì một ô phải cao gấp ba ô trái là ba vế lệch
+// hàng ngay, và người đọc ghép dòng bảng kê của bản ghi này với hóa đơn của
+// bản ghi khác — sai tiền vì một lỗi dàn trang. Grid cấp cha (`.ktmt-rec`)
+// giữ ba ô của cùng một bản ghi luôn nằm cùng hàng dù ô nào cao bao nhiêu.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const REC_FILTERS = [
+  { key: "chua_noi", label: "Chưa nối" },
+  { key: "lech_tien", label: "Lệch tiền" },
+  { key: "da_khop", label: "Đã khớp" },
+];
+
+async function openReconcile(container, state, advice) {
+  const modal = openModal({
+    title: "Đối soát bảng kê",
+    icon: "fa-scale-balanced",
+    maxWidth: 1080,
+    body: html`<div class="kt-boot"><div class="kt-spinner"></div></div>`,
+  });
+  const st = { advice, filter: "", page: 1 };
+  await renderReconcile(container, state, modal, st);
+}
+
+async function renderReconcile(container, state, modal, st) {
+  let d;
+  try {
+    d = await api.mtRecon(st.advice, { filter: st.filter || undefined, page: st.page, page_size: 25 });
+  } catch (e) {
+    setHTML(modal.body, html`<div class="kt-empty kt-empty--error"><p>${e.message}</p></div>`);
+    return;
+  }
+
+  const pct = d.lines ? Math.round((d.matched / d.lines) * 100) : 0;
+  setHTML(modal.body, html`
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px">
+      <div style="flex-grow:1;min-width:220px">
+        <div style="font-size:15px;font-weight:800;color:#0f172a">${d.advice_no}</div>
+        <div class="kt-sub">${d.chain || "—"}${d.payment_date ? ` · ngày trả ${formatDate(d.payment_date)}` : ""}
+          · ${d.lines} dòng · ${formatVND(d.total_payment)}${d.file_name ? ` · ${d.file_name}` : ""}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="ktmt-kicker">Tiến độ khớp</div>
+        <div style="font-size:18px;font-weight:800;color:var(--kt-success)">${d.matched} / ${d.lines}</div>
+      </div>
+      <div style="width:200px">
+        <div class="ktmt-bar">
+          <div class="ktmt-bar-done" style="width:${pct}%"></div>
+          <div class="ktmt-bar-left"></div>
+        </div>
+        <div class="kt-sub" style="margin-top:6px">${d.counts.chua_noi
+          ? `còn ${d.counts.chua_noi} dòng chưa nối được hóa đơn`
+          : "mọi dòng đã nối được hóa đơn"}</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      ${REC_FILTERS.map((f) => html`<button class="ktmt-chip ${
+        st.filter === f.key ? "is-on ktmt-chip--indigo" : "ktmt-chip--plain"
+      }" data-recf="${f.key}">${f.label} · <b>${d.counts[f.key] || 0}</b></button>`)}
+      ${st.filter ? html`<button class="ktmt-chip ktmt-chip--plain" data-recf="">Xem hết</button>` : ""}
+      ${d.can_manage && d.auto_ready
+        ? html`<button class="kt-btn kt-btn--success kt-btn--sm" id="rec-bulk" style="margin-left:auto">
+            <i class="fas fa-wand-magic-sparkles"></i> Nhận hết ${d.auto_ready} gợi ý khớp 100%
+          </button>`
+        : ""}
+    </div>
+
+    ${!d.rows.length
+      ? html`<div class="kt-empty"><i class="fas fa-circle-check"></i>
+          <p>Không có dòng nào trong bộ lọc này.</p></div>`
+      : html`<div class="kt-card" style="padding:0"><div class="ktmt-rec">
+          <div class="ktmt-rec-head ktmt-rec-head--l"><span class="ktmt-kicker"
+            style="color:#92400e">Dòng trên bảng kê của ${d.chain || "chuỗi"}</span></div>
+          <div class="ktmt-rec-head ktmt-rec-head--m"><span class="ktmt-kicker">Khớp</span></div>
+          <div class="ktmt-rec-head ktmt-rec-head--r"><span class="ktmt-kicker"
+            style="color:#3730a3">Hóa đơn trên ERPNext</span></div>
+          ${d.rows.map((r) => reconRow(d, r))}
+        </div></div>
+        ${pager(d, "dòng")}`}
+
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px;
+                padding-top:12px;border-top:1px solid var(--kt-border)">
+      <div class="kt-sub" style="flex-grow:1;min-width:240px">Chốt xong sẽ sinh
+        <b>bút toán NHÁP</b> — hệ thống không tự ghi sổ, vẫn chờ người duyệt ở bước Bút toán.</div>
+      ${d.can_manage
+        ? html`<button class="kt-btn" id="rec-commit">
+            <i class="fas fa-stamp"></i> Chốt bảng kê &amp; sinh bút toán nháp</button>`
+        : html`<span class="kt-sub">Chỉ kế toán trưởng mới chốt được bảng kê.</span>`}
+    </div>
+  `);
+
+  bindReconcile(container, state, modal, st, d);
+}
+
+function reconRow(d, r) {
+  const hit = r.state === "chua_noi" && r.auto;
+  const cls = hit ? " ktmt-rec-hit" : "";
+  return html`
+    <div class="ktmt-rec-l${cls}">
+      <div class="ktmt-rec-amount">${formatVND(r.amount)}</div>
+      <div class="ktmt-rec-sub">${r.payment_date ? formatDate(r.payment_date) : "—"}
+        ${r.store_name ? ` · ${r.store_name}` : ""}${r.doc_no ? ` · ${r.doc_no}` : ""}</div>
+    </div>
+    <div class="ktmt-rec-m${cls}">
+      ${reconGap(r)}
+      ${reconAction(d, r)}
+    </div>
+    <div class="ktmt-rec-r${cls}">${reconRight(d, r)}</div>`;
+}
+
+function reconGap(r) {
+  if (r.state === "chua_noi") {
+    return r.auto
+      ? html`<span style="font-size:11px;font-weight:700;color:var(--kt-success)">lệch 0 ₫</span>`
+      : html`<span style="font-size:11px;font-weight:700;color:#b45309">chưa có</span>`;
+  }
+  if (!r.gap) return html`<span style="font-size:11px;font-weight:700;color:var(--kt-success)">lệch 0 ₫</span>`;
+  return html`<span style="font-size:11px;font-weight:700;color:var(--kt-danger)">${
+    r.gap > 0 ? "+" : "−"}${formatVND(Math.abs(r.gap))}</span>`;
+}
+
+function reconAction(d, r) {
+  if (!d.can_manage) return "";
+  if (r.state === "chua_noi") {
+    return r.auto
+      ? html`<button class="kt-btn kt-btn--success kt-btn--sm" data-reclink="${r.line}"
+          data-si="${r.auto.sales_invoice}">Nối ✓</button>`
+      : html`<button class="kt-btn kt-btn--outline kt-btn--sm" data-recfind="${r.line}">Tìm HĐ</button>`;
+  }
+  if (r.state === "lech_tien") {
+    return html`<button class="kt-btn kt-btn--danger kt-btn--sm" data-recvar="${r.line}">Giải trình</button>`;
+  }
+  return html`<button class="kt-btn kt-btn--outline kt-btn--sm" data-recunlink="${r.line}"
+    title="Gỡ liên kết dòng này">Gỡ</button>`;
+}
+
+function reconRight(d, r) {
+  if (r.state === "chua_noi") {
+    if (!r.candidates.length) {
+      return html`<div style="font-size:12px;font-weight:700;color:#b45309">Không có hóa đơn nào khớp số tiền</div>
+        <div class="ktmt-rec-sub">Chuỗi chưa gán khách, hoặc hóa đơn chưa ghi sổ. Bấm <b>Tìm HĐ</b> để chọn tay.</div>`;
+    }
+    return html`
+      ${r.auto ? "" : html`<div style="font-size:12px;font-weight:700;color:#b45309">Chưa đủ chắc để nhận tự động</div>`}
+      <div class="ktmt-rec-sub">${r.candidates.map((c) => html`
+        <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-top:4px">
+          <a target="_blank" href="/desk/sales-invoice/${q(c.sales_invoice)}"><b>${c.sales_invoice}</b></a>
+          <span>${formatVND(c.amount)}</span>
+          <span class="kt-sub">${c.posting_date ? formatDate(c.posting_date) : ""}${
+            c.ship_to ? ` · ${c.ship_to}` : ""}</span>
+          <span class="kt-badge kt-badge--${c.level === "chac_chan" ? "green" : (c.level === "khac_diem" ? "yellow" : "gray")}">${c.level_label}</span>
+          ${d.can_manage ? html`<button class="kt-btn kt-btn--outline kt-btn--sm"
+            data-reclink="${r.line}" data-si="${c.sales_invoice}">Chọn</button>` : ""}
+        </div>`)}</div>`;
+  }
+  const si = r.invoice;
+  return html`
+    <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+      <a target="_blank" href="/desk/sales-invoice/${q(r.sales_invoice)}"><b>${r.sales_invoice}</b></a>
+      ${si ? html`<b>${formatVND(si.amount)}</b>` : html`<span class="kt-sub">không đọc được hóa đơn</span>`}
+    </div>
+    ${si ? html`<div class="ktmt-rec-sub">${si.posting_date ? formatDate(si.posting_date) : ""}
+      ${si.inv_series ? ` · ${si.inv_series}` : ""}${si.inv_no ? ` · ${si.inv_no}` : ""}
+      ${si.ship_to ? ` · ${si.ship_to}` : ""}</div>` : ""}
+    ${r.variance_kind
+      ? html`<div class="ktmt-rec-sub" style="color:#b45309">
+          Đã ghi nhận <b>${r.variance_kind}</b> ${formatVND(Math.abs(r.variance_amount))}${
+            r.variance_note ? ` — ${r.variance_note}` : ""}.
+          <b>Khoản này VẪN còn trên công nợ</b> cho tới khi có bút toán.</div>`
+      : (r.state === "lech_tien"
+        ? html`<div class="ktmt-rec-sub" style="color:var(--kt-danger)">Chuỗi trả thiếu ${
+            formatVND(Math.abs(r.gap || 0))} — chọn khoản trừ để ghi nhận</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px">
+            ${(d.variance_kinds || []).map((k) => html`<button class="ktmt-chip ktmt-chip--plain"
+              data-recvar="${r.line}" data-kind="${k}">${k}</button>`)}
+          </div>`
+        : "")}`;
+}
+
+function bindReconcile(container, state, modal, st, d) {
+  const reload = () => renderReconcile(container, state, modal, st);
+
+  modal.body.querySelectorAll("button[data-recf]").forEach((b) => {
+    b.addEventListener("click", () => {
+      st.filter = b.dataset.recf;
+      st.page = 1;
+      reload();
+    });
+  });
+  modal.body.querySelectorAll(".kt-pager button[data-page]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const p = parseInt(b.dataset.page, 10);
+      if (!p || p === st.page) return;
+      st.page = p;
+      reload();
+    });
+  });
+
+  modal.body.querySelectorAll("button[data-reclink]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        await api.mtReconLink(b.dataset.reclink, b.dataset.si);
+        toast("Đã nối " + b.dataset.si, "success");
+        invalidateWorklist(state);
+        reload();
+      } catch (e) { toast(e.message, "error"); b.disabled = false; }
+    });
+  });
+  modal.body.querySelectorAll("button[data-recunlink]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        await api.mtReconLink(b.dataset.recunlink, "");
+        toast("Đã gỡ liên kết", "success");
+        invalidateWorklist(state);
+        reload();
+      } catch (e) { toast(e.message, "error"); b.disabled = false; }
+    });
+  });
+  modal.body.querySelectorAll("button[data-recvar]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const kind = b.dataset.kind;
+      if (!kind) {
+        // Nút "Giải trình" ở ô giữa chỉ cuộn tới hàng chip loại khoản trừ —
+        // không tự chọn hộ: chọn loại khoản trừ là một kết luận kế toán.
+        const chip = modal.body.querySelector(`button[data-recvar="${b.dataset.recvar}"][data-kind]`);
+        if (chip) chip.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      b.disabled = true;
+      try {
+        const out = await api.mtReconExplain(b.dataset.recvar, kind);
+        toast(out.message || "Đã ghi nhận", "success");
+        reload();
+      } catch (e) { toast(e.message, "error"); b.disabled = false; }
+    });
+  });
+  modal.body.querySelectorAll("button[data-recfind]").forEach((b) => {
+    b.addEventListener("click", () => {
+      // Chọn tay đi qua ĐÚNG modal cũ (`openRelinkModal`), không dựng một ô
+      // tìm kiếm thứ hai: modal đó đã mang sẵn cảnh báo "hóa đơn này đã có
+      // dòng khác trỏ tới" và luật chỉ-dòng-Thanh-toán-mới-nối.
+      openRelinkModal(container, state, b.dataset.recfind, "");
+    });
+  });
+
+  const bulk = modal.body.querySelector("#rec-bulk");
+  if (bulk) bulk.addEventListener("click", async () => {
+    bulk.disabled = true;
+    try {
+      const out = await api.mtReconBulk(st.advice);
+      toast(out.message, out.failed && out.failed.length ? "warning" : "success");
+      invalidateWorklist(state);
+      reload();
+    } catch (e) { toast(e.message, "error"); bulk.disabled = false; }
+  });
+
+  const commit = modal.body.querySelector("#rec-commit");
+  if (commit) commit.addEventListener("click", async () => {
+    commit.disabled = true;
+    try {
+      const pre = await api.mtReconCommit(st.advice);
+      modal.close();
+      // Bản xem trước đi qua ĐÚNG modal bút toán cũ — nó là chỗ đã có đủ cảnh
+      // báo về tài khoản thiếu, dòng không ghi sổ được và vân tay kế hoạch.
+      openJePreviewFor(container, state, st.advice, pre);
+    } catch (e) { toast(e.message, "error"); commit.disabled = false; }
+  });
+}
+
+// Sau khi chốt bảng kê thì mở ĐÚNG modal bút toán cũ. Không dựng bản xem trước
+// thứ hai ở đây: modal kia mới là chỗ có vân tay kế hoạch, cảnh báo thiếu tài
+// khoản, và danh sách dòng không ghi sổ được — ba thứ quyết định bút toán có
+// đúng hay không, và không nhìn thấy được từ màn đối soát.
+function openJePreviewFor(container, state, advice, pre) {
+  invalidateWorklist(state);
+  if (pre && pre.unlinked) {
+    toast(`Đã chốt, nhưng còn ${pre.unlinked} dòng chưa nối hóa đơn — chúng KHÔNG vào bút toán.`,
+      "warning");
+  }
+  openJePreview(container, state, advice);
+}
+
+// Hàng đợi việc đã CŨ sau mỗi lần nối/gỡ — không xóa thì thanh trên đầu vẫn ghi
+// con số của lúc mở màn.
+function invalidateWorklist(state) {
+  state.wl = null;
+  state.wlKey = "";
 }

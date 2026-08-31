@@ -27,6 +27,9 @@
   "column_break_match",
   "match_confidence",
   "return_invoice",
+  "variance_kind",
+  "variance_amount",
+  "variance_note",
   "source_row"
  ],
  "fields": [
@@ -166,6 +169,25 @@
    "search_index": 1
   },
   {
+   "fieldname": "variance_kind",
+   "fieldtype": "Select",
+   "label": "Khoản trừ giải thích phần lệch",
+   "options": "\nPhí trưng bày\nChiết khấu thương mại\nHàng trả\nKhác",
+   "description": "Chuỗi trả THIẾU so với hóa đơn, và đây là lý do. CHỈ LÀ NHÃN — nó KHÔNG làm phần thiếu biến mất khỏi công nợ. Muốn xóa khoản đó khỏi sổ thì phải có bút toán ở bước B5; ghi nhãn ở đây rồi coi như đã thu là mất tiền thật."
+  },
+  {
+   "fieldname": "variance_amount",
+   "fieldtype": "Currency",
+   "label": "Phần lệch đã ghi nhận",
+   "read_only": 1,
+   "description": "MÁY SUY tại thời điểm ghi nhãn, bằng đúng phần còn thiếu của hóa đơn được nối. Không cho gõ tay: một con số đi giải trình mà gõ tay được thì nó là ý kiến, suy từ chứng từ thì nó là bằng chứng."
+  },
+  {
+   "fieldname": "variance_note",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú phần lệch"
+  },
+  {
    "description": "Số dòng trong file gốc (1-indexed như người dùng nhìn trong Excel) — để truy ngược khi nghi ngờ.",
    "fieldname": "source_row",
    "fieldtype": "Int",
@@ -174,7 +196,7 @@
  ],
  "istable": 1,
  "links": [],
- "modified": "2026-08-18 00:00:00.000000",
+ "modified": "2026-08-31 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "MT",
  "name": "MT Payment Advice Line",

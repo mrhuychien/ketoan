@@ -83,6 +83,7 @@ bản chất đã biết chắc nhờ cột loại chứng từ, chứ không su
 
 import base64
 import hashlib
+import io
 from collections import defaultdict
 
 import frappe
@@ -827,79 +828,193 @@ def _parser_chains():
 # Màn hình 2 — Danh sách hóa đơn (chia trang 20/trang)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _invoice_page(company, from_date, to_date, bucket, search, page_size, offset, sort=None,
-                  customer=None, chain=None, einvoice=None):
-    p = {"company": company, "fd": from_date, "td": to_date, "tol": PAID_TOLERANCE,
-         "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT, "limit": page_size, "offset": offset}
-    # Điều kiện rổ dựng Ở ĐÂY chứ không nhận sẵn từ ngoài: rổ 'chưa thanh toán'
-    # phải kèm luật số dư đầu kỳ, và luật đó cần chính `p` để nhét tham số vào.
+# ═══════════════════════════════════════════════════════════════════════════
+# TRẠNG THÁI MỘT DÒNG HÓA ĐƠN — thứ tự ưu tiên là NGHIỆP VỤ, không phải màu
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Một hóa đơn có thể vừa quá hạn vừa mang số HĐĐT đã chết vừa được trả thiếu.
+# In cả ba là không nói được PHẢI LÀM GÌ TRƯỚC. Nên chỉ MỘT nhãn, và thứ tự
+# dưới đây là thứ tự việc phải làm:
+#
+#   1. Phát hành lại  — số HĐĐT đã hủy/bị thay thế trên MISA. Siêu thị KHÔNG
+#      trả theo số đã chết, nên dù có quá hạn 100 ngày thì việc đầu tiên vẫn
+#      là phát hành lại; đi đòi trước khi phát hành lại là đòi vào chỗ trống.
+#   2. Cần xác nhận   — chuỗi ĐÃ trả nhưng thiếu một khoản, hoặc dòng khớp còn
+#      đang ở mức "Cần review". Đây là việc của người, không phải của thời gian.
+#   3. Quá hạn        — đã tới hạn mà chưa thấy tiền.
+#   4. Đã khớp        — đã thu đủ theo bảng kê.
+#   5. Chờ bảng kê    — chưa tới hạn, chưa có bảng kê nào. BÌNH THƯỜNG.
+#
+# ⚠ "Chờ bảng kê" cố ý là nhãn CUỐI: phần lớn hóa đơn nằm ở đây, và nếu nó
+# tranh chỗ với bốn nhãn trên thì màn hình toàn một màu và không còn chỉ được
+# việc nào.
+ST_PHAT_HANH_LAI = "Phát hành lại"
+ST_CAN_XAC_NHAN = "Cần xác nhận"
+ST_QUA_HAN = "Quá hạn"
+ST_DA_KHOP = "Đã khớp"
+ST_CHO_BANG_KE = "Chờ bảng kê"
+
+INVOICE_STATUSES = (ST_PHAT_HANH_LAI, ST_CAN_XAC_NHAN, ST_QUA_HAN,
+                    ST_DA_KHOP, ST_CHO_BANG_KE)
+
+
+def _invoice_status(row, tol):
+    """(nhãn, tham chiếu) cho một dòng hóa đơn. Xem thứ tự ưu tiên ở trên."""
+    paid = flt(row.get("paid")) - flt(row.get("clawed_back"))
+    remaining = flt(row.get("remaining"))
+    lines = row.get("payments") or []
+
+    if cint(row.get("misa_dead")):
+        return ST_PHAT_HANH_LAI, ""
+    if any(cstr(ln.get("match_confidence")) == "Cần review" for ln in lines):
+        return ST_CAN_XAC_NHAN, ""
+    # Chuỗi đã trả nhưng còn thiếu: KHÔNG phải "quá hạn" — tiền đã về, chỉ là
+    # thiếu một khoản chưa ai giải thích. Gọi nó là quá hạn thì kế toán đi đòi
+    # cả tờ, trong khi việc thật là hỏi chuỗi trừ khoản gì.
+    if paid > tol and remaining > tol:
+        return ST_CAN_XAC_NHAN, ""
+    d = row.get("days_overdue")
+    if d is not None and cint(d) > 0:
+        return ST_QUA_HAN, ""
+    if paid > tol and remaining <= tol:
+        ref = ""
+        for ln in lines:
+            if ln.get("advice_no"):
+                ref = cstr(ln.get("advice_no"))
+                break
+        return ST_DA_KHOP, ref
+    return ST_CHO_BANG_KE, ""
+
+
+def _invoice_where(company, from_date, to_date, bucket, search, p,
+                   customer=None, chain=None, einvoice=None):
+    """Mệnh đề lọc CHUNG cho cả ba truy vấn: đếm · lấy trang · cộng tổng.
+
+    Dựng MỘT LẦN. Ba nơi tự ghép mệnh đề riêng thì sớm muộn dòng tfoot cộng
+    trên một tập khác với tập đang hiện — và một dòng tổng không khớp danh sách
+    ngay dưới nó là con số tệ nhất trên màn hình, vì trông vẫn rất đáng tin.
+    """
     where = _bucket_where(bucket, p, company)
-    mt = _mt_clause(p)
-    # Lọc theo CHUỖI. Hóa đơn không mang trường chuỗi — nó thuộc chuỗi nào là do
-    # KHÁCH HÀNG của nó thuộc chuỗi nào (SOP §0.2: Customer = chuỗi).
-    #
-    # Trước đây `get_invoices` NHẬN `chain` nhưng chỉ chuyển xuống nhánh khấu trừ;
-    # ba rổ hóa đơn thì bỏ qua im lặng. Giao diện xếp theo chuỗi vì thế hiện lẫn
-    # hóa đơn mọi chuỗi ngay trong bàn làm việc của một chuỗi.
     if chain:
         where += " AND " + _customer_in_clause(chain_customers(chain), p)
-    # Lọc theo KHÁCH: kế toán MT đối chiếu trên đầu từng khách, không phải trên
-    # cả kênh. Lọc bằng tham số ràng buộc, không nối chuỗi vào SQL.
     if customer:
         p["cus"] = customer
         where += " AND si.customer = %(cus)s"
-    # Lọc theo TRỤC HÓA ĐƠN ĐIỆN TỬ. Đây là cái làm phần chênh giữa hai cuốn sổ
-    # BẤM VÀO XỬ LÝ ĐƯỢC: thấy 'chưa xuất HĐĐT 412 triệu' mà không mở ra được
-    # danh sách thì con số đó chỉ để nhìn.
-    #
-    # Ô số HĐĐT chưa có trên site -> BỎ QUA bộ lọc thay vì lọc bừa: không có ô
-    # nghĩa là không biết, và "không biết" không được biến thành "chưa xuất".
     einv = einvoice_issued_expr()
     if einvoice and einv:
         where += " AND " + (einv if einvoice == "da" else "NOT " + einv)
-    join = _debt_joins()
     if search:
         p["kw"] = f"%{search}%"
         where += (" AND (si.name LIKE %(kw)s OR si.customer_name LIKE %(kw)s"
                   f" OR si.{SI_NO_FIELD} LIKE %(kw)s)") if _has_si_field(SI_NO_FIELD) else \
                  " AND (si.name LIKE %(kw)s OR si.customer_name LIKE %(kw)s)"
+    return where
 
-    total = frappe.db.sql(f"""
-        SELECT COUNT(*)
+
+# Cách xếp danh sách. Khóa gửi từ màn hình; SQL khai ở ĐÂY, không nhận chuỗi
+# ORDER BY từ client — nhận là mở cửa cho SQL injection qua đúng cái ô mà không
+# ai nghĩ tới.
+SORTS = {
+    # Mặc định: NỢ GIÀ NHẤT LÊN TRƯỚC. Đó là thứ tự đi đòi. Hóa đơn chưa khai
+    # hạn xếp cuối chứ không lẫn vào giữa — chúng không có tuổi để mà so.
+    "tuoi": "(od IS NULL), od DESC, si.posting_date ASC",
+    "moi_nhat": "si.posting_date DESC, si.name DESC",
+    "cu_nhat": "si.posting_date ASC, si.name ASC",
+    "tien_lon": "remaining DESC",
+}
+SORT_DEFAULT = "tuoi"
+
+# Trần xuất file. 5.000 dòng là một file Excel ~1MB, mở được; trên nữa thì
+# người ta không đọc bằng Excel nữa mà cần một báo cáo.
+MAX_EXPORT = 5000
+
+SORT_LABEL = {
+    "tuoi": "Tuổi nợ giảm dần",
+    "moi_nhat": "Hóa đơn mới nhất trước",
+    "cu_nhat": "Hóa đơn cũ nhất trước",
+    "tien_lon": "Còn lại nhiều nhất trước",
+}
+
+
+def _invoice_page(company, from_date, to_date, bucket, search, page_size, offset, sort=None,
+                  customer=None, chain=None, einvoice=None):
+    p = {"company": company, "fd": from_date, "td": to_date, "tol": PAID_TOLERANCE,
+         "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT, "limit": page_size,
+         "offset": offset, "aging_as_of": nowdate()}
+    from ketoan.api.mt_debt import overdue_days_expr
+
+    # Mệnh đề lọc dựng MỘT LẦN cho cả ba truy vấn — xem `_invoice_where`.
+    where = _invoice_where(company, from_date, to_date, bucket, search, p,
+                           customer=customer, chain=chain, einvoice=einvoice)
+    mt = _mt_clause(p)
+    join = _debt_joins()
+    base = f"""
         FROM `tabSales Invoice` si
         INNER JOIN `tabCustomer` c ON c.name = si.customer
         {join}
         WHERE si.docstatus = 1 AND si.company = %(company)s
           AND si.posting_date BETWEEN %(fd)s AND %(td)s
-          AND {mt} AND {where}
-    """, p)[0][0]
+          AND {mt} AND {where}"""
+
+    total = frappe.db.sql(f"SELECT COUNT(*) {base}", p)[0][0]
 
     series_col = f"si.{SI_SERIES_FIELD}" if _has_si_field(SI_SERIES_FIELD) else "NULL"
     no_col = f"si.{SI_NO_FIELD}" if _has_si_field(SI_NO_FIELD) else "NULL"
-    order = sort or "si.posting_date DESC, si.name DESC"
+    dead = misa_dead_expr() or "0"
+    od = overdue_days_expr()
+    order = SORTS.get(cstr(sort), SORTS[SORT_DEFAULT])
+
+    # ── CỘNG TRÊN CẢ BỘ LỌC, không phải trên trang đang xem ──────────────
+    #
+    # Dòng tfoot mà chỉ cộng 20 dòng đang hiện thì nó là một con số đúng về một
+    # tập không ai hỏi. Kế toán đọc "còn lại 613 tr" rồi đem đi đối chiếu với
+    # chuỗi — và con số đó phải là của CẢ rổ.
+    tot = frappe.db.sql(f"""
+        SELECT SUM(ABS(si.grand_total)) AS invoiced,
+               SUM({_NET_PAID}) AS paid,
+               SUM({_REMAIN}) AS remaining,
+               SUM(CASE WHEN {od} > 0 THEN {_REMAIN} ELSE 0 END) AS overdue,
+               SUM(CASE WHEN {od} IS NULL THEN 1 ELSE 0 END) AS n_no_term
+        {base}
+    """, p, as_dict=True)
+    t = tot[0] if tot else {}
+    totals = {
+        "invoiced": flt(t.get("invoiced")),
+        "paid": flt(t.get("paid")),
+        "remaining": flt(t.get("remaining")),
+        "overdue": flt(t.get("overdue")),
+        # Hóa đơn CHƯA KHAI HẠN không nằm trong "quá hạn" và cũng không nằm
+        # trong "chưa đến hạn" — nó là một khoảng trắng. Đếm và nói ra, chứ
+        # không để con số quá hạn trông như đã bao trọn.
+        "no_term": cint(t.get("n_no_term")),
+        "count": cint(total),
+    }
 
     rows = frappe.db.sql(f"""
         SELECT si.name, si.posting_date, si.customer, si.customer_name, si.is_return,
                si.net_total, si.total_taxes_and_charges, si.grand_total,
                {series_col} AS inv_series, {no_col} AS inv_no,
+               {dead} AS misa_dead,
                IFNULL(p.paid, 0) AS paid,
                IFNULL(p.clawed_back, 0) AS clawed_back,
                IFNULL(p.paid_review, 0) AS paid_review,
                IFNULL(p.pay_lines, 0) AS pay_lines,
                p.last_payment_date,
-               GREATEST((ABS(si.grand_total) - IFNULL(rt.returned, 0)) - (IFNULL(p.paid, 0) - IFNULL(p.clawed_back, 0)), 0) AS remaining
-        FROM `tabSales Invoice` si
-        INNER JOIN `tabCustomer` c ON c.name = si.customer
-        {join}
-        WHERE si.docstatus = 1 AND si.company = %(company)s
-          AND si.posting_date BETWEEN %(fd)s AND %(td)s
-          AND {mt} AND {where}
+               {od} AS od,
+               {_REMAIN} AS remaining
+        {base}
         ORDER BY {order}
         LIMIT %(limit)s OFFSET %(offset)s
     """, p, as_dict=True)
 
     _attach_payment_lines(rows)
-    return rows, total
+    for r in rows:
+        # `od` NULL = chưa khai hạn. KHÔNG đổi thành 0: 0 đọc là "đến hạn hôm
+        # nay", một kết luận về việc chưa ai khai.
+        r["days_overdue"] = None if r.get("od") is None else cint(r.get("od"))
+        r.pop("od", None)
+        r["status"], r["status_ref"] = _invoice_status(r, PAID_TOLERANCE)
+    return rows, total, totals
 
 
 def _attach_payment_lines(rows):
@@ -985,9 +1100,140 @@ def _deduction_page(company, from_date, to_date, search, page_size, offset, chai
     return rows, total
 
 
+def _bucket_counts(company, from_date, to_date, search, customer, chain, einvoice):
+    """Số dòng của TỪNG rổ, cho thanh chọn rổ.
+
+    Thanh chọn rổ không ghi số thì người dùng phải bấm vào mới biết rổ đó có gì
+    — và rổ rỗng trông y hệt rổ chưa bấm. Ba rổ hóa đơn đếm trong MỘT truy vấn
+    (cùng một bảng, cùng một bộ lọc, chỉ khác mệnh đề rổ); rổ khấu trừ đọc bảng
+    khác nên phải một truy vấn riêng.
+    """
+    p = {"company": company, "fd": from_date, "td": to_date, "tol": PAID_TOLERANCE,
+         "kind_payment": KIND_PAYMENT, "kind_deduct": KIND_DEDUCT}
+    # Mệnh đề rổ nhét tham số vào chính `p` — gọi cho CẢ HAI rổ trước khi dựng
+    # câu, để mọi %(obd..)s của luật số dư đầu kỳ đều có mặt.
+    w_chua = _bucket_where("chua_thanh_toan", p, company)
+    w_da = _bucket_where("da_thanh_toan", p, company)
+    common = _invoice_where(company, from_date, to_date, "tat_ca", search, p,
+                            customer=customer, chain=chain, einvoice=einvoice)
+    mt = _mt_clause(p)
+    join = _debt_joins()
+    r = frappe.db.sql(f"""
+        SELECT COUNT(*) AS tat_ca,
+               SUM(CASE WHEN {w_chua} THEN 1 ELSE 0 END) AS chua_thanh_toan,
+               SUM(CASE WHEN {w_da} THEN 1 ELSE 0 END) AS da_thanh_toan
+        FROM `tabSales Invoice` si
+        INNER JOIN `tabCustomer` c ON c.name = si.customer
+        {join}
+        WHERE si.docstatus = 1 AND si.company = %(company)s
+          AND si.posting_date BETWEEN %(fd)s AND %(td)s
+          AND {mt} AND {common}
+    """, p, as_dict=True)
+    out = {k: cint((r[0] if r else {}).get(k)) for k in
+           ("tat_ca", "chua_thanh_toan", "da_thanh_toan")}
+
+    p2 = {"company": company, "fd": from_date, "td": to_date}
+    w2 = ["l.parenttype = 'MT Payment Advice'", "a.company = %(company)s",
+          "IFNULL(l.payment_date, a.payment_date) BETWEEN %(fd)s AND %(td)s"]
+    for i, k in enumerate(DEDUCTION_KINDS):
+        p2[f"dk{i}"] = k
+    w2.append("l.row_kind IN (%s)" % ", ".join("%%(dk%d)s" % i
+                                               for i in range(len(DEDUCTION_KINDS))))
+    if chain:
+        p2["chain"] = chain
+        w2.append("a.chain = %(chain)s")
+    if customer:
+        p2["cus"] = customer
+        w2.append("a.customer = %(cus)s")
+    out["chiet_khau"] = cint(frappe.db.sql("""
+        SELECT COUNT(*) FROM `tabMT Payment Advice Line` l
+        INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent
+        WHERE """ + " AND ".join(w2), p2)[0][0])
+    return out
+
+
+@frappe.whitelist()
+def export_invoices(bucket, company=None, from_date=None, to_date=None, search=None,
+                    chain=None, customer=None, einvoice=None, sort=None):
+    """Tải danh sách hóa đơn ĐANG XEM ra Excel.
+
+    Xuất theo CÙNG bộ lọc và CÙNG cách xếp với màn hình, không phải "mọi hóa
+    đơn": file khác danh sách trên màn thì kế toán gửi cho chuỗi một bảng mà
+    chính họ chưa từng nhìn thấy.
+
+    Trần `MAX_EXPORT` dòng, và khi chạm trần thì BÁO LỖI chứ không cắt im lặng —
+    một file thiếu dòng mà không nói gì là file sẽ được đem đi đối chiếu.
+    """
+    guard_mt()
+    _require_tables()
+    if bucket not in BUCKETS or bucket == "chiet_khau":
+        frappe.throw(_("Chỉ xuất được rổ hóa đơn."))
+    from_date, to_date = _range(from_date, to_date)
+    company = _company(company)
+    search = norm_text(search)
+    customer = norm_text(customer) or None
+    einvoice = norm_text(einvoice) or None
+    sort = cstr(sort or "").strip() or None
+    if sort and sort not in SORTS:
+        frappe.throw(_("Cách xếp không hợp lệ: {0}").format(sort))
+
+    rows, total, _t = _invoice_page(company, from_date, to_date, bucket, search,
+                                    MAX_EXPORT + 1, 0, sort=sort, customer=customer,
+                                    chain=chain, einvoice=einvoice)
+    if total > MAX_EXPORT:
+        frappe.throw(_(
+            "Bộ lọc đang có {0} hóa đơn, vượt trần xuất file ({1}). Thu hẹp khoảng ngày "
+            "hoặc chọn một chuỗi rồi xuất lại — file bị cắt bớt mà không báo còn tệ hơn."
+        ).format(total, MAX_EXPORT))
+
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font
+    except ImportError:
+        frappe.throw(_("Site thiếu thư viện openpyxl — không xuất Excel được"))
+
+    cols = ("Hóa đơn", "Ngày", "Khách hàng", "Ký hiệu", "Số HĐ", "Tổng tiền",
+            "Đã nhận", "Còn lại", "Tuổi nợ (ngày)", "Trạng thái")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "HoaDon"
+    for c, label in enumerate(cols, start=1):
+        cell = ws.cell(row=1, column=c, value=label)
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+    for i, r in enumerate(rows, start=2):
+        d = r.get("days_overdue")
+        vals = (r.get("name"), getdate(r.get("posting_date")) if r.get("posting_date") else None,
+                cstr(r.get("customer_name") or r.get("customer")),
+                cstr(r.get("inv_series") or ""), cstr(r.get("inv_no") or ""),
+                abs(flt(r.get("grand_total"))),
+                flt(r.get("paid")) - flt(r.get("clawed_back")),
+                flt(r.get("remaining")),
+                # "Chưa khai hạn" để TRỐNG, không ghi 0: 0 trong một cột ngày
+                # đọc là "đến hạn hôm nay".
+                None if d is None else cint(d),
+                cstr(r.get("status") or ""))
+        for c, v in enumerate(vals, start=1):
+            cell = ws.cell(row=i, column=c, value=v)
+            if c == 2 and v is not None:
+                cell.number_format = "DD/MM/YYYY"
+            elif c in (6, 7, 8):
+                cell.number_format = "#,##0"
+    for c, w in enumerate((20, 12, 34, 12, 14, 16, 16, 16, 14, 16), start=1):
+        ws.column_dimensions[ws.cell(row=1, column=c).column_letter].width = w
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    frappe.local.response.filename = "hoadon-mt-%s-%s.xlsx" % (
+        (chain or "toankenh").replace(" ", "-"), cstr(to_date))
+    frappe.local.response.filecontent = buf.getvalue()
+    frappe.local.response.type = "download"
+
+
 @frappe.whitelist()
 def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None,
-                 page=1, page_size=PAGE_SIZE, chain=None, customer=None, einvoice=None):
+                 page=1, page_size=PAGE_SIZE, chain=None, customer=None, einvoice=None,
+                 sort=None):
     """Một TRANG của một rổ. bucket ∈ chua_thanh_toan | da_thanh_toan | chiet_khau | tat_ca.
 
     Chia trang ở tầng SQL, 20 dòng/trang. Kênh MT một tháng có hàng nghìn hóa
@@ -1008,15 +1254,29 @@ def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None
     search = norm_text(search)
     customer = norm_text(customer) or None
 
+    # Khóa xếp KHAI SẴN, không nhận chuỗi ORDER BY từ client. Nhận là mở cửa
+    # cho SQL injection qua đúng cái ô không ai nghĩ tới; và một khóa lạ mà im
+    # lặng bỏ qua thì màn hình ghi "xếp theo tuổi nợ" trong khi nó xếp theo
+    # ngày — người đọc tin cái nhãn.
+    sort = cstr(sort or "").strip() or None
+    if sort and sort not in SORTS:
+        frappe.throw(_("Cách xếp không hợp lệ: {0}").format(sort))
+
+    totals = None
     if bucket == "chiet_khau":
+        # ⚠ RỔ NÀY LÀ DÒNG KHẤU TRỪ, KHÔNG PHẢI HÓA ĐƠN — hình dạng dòng khác
+        # hẳn (không có `name`, `grand_total`, `remaining`, `payments`). Nên nó
+        # KHÔNG có tuổi nợ, không có trạng thái, không có dòng tổng theo tiền
+        # phải thu. Gắn bừa vào là bịa một cột cho một thứ không có cột đó.
         source = "mt_line"
         rows, total = _deduction_page(company, from_date, to_date, search, page_size, offset,
                                       chain, customer)
     else:
         source = "erp"
-        rows, total = _invoice_page(company, from_date, to_date, bucket,
-                                    search, page_size, offset, customer=customer,
-                                    chain=chain, einvoice=einvoice)
+        rows, total, totals = _invoice_page(company, from_date, to_date, bucket,
+                                            search, page_size, offset, sort=sort,
+                                            customer=customer, chain=chain,
+                                            einvoice=einvoice)
 
     return {
         "bucket": bucket,
@@ -1030,6 +1290,14 @@ def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None
         "page_size": page_size,
         "pages": max(1, -(-total // page_size)),
         "tolerance": PAID_TOLERANCE,
+        # Chỉ rổ hóa đơn mới có dòng tổng. `None` để màn hình BIẾT là không có,
+        # thay vì nhận một bộ số 0 rồi in ra như thể đã cộng xong.
+        "totals": totals,
+        "sort": sort or SORT_DEFAULT,
+        "sorts": [{"key": k, "label": lb} for k, lb in SORT_LABEL.items()],
+        "statuses": list(INVOICE_STATUSES),
+        "counts": _bucket_counts(company, from_date, to_date, search, customer,
+                                 chain, einvoice),
     }
 
 

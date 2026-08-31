@@ -72,7 +72,13 @@ class Spy:
         q = " ".join(str(query).split())
         self.calls.append((q, dict(values or {})))
         if q.upper().startswith("SELECT COUNT"):
-            return [[0]]
+            # HÌNH DẠNG phải theo `as_dict`, không chỉ theo nội dung câu.
+            # Bản cũ luôn trả `[[0]]`, nên hàm nào đếm bằng `as_dict=True` đều
+            # nổ `AttributeError: 'list' object has no attribute 'get'` — một
+            # lỗi của BỘ GIẢ, và người đọc sẽ đi tìm nó trong mã sản xuất.
+            import frappe as _fr
+
+            return [_fr._dict()] if kw.get("as_dict") else [[0]]
         return []
 
     def last(self, must_contain):

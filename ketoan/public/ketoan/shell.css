@@ -60,7 +60,13 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-nav { display: flex; gap: 6px; padding: 10px 22px; background: var(--kt-bg-card); border-bottom: 1px solid var(--kt-border); position: sticky; top: 75px; z-index: 40; overflow-x: auto; }
 .kt-nav-item { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: var(--kt-r-md); font-size: 13px; font-weight: 600; color: var(--kt-text-2); white-space: nowrap; }
 .kt-nav-item:hover { color: var(--kt-primary); background: #eef2ff; }
-.kt-nav-item.is-active { background: var(--kt-grad); color: #fff; }
+/* Tab đang mở dùng GẠCH CHÂN, không phải viên gradient.
+   Viên gradient để dành cho tab BƯỚC (B2–B6) ở khu MT: hai tầng điều hướng
+   khác nhau mà cùng một kiểu nhấn thì người dùng không đọc ra tầng nào đang ở
+   đâu — và trên màn MT hai hàng viên gradient nằm chồng nhau. */
+.kt-nav-item.is-active { color: #4f46e5; font-weight: 700; box-shadow: inset 0 -2px 0 var(--kt-primary);
+  border-radius: 0; }
+.kt-nav-item.is-active:hover { background: transparent; }
 
 /* ===== Main / container ===== */
 .kt-main { max-width: 1400px; margin: 0 auto; padding: 20px 22px 90px; }
@@ -361,3 +367,156 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
   .kt-nav-item { flex-direction: column; font-size: 18px; padding: 8px 12px; }
   .kt-erp-link span { display: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ktmt-* — MÀN LÀM VIỆC KẾ TOÁN MT
+   ═══════════════════════════════════════════════════════════════════════════
+   Tiền tố RIÊNG cho khu MT. Không phải vì `kt-` đụng Bootstrap (nó không —
+   Bootstrap của ERPNext dùng .card/.badge/.btn/.modal trần), mà vì khu này có
+   những thành phần chỉ nó dùng: thanh việc cần làm, bố cục hai cột, lưới đối
+   soát ba vế. Trộn vào `kt-` là mọi màn hình khác gánh theo CSS chúng không
+   dùng, và đổi một cái ở đây thì phải thử lại cả portal.
+
+   Màu và bo góc LẤY TỪ `--kt-*` ở đầu file, KHÔNG khai lại: một bảng màu thứ
+   hai là bảng màu sẽ lệch. */
+
+/* ── Thanh việc cần làm — dính khi cuộn ───────────────────────────────── */
+.ktmt-worklist { position: sticky; top: 128px; z-index: 30; display: flex; align-items: center;
+  gap: 14px; flex-wrap: wrap; border-left: 4px solid var(--kt-danger); padding: 12px 16px;
+  background: var(--kt-bg-card); border-radius: var(--kt-r-lg); border: 1px solid var(--kt-border);
+  border-left: 4px solid var(--kt-danger); box-shadow: var(--kt-shadow); margin-bottom: 14px; }
+.ktmt-worklist--done { border-left-color: var(--kt-success); }
+.ktmt-worklist-icon { width: 30px; height: 30px; border-radius: 9px; background: #fef2f2;
+  display: flex; align-items: center; justify-content: center; color: var(--kt-danger); flex: none; }
+.ktmt-worklist--done .ktmt-worklist-icon { background: #f0fdf4; color: var(--kt-success); }
+.ktmt-worklist-title { font-size: 13px; font-weight: 700; color: #0f172a; }
+.ktmt-worklist-hint { font-size: 11px; color: var(--kt-muted); }
+
+/* Chip đếm việc. `is-on` = đang lọc theo chip đó. */
+.ktmt-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600;
+  border-radius: 999px; padding: 6px 13px; cursor: pointer; border: 1px solid transparent;
+  background: var(--kt-bg-soft); color: var(--kt-text-2); font-family: inherit; }
+.ktmt-chip b { font-size: 13px; font-weight: 800; }
+.ktmt-chip:hover { border-color: var(--kt-primary); }
+.ktmt-chip.is-on { outline: 2px solid var(--kt-primary); outline-offset: 1px; }
+.ktmt-chip--amber { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+.ktmt-chip--rose { color: #9f1239; background: #fff1f2; border-color: #fecdd3; }
+.ktmt-chip--indigo { color: #3730a3; background: #eef2ff; border-color: #c7d2fe; }
+.ktmt-chip--plain { color: var(--kt-text-2); background: var(--kt-bg-card); border-color: var(--kt-border); }
+
+/* ── Bố cục hai cột của bước đối soát ─────────────────────────────────────
+   BA MỨC, và mức giữa KHÔNG phải cho đẹp — nó là kết quả của phép ĐO.
+   Panel 380px cố định thì bảng hóa đơn 10 cột chỉ còn 908px ở màn 1366 và
+   822px ở màn 1280, trong khi nó cần 918px/878px: CẢ HAI cỡ bắt buộc đều sinh
+   cuộn ngang ngay trong màn làm việc chính. `table_width_check` đo bảng ĐỨNG
+   RIÊNG nên không nhìn thấy chỗ này — mục "bảng trong bố cục hai cột" của nó
+   được thêm đúng vì lý do đó. */
+.ktmt-split { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 1439px) { .ktmt-split { grid-template-columns: 300px minmax(0, 1fr); gap: 12px; } }
+@media (max-width: 1180px) { .ktmt-split { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── Panel "Cần bạn xử lý" ────────────────────────────────────────────── */
+.ktmt-queue-head { padding: 14px 16px; border-bottom: 1px solid var(--kt-border); }
+.ktmt-queue-group { padding: 12px 16px 4px; font-size: 11px; font-weight: 700;
+  letter-spacing: .2px; text-transform: uppercase; }
+.ktmt-queue-group--amber { color: #92400e; }
+.ktmt-queue-group--rose { color: #9f1239; }
+.ktmt-queue-group--indigo { color: #3730a3; }
+.ktmt-queue-item { padding: 10px 16px; border-bottom: 1px solid #f1f5f9; display: flex;
+  align-items: center; gap: 10px; }
+.ktmt-queue-item:hover { background: var(--kt-bg-input); }
+.ktmt-queue-main { flex-grow: 1; min-width: 0; }
+.ktmt-queue-line1 { font-size: 12px; font-weight: 600; color: var(--kt-text); }
+.ktmt-queue-line2 { font-size: 11px; color: var(--kt-text-2); margin-top: 2px; }
+.ktmt-queue-more { padding: 9px 16px; font-size: 11px; font-weight: 600; color: var(--kt-text-2);
+  border-bottom: 1px solid #f1f5f9; }
+
+/* ── Tab bước B2–B6 ───────────────────────────────────────────────────── */
+.ktmt-steps { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  background: var(--kt-bg-card); border: 1px solid var(--kt-border); border-radius: 14px;
+  padding: 6px; margin-bottom: 14px; }
+.ktmt-step { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600;
+  color: var(--kt-text-2); border-radius: var(--kt-r-sm); padding: 8px 14px; cursor: pointer;
+  border: none; background: transparent; font-family: inherit; white-space: nowrap; }
+.ktmt-step:hover { background: var(--kt-bg-soft); }
+.ktmt-step.is-on { color: #fff; background: var(--kt-grad); font-weight: 700; }
+.ktmt-step-no { font-size: 10px; font-weight: 800; color: var(--kt-muted); background: var(--kt-bg-soft);
+  border-radius: 5px; padding: 2px 5px; }
+.ktmt-step.is-on .ktmt-step-no { color: #fff; background: rgb(255 255 255 / .22); }
+.ktmt-step-todo { font-size: 10px; font-weight: 800; color: var(--kt-danger); background: #fff;
+  border-radius: 999px; padding: 2px 7px; border: 1px solid #fecaca; }
+.ktmt-step.is-on .ktmt-step-todo { border-color: transparent; }
+
+/* ── Bảng hóa đơn: badge trạng thái · dòng cộng · thanh chọn nhiều ────── */
+.ktmt-state { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 3px 9px;
+  white-space: nowrap; display: inline-block; }
+.ktmt-state--qua-han { color: var(--kt-danger); background: #fef2f2; }
+.ktmt-state--phat-hanh-lai { color: #b45309; background: #fffbeb; }
+.ktmt-state--can-xac-nhan { color: #9f1239; background: #fff1f2; }
+.ktmt-state--cho-bang-ke { color: #3730a3; background: #eef2ff; }
+.ktmt-state--da-khop { color: var(--kt-success); background: #f0fdf4; }
+.ktmt-bulkbar { padding: 9px 16px; background: var(--kt-bg-input); border-bottom: 1px solid var(--kt-border);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--kt-text-2); }
+.ktmt-table tfoot td { background: var(--kt-bg-input); border-top: 2px solid var(--kt-border);
+  border-bottom: none; font-weight: 700; }
+
+/* ── Dải chuỗi đã xong ────────────────────────────────────────────────── */
+.ktmt-donegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.ktmt-doneitem { padding: 11px 18px; display: flex; align-items: center; gap: 9px;
+  border-right: 1px solid #f1f5f9; border-top: 1px solid #f1f5f9; cursor: pointer; min-width: 0; }
+.ktmt-doneitem:hover { background: var(--kt-bg-input); }
+.ktmt-doneitem i { color: var(--kt-success); }
+.ktmt-doneitem b { font-size: 13px; font-weight: 700; color: var(--kt-text); flex-grow: 1;
+  overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Nhóm việc toàn kênh ──────────────────────────────────────────────── */
+.ktmt-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px; }
+.ktmt-kicker { font-size: 11px; font-weight: 700; color: var(--kt-text-2); letter-spacing: .3px;
+  text-transform: uppercase; }
+.ktmt-linkbtn { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600;
+  color: var(--kt-text); border: 1px solid var(--kt-border); border-radius: 9px; padding: 9px 12px;
+  cursor: pointer; background: var(--kt-bg-card); font-family: inherit; text-align: left; width: 100%; }
+.ktmt-linkbtn:hover { border-color: var(--kt-primary); color: var(--kt-primary); }
+.ktmt-linkbtn--once { border-style: dashed; color: var(--kt-text-2); }
+.ktmt-linkbtn-tag { font-size: 10px; font-weight: 700; color: #fff; background: #b45309;
+  border-radius: 999px; padding: 2px 7px; margin-left: auto; }
+.ktmt-linkbtn-tag--soft { color: #b45309; background: #fffbeb; }
+
+/* ── Lưới đối soát BA VẾ ──────────────────────────────────────────────────
+   MỖI BẢN GHI LÀ MỘT HÀNG GRID GỒM ĐÚNG BA Ô CON, không phải ba cột độc lập.
+   Ba cột độc lập thì ô phải cao gấp ba ô trái là ba vế lệch hàng ngay, và
+   người đọc ghép nhầm dòng bảng kê với hóa đơn của dòng khác — sai tiền vì một
+   lỗi dàn trang. Grid cấp cha giữ ba ô của cùng một bản ghi luôn cùng hàng. */
+.ktmt-rec { display: grid; grid-template-columns: minmax(0, 1fr) 132px minmax(0, 1fr); }
+.ktmt-rec-l { padding: 13px 14px; border-right: 1px solid var(--kt-border); border-bottom: 1px solid #f1f5f9; min-width: 0; }
+.ktmt-rec-m { padding: 13px 10px; border-right: 1px solid var(--kt-border); border-bottom: 1px solid #f1f5f9;
+  background: var(--kt-bg-input); display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 6px; }
+.ktmt-rec-r { padding: 13px 14px; border-bottom: 1px solid #f1f5f9; min-width: 0; }
+.ktmt-rec-head { padding: 10px 14px; border-bottom: 1px solid var(--kt-border); }
+.ktmt-rec-head--l { background: #fffbeb; border-right: 1px solid var(--kt-border); }
+.ktmt-rec-head--m { background: var(--kt-bg-input); border-right: 1px solid var(--kt-border); text-align: center; }
+.ktmt-rec-head--r { background: #eef2ff; }
+.ktmt-rec-hit { background: #fff7ed; }
+.ktmt-rec-amount { font-size: 14px; font-weight: 800; color: #0f172a; }
+.ktmt-rec-sub { font-size: 11px; color: var(--kt-text-2); margin-top: 3px; line-height: 1.55; }
+.ktmt-bar { height: 8px; border-radius: 999px; background: var(--kt-bg-soft); overflow: hidden; display: flex; }
+.ktmt-bar-done { background: var(--kt-success); }
+.ktmt-bar-left { flex-grow: 1; background: #fca5a5; }
+@media (max-width: 820px) {
+  /* Hẹp quá thì ba vế xếp dọc — VẪN theo bản ghi: ô trái, ô giữa, ô phải của
+     cùng một dòng nằm liền nhau, không phải ba cột rời rồi cuộn tìm nhau. */
+  .ktmt-rec { grid-template-columns: minmax(0, 1fr); }
+  .ktmt-rec-l, .ktmt-rec-m, .ktmt-rec-r { border-right: none; }
+  .ktmt-rec-m { flex-direction: row; justify-content: flex-start; }
+  .ktmt-rec-head--l, .ktmt-rec-head--m, .ktmt-rec-head--r { display: none; }
+}
+
+/* ── Chip preset khoảng ngày ──────────────────────────────────────────── */
+.ktmt-preset { display: inline-flex; background: var(--kt-bg-card); border: 1px solid var(--kt-border);
+  border-radius: 10px; overflow: hidden; }
+.ktmt-preset button { font-size: 12px; font-weight: 600; color: var(--kt-text-2); padding: 7px 11px;
+  border: none; border-right: 1px solid var(--kt-border); background: transparent; cursor: pointer;
+  font-family: inherit; }
+.ktmt-preset button:last-child { border-right: none; }
+.ktmt-preset button.is-on { color: #4f46e5; background: #eef2ff; font-weight: 700; }

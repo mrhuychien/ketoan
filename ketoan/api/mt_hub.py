@@ -190,11 +190,21 @@ def get_board(company=None, from_date=None, to_date=None, as_of=None):
     # ĐẾM RIÊNG HAI LOẠI: "chưa khớp" là tiền không biết của hóa đơn nào; "cần
     # review" là máy đoán mà chưa ai chốt. Gộp chung thì kế toán không biết nên
     # đi tìm hóa đơn hay chỉ cần xác nhận.
+    # ⚠ HAI Ô NÀY PHẢI RỜI NHAU. Một dòng vừa chưa nối hóa đơn vừa mang cờ
+    # "Cần review" là MỘT dòng và MỘT việc; đếm vào cả hai ô thì `todo` phồng
+    # lên, và badge trên tab nói 13 trong khi panel "Cần bạn xử lý" liệt kê 12.
+    # Không con số nào còn đáng tin sau lần lệch đầu tiên.
+    #
+    # Chưa nối THẮNG: chưa biết dòng tiền này trả cho hóa đơn nào thì không có
+    # gì để mà xác nhận.
     lines = _count_by_chain("""
         SELECT a.chain,
                SUM(CASE WHEN l.row_kind = %(kind_payment)s
                          AND IFNULL(l.sales_invoice, '') = '' THEN 1 ELSE 0 END) AS n_unmatched,
-               SUM(CASE WHEN l.match_confidence = 'Cần review' THEN 1 ELSE 0 END) AS n_review
+               SUM(CASE WHEN l.match_confidence = 'Cần review'
+                         AND NOT (l.row_kind = %(kind_payment)s
+                                  AND IFNULL(l.sales_invoice, '') = '')
+                        THEN 1 ELSE 0 END) AS n_review
         FROM `tabMT Payment Advice Line` l
         INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent
                AND a.company = %(company)s
@@ -493,4 +503,147 @@ def get_chain(chain, company=None, from_date=None, to_date=None, as_of=None):
         "blocked": blocked,
         "can_manage": board["can_manage"],
         "basis_note": board["basis_note"],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HÀNG ĐỢI VIỆC CỦA MỘT CHUỖI
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Thẻ chuỗi ở màn "Mọi chuỗi" nói "13 việc". Vào trong chuỗi thì con số đó biến
+# mất, và bước "Đối soát thanh toán" mở ra 194 hóa đơn — trong đó 13 việc thật
+# nằm lẫn. Người dùng đọc badge 13 rồi nhìn 194 dòng và không biết bấm vào đâu.
+#
+# Hàm này trả về ĐÚNG 13 dòng đó, có tên có số, kèm hành động cho từng dòng.
+#
+# ⚠ BA NHÓM PHẢI ĐẾM ĐÚNG CÁI MÀ THẺ CHUỖI ĐẾM. `get_board` cộng
+# `advices_unreconciled + lines_unmatched + lines_review + ...` — nếu hàm này
+# đếm theo luật khác thì badge nói 13 mà panel liệt kê 11, và không con số nào
+# còn đáng tin. Nên ba truy vấn dưới đây dùng LẠI đúng ba mệnh đề của
+# `get_board`, chỉ khác ở chỗ chúng trả về DÒNG thay vì đếm.
+
+WORK_ADVICE = "bang_ke_chua_doi_chieu"
+WORK_UNMATCHED = "dong_tien_chua_noi"
+WORK_REVIEW = "dong_can_xac_nhan"
+
+WORK_GROUPS = (
+    {"key": WORK_ADVICE, "label": "Bảng kê chưa đối chiếu", "tone": "amber",
+     "action": "Đối chiếu"},
+    {"key": WORK_UNMATCHED, "label": "Dòng tiền chưa nối hóa đơn", "tone": "rose",
+     "action": "Nối"},
+    {"key": WORK_REVIEW, "label": "Dòng cần người xác nhận", "tone": "indigo",
+     "action": "Xem"},
+)
+
+# Trần dòng trả về cho MỖI nhóm. Panel là chỗ BẮT ĐẦU làm việc, không phải chỗ
+# đọc hết: nhóm có 300 dòng thì liệt kê 300 dòng cũng chẳng ai đọc, mà lại nặng.
+# Số đếm LUÔN là số đầy đủ — cắt danh sách thì phải nói ra đã cắt.
+WORK_LIMIT = 8
+
+
+@frappe.whitelist()
+def get_chain_worklist(chain, company=None, from_date=None, to_date=None):
+    """Ba nhóm việc của một chuỗi, kèm dòng để bấm thẳng vào."""
+    guard_mt()
+    _require_tables()
+    company = _company(company)
+    from_date, to_date = _range(from_date, to_date)
+    chain = cstr(chain).strip()
+    if not chain:
+        frappe.throw(_("Chưa chọn chuỗi"))
+
+    p = {"company": company, "fd": from_date, "td": to_date, "chain": chain,
+         "kind_payment": KIND_PAYMENT, "draft": ADVICE_DRAFT, "limit": WORK_LIMIT}
+
+    # ── 1. Bảng kê đã nạp mà chưa đối chiếu xong ─────────────────────────
+    n_advice = cint(frappe.db.sql("""
+        SELECT COUNT(*) FROM `tabMT Payment Advice` a
+        WHERE a.company = %(company)s AND a.chain = %(chain)s
+          AND a.payment_date BETWEEN %(fd)s AND %(td)s
+          AND IFNULL(a.reconciled, 0) = 0
+    """, p)[0][0])
+    advices = frappe.db.sql("""
+        SELECT a.name, a.advice_no, a.payment_date, a.status, a.total_payment,
+               COUNT(l.name) AS n_lines,
+               SUM(CASE WHEN l.row_kind = %(kind_payment)s
+                         AND IFNULL(l.sales_invoice, '') = '' THEN 1 ELSE 0 END) AS n_unmatched
+        FROM `tabMT Payment Advice` a
+        LEFT JOIN `tabMT Payment Advice Line` l
+               ON l.parent = a.name AND l.parenttype = 'MT Payment Advice'
+        WHERE a.company = %(company)s AND a.chain = %(chain)s
+          AND a.payment_date BETWEEN %(fd)s AND %(td)s
+          AND IFNULL(a.reconciled, 0) = 0
+        GROUP BY a.name
+        ORDER BY a.payment_date DESC, a.name DESC
+        LIMIT %(limit)s
+    """, p, as_dict=True)
+
+    # ── 2 & 3. Dòng tiền chưa nối hóa đơn · dòng máy đoán chưa ai chốt ───
+    #
+    # MỘT truy vấn cho cả hai nhóm: chúng đọc cùng một bảng với cùng một bộ lọc,
+    # và tách thành hai lượt quét chỉ để phân loại lại trong Python là trả tiền
+    # hai lần cho cùng một câu hỏi.
+    lines = frappe.db.sql("""
+        SELECT l.name AS line, l.parent AS advice, a.advice_no, l.total_amount,
+               l.match_confidence, l.sales_invoice, l.inv_no, l.store_name,
+               l.description, l.row_kind,
+               IFNULL(l.payment_date, a.payment_date) AS payment_date
+        FROM `tabMT Payment Advice Line` l
+        INNER JOIN `tabMT Payment Advice` a ON a.name = l.parent
+        WHERE l.parenttype = 'MT Payment Advice'
+          AND a.company = %(company)s AND a.chain = %(chain)s
+          AND IFNULL(l.payment_date, a.payment_date) BETWEEN %(fd)s AND %(td)s
+          AND ((l.row_kind = %(kind_payment)s AND IFNULL(l.sales_invoice, '') = '')
+               OR l.match_confidence = 'Cần review')
+        ORDER BY payment_date DESC, l.idx
+    """, p, as_dict=True)
+
+    unmatched, review = [], []
+    for ln in lines:
+        d = {
+            "line": ln.line, "advice": ln.advice,
+            "advice_no": cstr(ln.advice_no or ""),
+            "amount": flt(ln.total_amount),
+            "payment_date": cstr(ln.payment_date or ""),
+            "sales_invoice": cstr(ln.sales_invoice or ""),
+            "inv_no": cstr(ln.inv_no or ""),
+            "store_name": cstr(ln.store_name or ""),
+            "description": cstr(ln.description or ""),
+            "confidence": cstr(ln.match_confidence or ""),
+        }
+        # Một dòng vừa chưa nối vừa "Cần review" thuộc nhóm CHƯA NỐI: chưa biết
+        # nó trả cho hóa đơn nào thì chẳng có gì để mà xác nhận. Đếm vào cả hai
+        # là tổng việc phồng lên và badge không bao giờ khớp panel.
+        if cstr(ln.row_kind) == KIND_PAYMENT and not d["sales_invoice"]:
+            unmatched.append(d)
+        else:
+            review.append(d)
+
+    groups = []
+    for g in WORK_GROUPS:
+        if g["key"] == WORK_ADVICE:
+            rows, n = [{
+                "advice": a.name, "advice_no": cstr(a.advice_no or "") or a.name,
+                "payment_date": cstr(a.payment_date or ""),
+                "status": cstr(a.status or ""),
+                "amount": flt(a.total_payment),
+                "n_lines": cint(a.n_lines),
+                "n_unmatched": cint(a.n_unmatched),
+            } for a in advices], n_advice
+        elif g["key"] == WORK_UNMATCHED:
+            rows, n = unmatched[:WORK_LIMIT], len(unmatched)
+        else:
+            rows, n = review[:WORK_LIMIT], len(review)
+        groups.append(dict(g, count=n, rows=rows, more=max(0, n - len(rows))))
+
+    return {
+        "chain": chain,
+        "company": company,
+        "from_date": from_date,
+        "to_date": to_date,
+        "groups": groups,
+        # Tổng của panel PHẢI bằng badge trên tab. Trả về ở đây để màn hình
+        # không tự cộng lại theo cách của nó rồi lệch.
+        "total": sum(g["count"] for g in groups),
+        "can_manage": is_chief(),
     }

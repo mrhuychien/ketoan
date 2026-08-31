@@ -2,7 +2,7 @@
 import { parseHash, matchRoute, navigate } from "./lib/router.js";
 import { html, setHTML } from "./lib/dom.js";
 import { toast } from "./components/toast.js";
-import { myWorkspaces, workHome } from "./lib/workspaces.js";
+import { myWorkspaces, workHome, navLabel } from "./lib/workspaces.js";
 
 const CTX = window.KETOAN_CONTEXT || {};
 const BASE = "/assets/ketoan/ketoan";
@@ -62,14 +62,8 @@ function renderShell() {
         <nav class="kt-nav" id="kt-nav">
           <a class="kt-nav-item" data-nav="home" href="#/"><i class="fas fa-house"></i><span>Trang chủ</span></a>
           ${NAV_WS.map(
-            (w) => html`<a class="kt-nav-item" data-nav="${w.key}" href="#${workHome(w)}"><i class="fas ${w.icon}"></i><span>${w.label}</span></a>`
+            (w) => html`<a class="kt-nav-item" data-nav="${w.key}" href="#${workHome(w)}"><i class="fas ${w.icon}"></i><span>${navLabel(w)}</span></a>`
           )}
-          ${CAPS.mt
-            ? html`<a class="kt-nav-item" data-nav="mt" href="#/cong-no-mt"><i class="fas fa-store"></i><span>Công nợ MT</span></a>`
-            : ""}
-          ${CAPS.salesany
-            ? html`<a class="kt-nav-item" data-nav="vat" href="#/hoa-don-vat"><i class="fas fa-receipt"></i><span>Hóa đơn VAT</span></a>`
-            : ""}
         </nav>
         <main class="kt-main" id="kt-view"><div class="kt-boot"><div class="kt-spinner"></div></div></main>
       </div>

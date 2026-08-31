@@ -147,6 +147,9 @@ export const api = {
   // phải outstanding_amount của ERPNext — hệ thống cố ý không tự tạo Payment Entry.
   mtOverview: (a) => callMethod(NS + "mt.get_overview", withCompany(a)),
   mtInvoices: (bucket, a) => callMethod(NS + "mt.get_invoices", withCompany({ bucket, ...a })),
+  // Xuất ĐÚNG bộ lọc đang xem, không phải "mọi hóa đơn" — file khác danh sách
+  // trên màn hình thì kế toán gửi cho chuỗi một bảng chính họ chưa từng thấy.
+  mtInvoicesExport: (bucket, a) => downloadPost(NS + "mt.export_invoices", withCompany({ bucket, ...a })),
   mtChainSummary: (a) => callMethod(NS + "mt.get_chain_summary", withCompany(a)),
   // Công nợ chi tiết TRÊN ĐẦU TỪNG KHÁCH — cấp chuỗi chỉ để nhìn tổng, đi đòi
   // nợ thì phải theo pháp nhân (riêng Co.op có 120 siêu thị thành viên).
@@ -266,6 +269,20 @@ export const api = {
   // Bảng điều khiển theo CHUỖI — màn hình đầu tiên của kênh MT. Một lời gọi
   // trả về tiến độ cả năm bước cho mọi chuỗi.
   mtBoard: (a) => callMethod(NS + "mt_hub.get_board", withCompany(a)),
+  // Ba nhóm việc của một chuỗi — cùng số với badge trên tab bước.
+  mtChainWorklist: (chain, a) => callMethod(NS + "mt_hub.get_chain_worklist",
+    withCompany({ chain, ...a })),
+
+  // Đối soát một bảng kê: dòng chuỗi trả · mức lệch · hóa đơn ERPNext.
+  mtRecon: (advice, a) => callMethod(NS + "mt_reconcile.get_statement_reconcile",
+    withCompany({ advice, ...a })),
+  mtReconLink: (line, sales_invoice, note) =>
+    callMethod(NS + "mt_reconcile.link_statement_line", { line, sales_invoice, note }),
+  mtReconBulk: (advice) => callMethod(NS + "mt_reconcile.bulk_link", withCompany({ advice })),
+  mtReconExplain: (line, deduction_type, note) =>
+    callMethod(NS + "mt_reconcile.explain_variance", withCompany({ line, deduction_type, note })),
+  mtReconCommit: (advice, expected_hash) =>
+    callMethod(NS + "mt_reconcile.commit_statement", withCompany({ advice, expected_hash })),
   mtChainDesk: (chain, a) => callMethod(NS + "mt_hub.get_chain", withCompany({ chain, ...a })),
 
   // Công nợ MT đến hạn (SOP §5, việc hàng tuần). Số còn nợ tính từ DÒNG BẢNG KÊ

@@ -175,6 +175,32 @@ def extract_tables():
     return out
 
 
+def _in_split(t):
+    """Bảng này có nằm trong `.ktmt-split` trên màn hình thật không.
+
+    Nhận theo VỊ TRÍ trong mã: bảng do `invoiceTable` dựng là bảng duy nhất
+    được `loadTab` đặt vào cột phải của bố cục hai cột. Dò theo tên hàm chứ
+    không theo số dòng — số dòng đổi mỗi lần sửa file.
+    """
+    fname, line, _cols = t
+    if fname != "mt.js":
+        return False
+    src = open(os.path.join(VIEWS, "mt.js"), encoding="utf-8").read()
+    for name in SPLIT_TABLES:
+        i = src.find("function %s(" % name)
+        if i < 0:
+            continue
+        j = src.find("\nfunction ", i + 1)
+        seg = src[i:j if j > 0 else len(src)]
+        # `line` là số dòng của `<thead>`; bảng thuộc hàm nếu dòng đó nằm trong
+        # thân hàm.
+        lo = src.count("\n", 0, i) + 1
+        hi = lo + seg.count("\n")
+        if lo <= line <= hi:
+            return True
+    return False
+
+
 def build_html(tables, css):
     parts = ["<meta charset='utf-8'><style>", css, "</style>",
              "<div class='kt-app'><div class='kt-main'>"]
@@ -204,6 +230,53 @@ def build_html(tables, css):
             f"<div class='kt-card-body'><div class='kt-table-wrap'>"
             f"<table class='kt-table'><thead><tr>{ths}</tr></thead>"
             f"<tbody>{''.join(rows)}</tbody></table></div></div></div>")
+    parts.append("</div></div>")
+    return "".join(parts)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BẢNG NẰM TRONG BỐ CỤC HAI CỘT
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Mọi phép đo ở trên dựng bảng ĐỨNG RIÊNG, chiếm trọn `.kt-main`. Nhưng bước
+# "Đối soát thanh toán" đặt bảng hóa đơn vào cột phải của `.ktmt-split`, sau
+# một panel việc rộng 300–380px. Bảng vừa khít khi đứng riêng vẫn cuộn ngang ở
+# đó, và đó chính là màn hình kế toán MT mở nhiều nhất trong ngày.
+#
+# Đã xảy ra thật: panel 380px cố định làm bảng 10 cột cuộn ngang ở CẢ 1366 lẫn
+# 1280 — hai trong ba cỡ bắt buộc — trong khi mục đo đứng riêng vẫn xanh.
+SPLIT_TABLES = ("invoiceTable",)
+
+
+def split_html(tables, css):
+    """Dựng lại đúng bố cục hai cột: panel việc bên trái, bảng bên phải."""
+    parts = ["<meta charset='utf-8'><style>", css, "</style>",
+             "<div class='kt-app'><div class='kt-main'>"]
+    for i, (fname, line, cols) in enumerate(tables):
+        ths = "".join(f"<th{attrs}>{_html.escape(lab)}</th>" for lab, _k, attrs in cols)
+        rows = []
+        for _r in range(3):
+            tds = []
+            for j, (lab, kind, attrs) in enumerate(cols):
+                cls = ' class="num"' if kind != "text" else ""
+                if kind == "money":
+                    val = MONEY
+                elif kind == "count":
+                    val = COUNT
+                elif j == 0:
+                    val = f"<b>{_html.escape(LONG_NAME)}</b>"
+                elif j == 1:
+                    val = CODE
+                else:
+                    val = DATE if j % 3 else "Đã phát hành · cần đối chiếu"
+                tds.append(f"<td{cls}>{val}</td>")
+            rows.append("<tr>" + "".join(tds) + "</tr>")
+        parts.append(
+            f"<div class='ktmt-split'><div class='kt-card' style='height:220px'></div>"
+            f"<div><div class='kt-card' data-id='{i}' data-src='{fname}:{line}'>"
+            f"<div class='kt-table-wrap'>"
+            f"<table class='kt-table'><thead><tr>{ths}</tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table></div></div></div></div>")
     parts.append("</div></div>")
     return "".join(parts)
 
@@ -268,6 +341,25 @@ def main():
                     bad += len(over) + (1 if res["page"] > 1 else 0)
                 else:
                     worst_report.append((w, len(over)))
+        # ── Bảng NẰM TRONG bố cục hai cột ───────────────────────────
+        split = [t for t in tables if _in_split(t)]
+        if split:
+            page.set_content(split_html(split, css), wait_until="load")
+            print("-" * 82)
+            print(f"  Bảng nằm trong bố cục hai cột (.ktmt-split) — {len(split)} bảng."
+                  f" Đo lại vì panel việc ăn mất 300–380px bề ngang.")
+            for w in WIDTHS_MUST:
+                page.set_viewport_size({"width": w, "height": 900})
+                page.wait_for_timeout(60)
+                res = page.evaluate(MEASURE)
+                over = [t for t in res["tables"] if t["over"] > 1]
+                if not over:
+                    print(f"  ✅ {w}px — nằm gọn cạnh panel việc")
+                else:
+                    print(f"  ❌ {w}px — {len(over)} bảng tràn cạnh panel việc")
+                    for t in over:
+                        print(f"       {t['src']:<24} {t['cols']:2d} cột  tràn {t['over']:4d}px")
+                    bad += len(over)
         browser.close()
 
     if worst_report:

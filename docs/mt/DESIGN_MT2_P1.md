@@ -595,7 +595,8 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AK** `return_invoice` — nối chứng từ trả hàng, cấm đường tiền | `4198f5c` | `return_doc_check` |
 | **MT2-AL** DocType `MT Hang Hoan` — sổ việc giấy tờ của một lần hàng về | `969501c` | `hoan_check` |
 | **MT2-AM** bảng mã hàng chuyển sang `vanchuyen` + cất bản vá app kia | `540f391` | `hoan_check` |
-| **MT2-AN** màn "Hàng hoàn chờ xử lý" + `mt_hoan.py`, bản vá đã sang repo kia | *(commit này)* | `hoan_check` |
+| **MT2-AN** màn "Hàng hoàn chờ xử lý" + `mt_hoan.py`, bản vá đã sang repo kia | `8a8a3b9` | `hoan_check` |
+| **MT2-AO** màn làm việc MT xếp lại theo VIỆC · màn đối soát bảng kê | *(commit này)* | `ui_mt_check` · `table_width_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -609,7 +610,7 @@ for t in regression_check crosscheck_mt2 mutation_check \
          table_width_check client_script_check win_pdf_check \
          two_books_check portal_js_check einv_gap_check win_seed_check \
          gl_bridge_check ledger_check po_field_check return_doc_check \
-         hoan_check; do
+         hoan_check ui_mt_check; do
   python3 docs/mt/verified/$t.py
 done
 ```
@@ -898,6 +899,127 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AO — badge nói 13, màn hình mở ra 194 dòng
+
+Thẻ chuỗi ghi "13 việc". Bấm vào chuỗi thì con số đó **biến mất**, bước Đối soát
+mở ra 194 hóa đơn với bộ lọc mặc định *Tất cả*, và 13 việc thật nằm lẫn trong đó
+không có gì đánh dấu. Người dùng đọc badge rồi nhìn danh sách và không biết bấm
+vào đâu — badge nói về một tập, danh sách nói về một tập khác.
+
+Ba chỗ sửa, và chúng phải nói CÙNG một con số:
+
+- **Thanh việc dính trên đầu** — tổng + ba chip đếm theo nhóm, bấm chip là nhảy
+  thẳng vào nhóm đó.
+- **Panel "Cần bạn xử lý"** ở cột trái — liệt kê đúng những dòng đó, mỗi dòng
+  một nút (`Đối chiếu` / `Nối` / `Xem`).
+- **Rổ mặc định đổi sang `Chưa thu đủ`**, và mỗi chip rổ mang số đếm của nó.
+
+#### Badge và panel lệch nhau ngay từ đầu — vì `get_board` đếm hai lần
+
+`get_board` cộng `lines_unmatched + lines_review`. Một dòng vừa **chưa nối hóa
+đơn** vừa mang cờ **Cần review** rơi vào CẢ HAI ô, nên badge nói 13 trong khi
+panel — vốn xếp mỗi dòng vào đúng một nhóm — liệt kê 12.
+
+Đúng hơn là panel: đó là MỘT dòng và MỘT việc. Nên `get_board` thôi đếm chồng,
+và "chưa nối" thắng — chưa biết dòng tiền trả cho hóa đơn nào thì chẳng có gì
+để mà xác nhận.
+
+#### Tuổi nợ trên danh sách hóa đơn, mà KHÔNG dựng luật hạn thứ hai
+
+Cột tuổi nợ cần ngày đến hạn. Luật đó đã có ở `mt_debt._resolve_due` — nhưng nó
+là Python chạy trên từng dòng đã lấy về, còn danh sách phải **xếp theo tuổi nợ
+và cộng phần quá hạn trên CẢ bộ lọc**, tức phải làm trong SQL.
+
+Nên `mt_debt.due_expr()` là **bản song sinh SQL**, đặt cạnh bản Python trong
+chính module sở hữu luật, và `debt_due_check` chạy cả hai trên cùng một ma trận
+trường hợp. Hai bản nói khác nhau thì cùng một hóa đơn bị gọi là quá hạn 40 ngày
+ở màn này và 0 ngày ở màn kia — mất lòng tin vào cả hai.
+
+`NULL` (chưa khai hạn) đi thẳng ra màn hình thành chữ **"chưa khai hạn"**, không
+thành 0: 0 trong một cột ngày đọc là *đến hạn hôm nay*, một kết luận về việc
+chưa ai khai. Dòng cộng vì vậy đếm riêng số tờ chưa khai hạn — chúng không nằm
+trong "quá hạn" mà cũng không nằm trong "chưa đến hạn".
+
+#### Dòng cộng nói về CẢ BỘ LỌC
+
+Một `tfoot` cộng 20 dòng đang hiện là con số đúng về một tập không ai hỏi — mà
+nó trông vẫn rất đáng tin, và kế toán sẽ đem đi đối chiếu với chuỗi. Nên mệnh đề
+lọc tách ra `_invoice_where` và dùng chung cho **ba** truy vấn: đếm · lấy trang ·
+cộng tổng. Ba nơi tự ghép mệnh đề riêng thì sớm muộn dòng tổng cộng trên một tập
+khác với tập đang hiện.
+
+#### Trạng thái: MỘT nhãn, và thứ tự ưu tiên là nghiệp vụ
+
+Một hóa đơn có thể vừa quá hạn, vừa mang số HĐĐT đã chết, vừa bị trả thiếu. In
+cả ba là không nói được **phải làm gì trước**.
+
+```
+1. Phát hành lại   số HĐĐT đã hủy/thay thế — siêu thị KHÔNG trả theo số đã chết,
+                   nên đi đòi trước khi phát hành lại là đòi vào chỗ trống
+2. Cần xác nhận    chuỗi đã trả nhưng thiếu một khoản, hoặc dòng còn "Cần review"
+3. Quá hạn         tới hạn mà chưa thấy tiền
+4. Đã khớp         thu đủ theo bảng kê
+5. Chờ bảng kê     chưa tới hạn, chưa có bảng kê — BÌNH THƯỜNG
+```
+
+"Chờ bảng kê" cố ý đứng CUỐI: phần lớn hóa đơn nằm ở đó, và nếu nó tranh chỗ với
+bốn nhãn trên thì màn hình toàn một màu.
+
+#### Màn đối soát ba vế — và vì sao nó là MỘT grid, không phải ba cột
+
+Ba cột độc lập đặt cạnh nhau thì một ô phải cao gấp ba ô trái là ba vế **lệch
+hàng ngay**, và người đọc ghép dòng bảng kê của bản ghi này với hóa đơn của bản
+ghi khác — sai tiền vì một lỗi dàn trang. Nên mỗi bản ghi là **một hàng grid gồm
+đúng ba ô con**; grid cấp cha giữ chúng cùng hàng dù ô nào cao bao nhiêu.
+
+Module `mt_reconcile` **ủy quyền**, không viết lại: nối dòng đi qua
+`mt.relink_line` (đã chặn dòng `Ghi giảm` — bẫy tiền Central Retail, chặn hóa
+đơn khác công ty, chặn khách ngoài kênh MT, chặn phiếu trả hàng), sinh bút toán
+đi qua `mt_je` và giữ nguyên hai bước vân tay. Bốn chốt đầu không nhìn thấy được
+từ màn hình, nên một bản "viết lại cho gọn" sẽ chạy tốt tới ngày tiền biến khỏi
+cả hai kênh.
+
+**Gợi ý khớp có ba mức, và chỉ mức 1 được nhận hàng loạt** — mà mức 1 còn phải
+là ứng viên DUY NHẤT: hai hóa đơn cùng số tiền cùng điểm giao thì máy không có
+cơ sở nào chọn giữa chúng.
+
+#### "Giải trình phần lệch" là một cái NHÃN, không phải một lần thu tiền
+
+Chuỗi trả 3.276.000 cho hóa đơn 3.294.000; kế toán biết 18.000 là phí trưng bày
+và ghi lại. ⚠ **Nó KHÔNG làm 18.000 biến mất khỏi công nợ** — khoản đó còn
+nguyên cho tới khi có bút toán ở bước B5. Cho cái nhãn tự trừ công nợ là mở lại
+đúng cái lỗ MT2-G đã bịt.
+
+Vì vậy `variance_amount` **máy suy** đúng bằng phần còn thiếu, không cho gõ tay,
+và `ui_mt_check` quét mọi hàm trong `api/` để chắc không hàm nào vừa cộng tiền
+vừa đọc ba ô `variance_*`.
+
+#### Phép ĐO bắt một lỗi mà phép kiểm cũ không thấy
+
+`table_width_check` dựng mỗi bảng ĐỨNG RIÊNG, chiếm trọn `.kt-main`. Nhưng bảng
+hóa đơn giờ nằm ở cột phải của bố cục hai cột, sau một panel 380px. Đo thật bằng
+Chromium:
+
+```
+1440px  ô bảng 958px · cần 958px   vừa
+1366px  ô bảng 908px · cần 918px   CUỘN NGANG
+1280px  ô bảng 822px · cần 878px   CUỘN NGANG
+```
+
+Hai trong ba cỡ **bắt buộc** đều hỏng, trong khi mục đo đứng riêng vẫn xanh.
+Panel thu về 300px dưới 1440px, và `table_width_check` có thêm mục **"bảng nằm
+trong bố cục hai cột"** — dựng lại đúng `.ktmt-split` rồi đo, để lần sau ai đổi
+bề rộng panel là biết ngay.
+
+#### Điều KHÔNG được đổi, và đã có phép kiểm canh
+
+Khối **"Hai cách theo dõi công nợ"** + dòng **"Sổ cái TK 131 — số dư thật trên
+sổ"** + nút **"Vì sao lệch"**: giữ nguyên từng chữ, nguyên bố cục hai vế, nguyên
+vị trí. Đó là khối đắt nhất của cả màn — hai vế luôn cộng lại bằng số còn nợ, và
+dòng sổ cái nói ra chỗ lệch giữa rổ hóa đơn và số dư thật. Sửa một chữ ở đó là
+sửa một kết luận kế toán, không phải sửa giao diện. `ui_mt_check` mục 2 đọc từng
+câu.
 
 ### MT2-AN — hàng đợi hàng hoàn, và việc mà không màn hình nào đếm được
 

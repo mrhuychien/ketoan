@@ -33,6 +33,7 @@ export const WORKSPACES = [
   {
     key: "npp",
     label: "Kế toán NPP",
+    navLabel: "NPP",
     icon: "fa-handshake",
     home: "/doi-chieu-npp",
     desc: "Kênh nhà phân phối: đối chiếu công nợ, chính sách thu, chiết khấu",
@@ -65,8 +66,13 @@ export const WORKSPACES = [
   {
     key: "mt",
     label: "Kế toán MT",
+    navLabel: "Kênh MT",
     icon: "fa-store",
-    home: "/cong-no/mt",
+    // Bàn làm việc thật của kế toán MT là màn CHUỖI (`/cong-no-mt`), không
+    // phải màn công nợ theo kênh. Trước đây nav có CẢ HAI — "Kế toán MT" trỏ
+    // vào màn công nợ, rồi thêm một mục "Công nợ MT" trỏ vào màn chuỗi. Hai
+    // mục, hai tên, và tên nào cũng không nói được mục kia là gì.
+    home: "/cong-no-mt",
     desc: "Kênh MT (siêu thị/hiện đại): công nợ, đối chiếu, thu tiền",
     guide: [
       "Hàng đi: lập Sales Invoice cho khách MT; điền số hóa đơn điện tử khi phát hành.",
@@ -94,6 +100,7 @@ export const WORKSPACES = [
   {
     key: "travel",
     label: "Kế toán Du lịch, Khác",
+    navLabel: "Du lịch & Khác",
     icon: "fa-umbrella-beach",
     home: "/cong-no/khac",
     desc: "Kênh du lịch & khách lẻ/khác: công nợ, thu tiền",
@@ -122,6 +129,7 @@ export const WORKSPACES = [
   {
     key: "purchase",
     label: "Kế toán mua hàng",
+    navLabel: "Mua hàng",
     icon: "fa-truck-field",
     home: "/cong-no-ncc",
     desc: "Công nợ phải trả, hóa đơn NCC, thanh toán mua hàng",
@@ -155,6 +163,7 @@ export const WORKSPACES = [
   {
     key: "payroll",
     label: "Kế toán tiền lương",
+    navLabel: "Tiền lương",
     icon: "fa-money-check-dollar",
     home: "/luong",
     desc: "Tính lương, duyệt phiếu lương, xuất bảng lương",
@@ -181,6 +190,7 @@ export const WORKSPACES = [
   {
     key: "gl",
     label: "Kế toán hạch toán",
+    navLabel: "Hạch toán",
     icon: "fa-book",
     home: "/quy",
     desc: "Quỹ tiền mặt & ngân hàng, bút toán, sổ cái",
@@ -209,6 +219,7 @@ export const WORKSPACES = [
   {
     key: "chief",
     label: "Kế toán trưởng",
+    navLabel: "Kế toán trưởng",
     icon: "fa-user-tie",
     home: "/dashboard",
     desc: "Tổng quan toàn phòng, duyệt hồ sơ, cảnh báo, cấu hình",
@@ -254,4 +265,10 @@ export function myWorkspaces() {
 // Trang làm việc chính của 1 workspace (fallback về trang tham khảo /vt/:key).
 export function workHome(w) {
   return w.home || "/vt/" + w.key;
+}
+
+// Nhãn hiện trên THANH ĐIỀU HƯỚNG. Không có `navLabel` thì lùi về `label` —
+// thêm một workspace mà quên khai nhãn ngắn vẫn hiện được tên, chỉ là dài.
+export function navLabel(w) {
+  return w.navLabel || w.label;
 }
