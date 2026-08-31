@@ -1660,7 +1660,13 @@ function invoiceFoot(t) {
     <td>${t.no_term
       ? html`<span class="kt-sub" title="Không tính được tuổi nợ vì khách chưa khai hạn thanh toán">${t.no_term} tờ chưa khai hạn</span>`
       : ""}</td>
-  </tr></tfoot>`;
+  </tr>
+  ${t.returns ? html`<tr><td></td><td colspan="9" class="kt-sub">
+    Trong đó <b>${t.returns} phiếu trả hàng</b> (${formatVNDShort(t.returns_amt)}) —
+    có trong danh sách, <b>không</b> nằm trong ba cột cộng ở trên: một lần bán đã bị
+    hủy thì không còn là khoản phải thu.
+  </td></tr>` : ""}
+  </tfoot>`;
 }
 
 const PAGE_SIZES = [20, 50, 100, 200];
@@ -1705,6 +1711,10 @@ function invoiceRow(r, tol, canManage, picked) {
   // Nới rộng sai số ở giao diện là tự tay dán nhãn "đủ" cho hóa đơn còn thiếu tiền.
   const done = paid > 0 && remaining <= tol;
   const over = paid - total > tol;
+  // `paid` là số RÒNG (đã trả − đã đòi lại). Một hóa đơn Co.op bị đòi lại trọn
+  // vẹn hiện "Đã nhận —", y hệt một hóa đơn chưa ai trả đồng nào — hai tình
+  // huống hoàn toàn khác nhau, và tình huống thứ hai không cần đi hỏi ai.
+  const clawed = r.clawed_back || 0;
   const st = r.status || "";
 
   return html`<tr>
@@ -1717,6 +1727,8 @@ function invoiceRow(r, tol, canManage, picked) {
     <td>${r.inv_series || "—"}${r.inv_no ? html` · <b>${r.inv_no}</b>` : ""}</td>
     <td class="num">${formatVND(total)}</td>
     <td class="num">${paid ? formatVND(paid) : html`<span class="kt-sub">—</span>`}
+      ${clawed ? html`<div class="kt-sub" title="Chuỗi đã trả rồi đòi lại ở một bảng kê sau. Cột này là số RÒNG."
+        >gộp ${formatVNDShort(r.paid_gross)} · đòi lại ${formatVNDShort(clawed)}</div>` : ""}
       ${over ? html`<div><span class="kt-badge kt-badge--red">trả vượt</span></div>` : ""}</td>
     <td class="num">${done
       ? html`<span class="kt-badge kt-badge--green">đủ</span>`

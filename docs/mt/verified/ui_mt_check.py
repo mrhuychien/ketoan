@@ -202,6 +202,15 @@ def main():
           "{od} > 0 THEN {_REMAIN}" in ip)
     check("và đếm luôn số tờ CHƯA KHAI HẠN (không nằm trong cả hai vế)",
           "n_no_term" in ip)
+    # Backend TRẢ RA thì màn hình phải ĐỌC. Một con số tính đúng rồi rơi ở giữa
+    # đường còn tệ hơn không tính: mã nguồn đọc như thể màn hình đã nói ra nó.
+    ifoot = js_body(js, "invoiceFoot")
+    check("dòng cộng NÓI RA phiếu trả hàng nằm ngoài phép cộng",
+          "${t.returns ?" in ifoot and "t.returns_amt" in ifoot
+          and "phiếu trả hàng" in ifoot)
+    irow = js_body(js, "invoiceRow")
+    check("hóa đơn bị ĐÒI LẠI tiền không hiện y hệt hóa đơn chưa ai trả",
+          "clawed_back" in irow and "paid_gross" in irow)
 
     st = b.get("_invoice_status", "")
     check("trạng thái có ĐỦ năm nhãn", len(mt.INVOICE_STATUSES) == 5,

@@ -1054,6 +1054,22 @@ về muộn hơn một lần xóa thì vứt), và `openModal` có `onClose` ch�
 cho cả ba lối đóng (nút X · bấm nền · Esc) — ba lối mà chỉ một lối gọi lại thì
 màn hình giữ số cũ đúng trong hai trường hợp kia.
 
+#### Hai con số backend tính đúng rồi rơi ở giữa đường
+
+`_invoice_page` đếm riêng phiếu trả hàng và trả `returns` / `returns_amt`, kèm
+chú thích nói rõ vì sao: với một phiếu trả `_REMAIN` vẫn dương, nên cộng thẳng
+là dòng tổng ghi "còn nợ 3tr" cho một lần bán **đã bị hủy**. Nó cũng trả
+`paid_gross` để màn hình nói được "đã trả X, bị đòi lại Y".
+
+Màn hình không đọc cả hai. Hậu quả: dòng tổng ghi "Cộng 194 hóa đơn" trong khi
+ba cột tiền chỉ cộng 190 — đúng, nhưng không có gì trên màn hình nói ra bốn tờ
+kia đi đâu. Và một hóa đơn Co.op bị đòi lại trọn 5tr hiện **"Đã nhận —"**, y hệt
+một hóa đơn chưa ai trả đồng nào; hai tình huống hoàn toàn khác nhau, và chỉ một
+trong hai cần đi hỏi chuỗi.
+
+Một con số tính đúng rồi rơi ở giữa đường còn tệ hơn không tính: mã nguồn đọc
+như thể màn hình đã nói ra nó, nên không ai đi tìm.
+
 #### Ngày mặc định lấy theo giờ London
 
 `new Date().toISOString().slice(0, 10)` đọc như "hôm nay". Nó là hôm nay **ở
