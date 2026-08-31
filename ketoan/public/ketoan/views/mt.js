@@ -10,7 +10,7 @@
 // luận sai. Vì vậy câu cảnh báo đó nằm ngay dưới tiêu đề, không nằm trong tooltip.
 import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
-import { formatVND, formatVNDShort, formatDate } from "../lib/format.js";
+import { formatVND, formatVNDShort, formatDate, isoDate } from "../lib/format.js";
 import { openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 
@@ -161,8 +161,10 @@ const STATUS_TONE = { "Nháp": "gray", "Đã đối chiếu": "yellow", "Đã gh
 
 const CONF_TONE = { "Chắc chắn": "green", "Cần review": "yellow", "Không khớp": "red" };
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const monthsAgo = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n); return d.toISOString().slice(0, 10); };
+// `isoDate`, KHÔNG phải `toISOString()`: xem lib/format.js. Cả màn này chạy ở
+// UTC+7, nên bản cũ trả về hôm qua suốt 7 tiếng đầu mỗi ngày.
+const todayISO = () => isoDate();
+const monthsAgo = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n); return isoDate(d); };
 
 export async function render({ container, query }) {
   setHTML(container, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
@@ -316,7 +318,7 @@ const DATE_PRESETS = [
 
 function presetRange(key) {
   const now = new Date();
-  const iso = (d) => d.toISOString().slice(0, 10);
+  const iso = isoDate;
   if (key === "thang") {
     return [iso(new Date(now.getFullYear(), now.getMonth(), 1)), todayISO()];
   }
@@ -4060,7 +4062,7 @@ async function openBkckPreview(container, state, content, filename, chain, perio
 
 async function renderBkckPreview(container, state, modal, content, filename, chain, period, sheetDate) {
   setHTML(modal.body, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
   let res;
   try {
     res = await api.mtDiscountPreview({
@@ -4454,7 +4456,7 @@ async function openWinPreview(container, state, vendorCode) {
   });
   const st = {
     from: state.from, to: state.to,
-    submit: new Date().toISOString().slice(0, 10),
+    submit: todayISO(),
     no: 1, vendor: vendorCode || "",
   };
   await renderWinPreview(container, state, modal, st);

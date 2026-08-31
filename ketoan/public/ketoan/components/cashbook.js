@@ -4,7 +4,7 @@ import { openModal } from "./modal.js";
 import { toast } from "./toast.js";
 import { api } from "../lib/api.js";
 import { html } from "../lib/dom.js";
-import { formatVND } from "../lib/format.js";
+import { formatVND, isoDate } from "../lib/format.js";
 
 // BIN VietQR các ngân hàng phổ biến.
 const BANKS = [
@@ -23,7 +23,7 @@ export async function openCashbook({ onDone } = {}) {
     toast("Không tải được tùy chọn: " + e.message, "error");
     return;
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const today = isoDate();
 
   const m = openModal({
     title: "Nhập sổ quỹ",

@@ -40,3 +40,17 @@ export function daysLabel(d) {
   if (d <= 0) return "trong hạn";
   return "quá " + d + " ngày";
 }
+
+// Ngày ISO theo GIỜ MÁY NGƯỜI DÙNG, không phải UTC.
+//
+// `new Date().toISOString().slice(0, 10)` trông như "hôm nay" nhưng nó là hôm
+// nay Ở LONDON. Việt Nam là UTC+7, nên từ 00:00 tới 07:00 mỗi ngày nó trả về
+// HÔM QUA — lặng lẽ, và chỉ trong 7 tiếng đó, nên kiểm tay lúc 9 giờ sáng
+// không bao giờ thấy. Cùng lỗi ấy ăn vào mọi `new Date(y, m, 1)`: nửa đêm giờ
+// địa phương quy sang UTC là 17:00 ngày HÔM TRƯỚC, nên "đầu tháng này" ra
+// ngày cuối tháng trước.
+export function isoDate(d) {
+  const x = d || new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}`;
+}

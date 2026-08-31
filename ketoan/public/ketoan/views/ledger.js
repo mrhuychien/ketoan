@@ -4,12 +4,12 @@
 // diễn giải, đối tượng, dư đầu / số dư lũy kế từng dòng / dư cuối.
 import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
-import { formatVND, formatDate } from "../lib/format.js";
+import { formatVND, formatDate, isoDate } from "../lib/format.js";
 import { replaceQuery } from "../lib/router.js";
 import { createCombobox, closeComboPanel } from "../components/combobox.js";
 import { glUrl } from "../lib/workspaces.js";
 
-const iso = (d) => d.toISOString().slice(0, 10);
+const iso = isoDate;
 const todayIso = () => iso(new Date());
 
 // Nút kỳ nhanh — chỉ ĐIỀN SẴN Từ ngày/Đến ngày, sau đó sửa tay tùy ý.

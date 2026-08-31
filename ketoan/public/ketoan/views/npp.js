@@ -1,7 +1,7 @@
 // views/npp.js — Đối chiếu công nợ kênh NPP: công nợ, đến hạn (+Zalo), chiết khấu.
 import { api } from "../lib/api.js";
 import { html, setHTML, on } from "../lib/dom.js";
-import { formatVND, formatVNDShort, formatDate, escapeHtml } from "../lib/format.js";
+import { formatVND, formatVNDShort, formatDate, escapeHtml, isoDate } from "../lib/format.js";
 import { navigate } from "../lib/router.js";
 import { openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
@@ -224,7 +224,7 @@ function debtRow(r, state) {
 }
 
 function openBulkExport(picks) {
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = isoDate();
   const yearStart = todayStr.slice(0, 4) + "-01-01";
   const m = openModal({
     title: `Xuất đối chiếu ${picks.length} NPP`,

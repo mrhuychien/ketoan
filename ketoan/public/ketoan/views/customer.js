@@ -1,7 +1,7 @@
 // views/customer.js — 360° công nợ 1 khách: hóa đơn outstanding + hạn mức + deep-link Desk.
 import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
-import { formatVND, formatDate, escapeHtml } from "../lib/format.js";
+import { formatVND, formatDate, escapeHtml, isoDate } from "../lib/format.js";
 import { openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 import { glUrl } from "../lib/workspaces.js";
@@ -169,7 +169,7 @@ function openCustomerDocs(container) {
 }
 
 /* ---- Sổ cái giao dịch + việc cần làm gắn từng chứng từ ---- */
-const lgIso = (dt) => dt.toISOString().slice(0, 10);
+const lgIso = isoDate;
 const lgToday = () => lgIso(new Date());
 const LEDGER_PERIODS = [
   { key: "thang", label: "Tháng này" },
@@ -388,7 +388,7 @@ async function renderCustomerFiles(container, customer) {
 }
 
 function openReconModal(d) {
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = isoDate();
   const yearStart = todayStr.slice(0, 4) + "-01-01";
   const m = openModal({
     title: "Xuất biên bản đối chiếu công nợ",

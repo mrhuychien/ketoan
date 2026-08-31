@@ -5,6 +5,8 @@
 // thì mang ?tab= để rơi đúng màn hình.
 // item.type: "desk" (href ra /desk), "route" (route nội bộ #/...).
 
+import { isoDate } from "./format.js";
+
 const CTX = window.KETOAN_CONTEXT || {};
 
 // URL Sổ cái CHUẨN duy nhất của portal: /desk/query-report/General%20Ledger
@@ -13,7 +15,7 @@ const CTX = window.KETOAN_CONTEXT || {};
 // glUrl({ account }) · glUrl({ party_type, party }) · glUrl({ from_date }).
 // KHÔNG dùng dạng tắt /desk/general-ledger — site không nhận route đó.
 export function glUrl(extra = {}) {
-  const fmt = (d) => d.toISOString().slice(0, 10);
+  const fmt = isoDate;
   const to = new Date();
   const from = new Date();
   from.setDate(from.getDate() - 30);

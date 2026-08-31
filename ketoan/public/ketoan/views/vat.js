@@ -2,7 +2,7 @@
 // 4 rổ: Đã liên kết / Chỉ có trên phần mềm / Chỉ có trên MISA / Lệch tiền.
 import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
-import { formatVND, formatVNDShort, formatDate, escapeHtml } from "../lib/format.js";
+import { formatVND, formatVNDShort, formatDate, escapeHtml, isoDate } from "../lib/format.js";
 import { openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
 
@@ -19,8 +19,8 @@ const BUCKETS = [
     hint: "Hóa đơn ERPNext đã có số hóa đơn MISA." },
 ];
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
-const monthsAgo = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n); return d.toISOString().slice(0, 10); };
+const todayISO = () => isoDate();
+const monthsAgo = (n) => { const d = new Date(); d.setMonth(d.getMonth() - n); return isoDate(d); };
 
 export async function render({ container, query }) {
   setHTML(container, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);

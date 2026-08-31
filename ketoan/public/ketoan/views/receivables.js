@@ -2,7 +2,7 @@
 // và soát GIÁ BÁN vs Bảng giá bán hàng của kênh (tab Giá bán).
 import { api } from "../lib/api.js";
 import { html, setHTML, on } from "../lib/dom.js";
-import { formatVND, formatVNDShort, formatDate } from "../lib/format.js";
+import { formatVND, formatVNDShort, formatDate, isoDate } from "../lib/format.js";
 import { navigate } from "../lib/router.js";
 import { openModal } from "../components/modal.js";
 import { toast } from "../components/toast.js";
@@ -309,7 +309,7 @@ function openZaloReminder(r) {
 
 // ── Xuất biên bản đối chiếu (PDF) cho 1 khách trong bảng kê ────────────────
 function openReconExport(r) {
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = isoDate();
   const yearStart = todayStr.slice(0, 4) + "-01-01";
   const m = openModal({
     title: "Xuất biên bản đối chiếu công nợ",
