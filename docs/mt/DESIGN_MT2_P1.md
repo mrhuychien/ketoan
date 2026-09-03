@@ -599,6 +599,7 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AO** màn làm việc MT xếp lại theo VIỆC · màn đối soát bảng kê | `d14986d`…`8685fd7` | `ui_mt_check` · `table_width_check` |
 | **MT2-AP** mở cửa cho PDF ở nút *Nạp bảng kê thanh toán* | `802c07e` | `win_pdf_check` |
 | **MT2-AQ** đối soát so PHẦN RÒNG (hóa đơn đi + hóa đơn trả về) · số HĐĐT trên bảng kê | `21b15c9` | `ui_mt_check` |
+| **MT2-AR** phí LOTTE gõ tay (`- Manual`) vào đúng nhóm → sinh bút toán gộp theo bảng kê | *(commit này)* | `je_plan_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -901,6 +902,61 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AR — phí chuỗi trừ mà không vào sổ, vì một cái tên bị đọc thành số chứng từ
+
+Màn *Khoản chuỗi trừ lại* của LOTTE, kỳ 8/2026:
+
+| số chứng từ | diễn giải | số tiền | loại |
+|---|---|---|---|
+| `260807-01002-1-0262` | Hang tra lai | −2.609.820 | Ghi giảm ✓ |
+| `Opening Support fee - Manual(8%)` | PHI HO TRO KHAI TRUONG NAM 2026 | −2.160.000 | Ghi giảm ✗ |
+| `Other services fee - Manual(8%)` | TRUY THU PHI DICH VU KHAC T01-T06.2026 | −24.746 | Ghi giảm ✗ |
+
+Cột **"số chứng từ" chứa một cái TÊN PHÍ**. Đó là toàn bộ dấu vết lộ ra màn hình.
+
+`Deduct Name` của LOTTE kiêm hai vai — **danh mục** khoản trừ, và **số chứng từ**
+hàng trả lại. Bản đầu phân biệt bằng whitelist đúng ba chuỗi `- Auto` đọc từ file
+6/2026, file duy nhất có lúc đó; `lotte.py` đã ghi thẳng điều nó chưa biết:
+*"chưa biết bản xuất kỳ khác có thêm loại Deduct Name mới"*. Kỳ 8/2026 thêm thật,
+ở dạng gõ tay `- Manual(8%)`.
+
+Hai dòng đó rơi vào nhánh *"không thuộc danh mục ⇒ là số chứng từ"* → `ghi_giam`,
+và `ghi_giam` **cố ý không sinh bút toán** (SOP §4: hàng trả đi đường chứng từ trả
+hàng của ERPNext). Nên **phí chuỗi đã trừ không vào sổ một đồng nào** — im lặng,
+vì cả ba số kiểm tra `SUM` vẫn khớp: tiền chỉ đổi **nhóm** chứ không đổi **tổng**.
+Đúng cái bẫy mà chính parser đã cảnh báo ở nhánh bên cạnh, chỉ khác chiều.
+
+#### Ranh giới mới: hậu tố chế độ, không phải chuỗi nguyên văn
+
+Số chứng từ trả hàng không bao giờ mang hậu tố `- Auto` / `- Manual(...)`, nên hậu
+tố là ranh giới đáng tin giữa hai vai. Danh mục khai theo **gốc tên**:
+
+```
+'Opening Support fee - Manual(8%)'  ->  gốc 'opening support fee'  ->  phi
+'Basic discount - Manual(5%)'       ->  gốc 'basic discount'       ->  chiet_khau
+'260807-01002-1-0262'               ->  không hậu tố               ->  số chứng từ
+```
+
+Gốc tên **lạ** mà có hậu tố thì ra `khac`, **không đoán thành phí**. Đoán theo chữ
+"fee" là đẩy một khoản chưa ai xác nhận thẳng vào tài khoản chi phí; `khac` không
+sinh bút toán nhưng **hiện ra kèm số tiền** ở màn xem trước — đúng SOP §4: treo,
+hỏi chuỗi lấy hóa đơn/biên bản trước.
+
+Sửa xong thì phí gõ tay đi đúng đường có sẵn: `mt_je` sinh **một bút toán phí gộp
+theo bảng kê** (Nợ 6411 + 1331 · Có 131 một dòng tổng), y như phí `- Auto`. Không
+thêm cơ chế nào.
+
+#### Bảng kê nạp từ TRƯỚC phải tự tố cáo
+
+Sửa tầng đọc không đụng tới dữ liệu đã nạp — 88 dòng trên màn hình kia vẫn mang
+`row_kind = 'Ghi giảm'`. Nên màn xem trước bút toán nay soi lại nhóm "không sinh
+bút toán": dòng nào có *số chứng từ* mang hậu tố chế độ thì nó **không phải hàng
+trả**, và khối cảnh báo nói thẳng số dòng, số tiền, tên khoản, kèm việc phải làm
+(**nạp lại bảng kê**).
+
+Hàng trả **thật** không bị kêu oan — sau lần báo động giả đầu tiên thì cảnh báo
+này mất tác dụng, nên phép kiểm canh cả chiều đó.
 
 ### MT2-AQ — một lần bán, hai chứng từ, và một màn hình chỉ đếm một
 

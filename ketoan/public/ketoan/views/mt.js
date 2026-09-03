@@ -3460,7 +3460,17 @@ async function renderJePreview(container, state, modal, advice) {
               ? html`<br><b>Nhóm có cả khoản trừ lẫn khoản hoàn:</b> số trên là RÒNG;
                      cộng độ lớn từng dòng ra ${formatVND(n.amount_gross)}.`
               : ""}
-            <br>${n.reason}</div>`)}
+            <br>${n.reason}
+            ${n.misclassified
+              ? html`<div style="margin-top:6px;padding:8px;border-left:3px solid var(--kt-danger);background:#fff7ed">
+                  <b style="color:var(--kt-danger)">${n.misclassified.n} dòng ở đây trông KHÔNG phải hàng trả —
+                  ${formatVND(n.misclassified.amount)}.</b>
+                  Cột "số chứng từ" của chúng là <b>${n.misclassified.names.join(" · ")}</b> —
+                  đó là TÊN khoản trừ, không phải số chứng từ trả hàng. Bảng kê này nạp bằng
+                  bản đọc file cũ nên khoản đó bị xếp nhầm và không vào sổ.
+                  <b>Nạp lại bảng kê</b> để nó vào đúng nhóm phí / chiết khấu và sinh bút toán.
+                </div>`
+              : ""}</div>`)}
         </div></div>`
       : ""}
 

@@ -78,6 +78,7 @@ toán y hệt nhau, và duyệt cả hai là trừ công nợ khách GẤP ĐÔI
 """
 
 import hashlib
+import re
 
 import frappe
 from frappe import _
@@ -113,6 +114,23 @@ KIND_TO_EVENT = (
     (KIND_DISCOUNT, EVENT_DISCOUNT, "Chiết khấu"),
     (KIND_FEE, EVENT_FEE, "Phí"),
 )
+
+# Dấu vết của một khoản trừ bị XẾP NHẦM sang 'Ghi giảm'.
+#
+# 'Số chứng từ' của một dòng ghi giảm là số chứng từ trả hàng của chuỗi
+# ('260807-01002-1-0262'). Khi nó mang hậu tố chế độ ('- Auto', '- Manual(8%)')
+# thì đó KHÔNG phải số chứng từ — đó là TÊN DANH MỤC khoản trừ mà tầng đọc chưa
+# nhận ra, và cả khoản phí ấy đang nằm im ở nhóm "không sinh bút toán".
+#
+# Tầng đọc đã được sửa (xem `_lt_deduct_kind`), nhưng bảng kê NẠP TỪ TRƯỚC vẫn
+# giữ phân loại cũ trong bảng. Chốt này để chúng tự tố cáo ở màn xem trước, chứ
+# không phải để kế toán đi dò 88 dòng bằng mắt.
+_MISCLASSIFIED_DOC_NO = re.compile(r"\s-\s*(auto|manual)\s*(\([^)]*\))?\s*$", re.I)
+
+
+def _looks_like_category(doc_no):
+    return bool(doc_no) and bool(_MISCLASSIFIED_DOC_NO.search(cstr(doc_no)))
+
 
 # Loại dòng CỐ Ý không sinh bút toán, kèm lý do hiện ra cho kế toán.
 NO_JE_REASON = {
@@ -345,6 +363,14 @@ def _build_plan(doc):
             if _has_mixed_signs(rows):
                 item["mixed_signs"] = True
                 item["amount_gross"] = sum(_line_amount(r) for r in rows)
+            if kind == KIND_DEDUCT:
+                mis = [r for r in rows if _looks_like_category(r.get("doc_no"))]
+                if mis:
+                    item["misclassified"] = {
+                        "n": len(mis),
+                        "amount": _group_amount(mis),
+                        "names": sorted({cstr(r.get("doc_no")) for r in mis})[:6],
+                    }
             not_posted.append(item)
 
     plan = []

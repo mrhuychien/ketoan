@@ -1142,14 +1142,56 @@ _LT_COLS = ["NO", "Store CD", "Store Name", "Vendor CD", "Vendor Name", "Write D
 _LT_REQUIRED = ("Store CD", "Tax No", "Invoice No", "Deduct Name", "Deduct Cause",
                 "Pay Amt", "Vat Amt", "Total Amt", "Payment Date")
 
-# Chỉ BA giá trị này của 'Deduct Name' là DANH MỤC khoản trừ. Mọi giá trị khác của
-# cột đó là SỐ CHỨNG TỪ (vd '260626-01006-1-0265' của hàng trả lại) — whitelist
-# theo 3 giá trị này rồi bỏ phần còn lại sẽ mất 2 dòng ghi giảm -809.335đ.
-_LT_DEDUCT_KIND = {
-    "Basic discount - Auto": ("chiet_khau", "Chiết khấu cơ bản"),
-    "Sale services fee - Auto": ("phi", "Phí bán hàng"),
-    "Other services fee - Auto": ("phi", "Phí dịch vụ khác"),
+# 'Deduct Name' của LOTTE kiêm HAI VAI, và phân biệt bằng HẬU TỐ CHẾ ĐỘ.
+#
+#   'Basic discount - Auto'          -> DANH MỤC khoản trừ
+#   'Other services fee - Manual(8%)' -> DANH MỤC khoản trừ (LOTTE gõ tay)
+#   '260626-01006-1-0265'             -> SỐ CHỨNG TỪ hàng trả lại
+#
+# ⚠ Bản đầu whitelist ĐÚNG BA CHUỖI '- Auto' đọc từ file tháng 6/2026 — file duy
+# nhất có lúc đó, và `lotte.py` đã ghi thẳng điều nó chưa biết: "chưa biết bản
+# xuất kỳ khác có thêm loại Deduct Name mới". Kỳ 8/2026 thêm thật:
+#
+#   'Opening Support fee - Manual(8%)'  PHI HO TRO KHAI TRUONG NAM 2026   2.160.000
+#   'Other services fee - Manual(8%)'   TRUY THU PHI DICH VU KHAC          24.746
+#
+# Hai dòng đó rơi vào nhánh "không thuộc danh mục -> là số chứng từ", thành
+# `ghi_giam`, và `ghi_giam` CỐ Ý không sinh bút toán (SOP §4: hàng trả đi đường
+# chứng từ trả hàng). Nên PHÍ CHUỖI ĐÃ TRỪ KHÔNG VÀO SỔ MỘT ĐỒNG NÀO — im lặng,
+# vì mọi số kiểm tra SUM vẫn khớp: tiền chỉ đổi NHÓM chứ không đổi TỔNG. Dấu
+# hiệu duy nhất lộ ra màn hình là cột "Số chứng từ" chứa một cái TÊN PHÍ.
+#
+# Sửa bằng GỐC TÊN + hậu tố, không bằng chuỗi nguyên văn: số chứng từ trả hàng
+# không bao giờ mang hậu tố '- Auto'/'- Manual', nên hậu tố là ranh giới đáng
+# tin giữa hai vai. Danh mục lạ vẫn KHÔNG được đoán — nó ra `khac`, hiện ra ở
+# màn xem trước kèm số tiền để người quyết.
+_LT_MODE_RE = re.compile(r"\s*-\s*(auto|manual)\s*(\([^)]*\))?\s*$", re.I)
+
+_LT_DEDUCT_STEM = {
+    "basic discount": ("chiet_khau", "Chiết khấu cơ bản"),
+    "sale services fee": ("phi", "Phí bán hàng"),
+    "other services fee": ("phi", "Phí dịch vụ khác"),
+    "opening support fee": ("phi", "Phí hỗ trợ khai trương"),
 }
+
+
+def _lt_deduct_kind(dname):
+    """'Deduct Name' -> (row_kind, nhãn, cần_người_xem).
+
+    `(None, None, False)` = KHÔNG phải danh mục; người gọi hiểu đó là số chứng từ.
+
+    Có hậu tố chế độ mà gốc tên lạ -> `khac`, KHÔNG đoán thành `phi`. Đoán theo
+    chữ 'fee' là đẩy thẳng một khoản chưa ai xác nhận vào tài khoản chi phí;
+    `khac` thì không sinh bút toán nhưng HIỆN RA kèm tiền ở màn xem trước, và
+    SOP §4 nói đúng thế: treo, hỏi chuỗi lấy hóa đơn/biên bản trước.
+    """
+    if not dname or not _LT_MODE_RE.search(dname):
+        return None, None, False
+    stem = _LT_MODE_RE.sub("", dname).strip().lower()
+    hit = _LT_DEDUCT_STEM.get(stem)
+    if hit:
+        return hit[0], hit[1], False
+    return "khac", dname, True
 # LOTTE có HAI mức dòng tổng: SUB SUM (mỗi siêu thị) và SUM (toàn file). Chỉ lọc
 # 'SUB SUM' thì dòng SUM 229.719.804 lọt vào dữ liệu và tổng file bị NHÂN ĐÔI.
 _LT_TOTAL_CAUSES = {"SUB SUM", "SUM"}
@@ -1232,8 +1274,14 @@ def parse_lotte(sheets):
             # --- phân loại: TUYỆT ĐỐI không dùng dấu của số tiền ---
             needs_review = False
             doc_no = None
-            if dname in _LT_DEDUCT_KIND:
-                kind, label = _LT_DEDUCT_KIND[dname]
+            cat_kind, cat_label, cat_review = _lt_deduct_kind(dname)
+            if cat_kind:
+                kind, label, needs_review = cat_kind, cat_label, cat_review
+                if cat_review:
+                    warnings.append(
+                        "Sheet %s dòng %d: khoản trừ %r chưa có trong danh mục — đã xếp "
+                        "'Khác' nên KHÔNG sinh bút toán, cần người xác nhận là phí hay "
+                        "chiết khấu rồi bổ sung danh mục." % (name, rno, dname))
             elif dname:
                 # Deduct Name có giá trị nhưng không thuộc 3 danh mục -> đó là SỐ CHỨNG TỪ
                 # ghi giảm của LOTTE (quan sát thật: Deduct Cause='Hang tra lai').

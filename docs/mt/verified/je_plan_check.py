@@ -429,6 +429,105 @@ def main():
     bad += not ok
     _fr.db.sql = _sql_old
 
+    # ── KHOẢN CHUỖI TRỪ LẠI PHẢI VÀO SỔ, KHÔNG RƠI SANG 'Ghi giảm' ────────
+    #
+    # 'Deduct Name' của LOTTE kiêm hai vai: DANH MỤC khoản trừ
+    # ('Basic discount - Auto') và SỐ CHỨNG TỪ hàng trả lại
+    # ('260626-01006-1-0265'). Bản đầu whitelist đúng ba chuỗi '- Auto' đọc từ
+    # file 6/2026. Kỳ 8/2026 LOTTE thêm biến thể gõ tay
+    # ('Opening Support fee - Manual(8%)', 'Other services fee - Manual(8%)'),
+    # và chúng rơi vào nhánh "không thuộc danh mục -> là số chứng từ" => `ghi_giam`
+    # => KHÔNG sinh bút toán. Phí chuỗi đã trừ không vào sổ một đồng, mà mọi số
+    # kiểm tra SUM vẫn khớp vì tiền chỉ đổi NHÓM chứ không đổi TỔNG.
+    print("-" * 78)
+    ma = importlib.import_module("ketoan.api.mt_advice")
+
+    # Ranh giới giữa hai vai là HẬU TỐ CHẾ ĐỘ, không phải chuỗi nguyên văn.
+    cases = [
+        ("Basic discount - Auto", "chiet_khau", False),
+        ("Sale services fee - Auto", "phi", False),
+        ("Other services fee - Auto", "phi", False),
+        ("Other services fee - Manual(8%)", "phi", False),
+        ("Opening Support fee - Manual(8%)", "phi", False),
+        ("Basic discount - Manual(5%)", "chiet_khau", False),
+        # Danh mục LẠ: không đoán theo chữ 'fee' — ra `khac`, hiện kèm tiền.
+        ("Listing fee - Manual(10%)", "khac", True),
+        # Số chứng từ hàng trả lại: KHÔNG mang hậu tố chế độ.
+        ("260807-01002-1-0262", None, False),
+        ("260626-01006-1-0265", None, False),
+        ("", None, False),
+        (None, None, False),
+    ]
+    wrong = [(d, ma._lt_deduct_kind(d)[0], want)
+             for d, want, _rv in cases if ma._lt_deduct_kind(d)[0] != want]
+    ok = not wrong
+    print(f"  {'✅' if ok else '❌'} LOTTE · hậu tố '- Auto'/'- Manual(..)' phân biệt DANH MỤC "
+          f"với SỐ CHỨNG TỪ" + ("" if ok else f"  ({wrong[:2]})"))
+    bad += not ok
+    ok = ma._lt_deduct_kind("Listing fee - Manual(10%)")[2] is True
+    print(f"  {'✅' if ok else '❌'} và danh mục LẠ bắt người xác nhận, không đoán thành phí")
+    bad += not ok
+
+    # Phép đo thật: một dòng phí gõ tay PHẢI vào bút toán phí, không vào
+    # `not_posted`.
+    fee_line = _D(row_kind="Phí", row_subtype="Phí hỗ trợ khai trương",
+                  inv_series=None, inv_no=None, doc_no=None,
+                  description="PHI HO TRO KHAI TRUONG NAM 2026",
+                  total_amount=-2160000.0, vat_amount=160000.0,
+                  amount_before_vat=2000000.0, sales_invoice=None,
+                  match_confidence=None, match_method="test", source_row=9)
+    plan_fee, _w, np_fee = mj._build_plan(FakeAdvice([fee_line], chain="LOTTE"))
+    ok = any(e["kind"] == mj.KIND_FEE for e in plan_fee)
+    print(f"  {'✅' if ok else '❌'} phí chuỗi gõ tay SINH bút toán phí (gộp theo bảng kê)")
+    bad += not ok
+    ok = not any(x.get("kind") == mj.KIND_DEDUCT for x in np_fee)
+    print(f"  {'✅' if ok else '❌'} và KHÔNG rơi vào nhóm 'không sinh bút toán'")
+    bad += not ok
+
+    # BẢNG KÊ NẠP TỪ TRƯỚC vẫn giữ phân loại cũ trong bảng — sửa tầng đọc không
+    # đụng tới chúng. Chúng phải TỰ TỐ CÁO ở màn xem trước, chứ không bắt kế toán
+    # dò 88 dòng bằng mắt.
+    old_line = _D(row_kind="Ghi giảm", row_subtype=None, inv_series=None, inv_no=None,
+                  doc_no="Opening Support fee - Manual(8%)",
+                  description="PHI HO TRO KHAI TRUONG NAM 2026",
+                  total_amount=-2160000.0, vat_amount=160000.0,
+                  amount_before_vat=2000000.0, sales_invoice=None,
+                  match_confidence=None, match_method="test", source_row=9)
+    real_ret = _D(row_kind="Ghi giảm", row_subtype=None, inv_series=None, inv_no=None,
+                  doc_no="260807-01002-1-0262", description="Hang tra lai",
+                  total_amount=-2609820.0, vat_amount=193320.0,
+                  amount_before_vat=2416500.0, sales_invoice=None,
+                  match_confidence=None, match_method="test", source_row=10)
+    _p, _w, np_old = mj._build_plan(FakeAdvice([old_line, real_ret], chain="LOTTE"))
+    hit = [x for x in np_old if x.get("misclassified")]
+    ok = len(hit) == 1 and hit[0]["misclassified"]["n"] == 1
+    print(f"  {'✅' if ok else '❌'} bảng kê nạp từ trước TỰ TỐ CÁO dòng bị xếp nhầm "
+          f"({hit[0]['misclassified']['n'] if hit else 0} dòng)")
+    bad += not ok
+    # `_group_amount` trả ĐỘ LỚN của tổng đại số — cùng phép với ô `amount` của
+    # cả nhóm, nên hai con số trên màn hình so được với nhau.
+    ok = bool(hit) and hit[0]["misclassified"]["amount"] == 2160000.0
+    print(f"  {'✅' if ok else '❌'} và nói ra SỐ TIỀN đang nằm ngoài sổ  "
+          f"({hit[0]['misclassified']['amount'] if hit else '—'})")
+    bad += not ok
+    # Hàng trả THẬT không được kêu oan — sau lần báo động giả đầu tiên thì cảnh
+    # báo này mất tác dụng.
+    ok = bool(hit) and "260807-01002-1-0262" not in hit[0]["misclassified"]["names"]
+    print(f"  {'✅' if ok else '❌'} hàng trả THẬT không bị kêu oan")
+    bad += not ok
+
+    # File 6/2026 KHÔNG được đổi một đồng nào vì bản sửa này.
+    res6 = ma.read_payment_advice(
+        base64.b64encode(open(os.path.join(rc.SAMPLES,
+                                           "Chi tiết thanh toán Lotte.xls"), "rb").read()).decode(),
+        "lotte")
+    kinds = {}
+    for r in res6["rows"]:
+        kinds[r["row_kind_label"]] = kinds.get(r["row_kind_label"], 0) + 1
+    ok = kinds == {"Thanh toán": 45, "Phí": 42, "Chiết khấu": 21, "Ghi giảm": 8}
+    print(f"  {'✅' if ok else '❌'} file LOTTE 6/2026 phân loại KHÔNG đổi  ({kinds})")
+    bad += not ok
+
     print("=" * 78)
     print("KẾT QUẢ:", "ĐẠT — bút toán cân, không ghi trùng, không mất tiền im lặng"
           if not bad else f"HỎNG {bad} mục")
