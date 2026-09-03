@@ -598,7 +598,7 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AN** màn "Hàng hoàn chờ xử lý" + `mt_hoan.py`, bản vá đã sang repo kia | `8a8a3b9` | `hoan_check` |
 | **MT2-AO** màn làm việc MT xếp lại theo VIỆC · màn đối soát bảng kê | `d14986d`…`8685fd7` | `ui_mt_check` · `table_width_check` |
 | **MT2-AP** mở cửa cho PDF ở nút *Nạp bảng kê thanh toán* | `802c07e` | `win_pdf_check` |
-| **MT2-AQ** đối soát so PHẦN RÒNG (hóa đơn đi + hóa đơn trả về) · số HĐĐT trên bảng kê | *(commit này)* | `ui_mt_check` |
+| **MT2-AQ** đối soát so PHẦN RÒNG (hóa đơn đi + hóa đơn trả về) · số HĐĐT trên bảng kê | `21b15c9` | `ui_mt_check` |
 
 Chạy toàn bộ, không cần bench:
 
