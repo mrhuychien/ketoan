@@ -2090,7 +2090,14 @@ function openRelinkModal(container, state, line, currentSI, onDone) {
 function pickFile(container, state) {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = ".xlsx,.xls";
+  // `.pdf` vì WinCommerce gửi bảng kê thanh toán bằng PDF, và `read_sheets_any`
+  // của `mt_advice_pdf` đọc thẳng nó từ MT2-W. Ô này thì không ai mở ra sửa,
+  // nên suốt từ đó tới giờ hộp thoại chọn file LỌC MẤT đúng cái file duy nhất
+  // chuỗi ấy gửi: cả tầng đọc PDF nằm đó mà không có đường nào bấm tới.
+  //
+  // Liệt kê cả `.PDF` viết hoa như `pickBkckFile`: backend nhận dạng bằng chữ
+  // ký byte nên chữ hoa không sao, nhưng hộp thoại của trình duyệt thì so đuôi.
+  input.accept = ".xlsx,.xls,.xlsm,.pdf,.PDF";
   input.onchange = () => {
     const file = input.files && input.files[0];
     if (!file) return;

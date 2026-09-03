@@ -597,6 +597,7 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AM** bảng mã hàng chuyển sang `vanchuyen` + cất bản vá app kia | `540f391` | `hoan_check` |
 | **MT2-AN** màn "Hàng hoàn chờ xử lý" + `mt_hoan.py`, bản vá đã sang repo kia | `8a8a3b9` | `hoan_check` |
 | **MT2-AO** màn làm việc MT xếp lại theo VIỆC · màn đối soát bảng kê | `d14986d`…`8685fd7` | `ui_mt_check` · `table_width_check` |
+| **MT2-AP** mở cửa cho PDF ở nút *Nạp bảng kê thanh toán* | *(commit này)* | `win_pdf_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -899,6 +900,27 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AP — tầng đọc PDF nằm đó suốt, không có nút nào bấm tới
+
+MT2-W dựng `mt_advice_pdf`: đọc THẲNG bảng kê thanh toán PDF của WinCommerce,
+đối chiếu với bản Excel chuyển đổi ra **cùng 36 dòng, cùng 245.795.904đ**, và
+`read_sheets_any` thành "cửa vào duy nhất" nhận cả Excel lẫn PDF theo chữ ký
+byte.
+
+Ô chọn file của nút **Nạp bảng kê thanh toán** thì vẫn là `.xlsx,.xls` — nguyên
+từ MT2-D, không ai mở ra sửa. Hộp thoại của trình duyệt vì vậy **lọc mất đúng
+cái file duy nhất WinCommerce gửi**: kế toán bấm nút, thấy file PDF của mình bị
+làm mờ, và không có gì trên màn hình nói vì sao. Cả một tầng đọc đã đo đạc, đã
+đối chiếu, đã có bộ kiểm — không có đường nào bấm tới.
+
+Sáu mục của `win_pdf_check` chỉ đo TẦNG DƯỚI, nên tất cả đều xanh suốt thời gian
+đó. Nay có mục 7: tầng đọc nhận PDF thì cửa vào phải mở.
+
+⚠ Mục ấy suýt nữa cũng nói dối. Bản đầu quét cả thân `pickFile` tìm chữ `.pdf` —
+mà chú thích ngay trên dòng `accept` có chữ đó, nên bẻ ô chọn file về `.xlsx,.xls`
+nó vẫn xanh. Phải đọc **chính giá trị** `accept` bằng regex thì hai đột biến mới
+đỏ. Đúng kiểu lỗi mục này sinh ra để bắt.
 
 ### MT2-AO — badge nói 13, màn hình mở ra 194 dòng
 

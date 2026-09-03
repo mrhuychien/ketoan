@@ -33,6 +33,7 @@ Chạy KHÔNG cần bench (stub frappe của `regression_check`), nhưng CẦN
 import base64
 import importlib
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -232,6 +233,31 @@ def main():
     ok = "from ketoan.api.mt_advice_pdf import read_sheets_any" in src
     print(f"  {'✅' if ok else '❌'} nhập trong hàm, không ở mức module (tránh vòng import "
           f"mt_advice -> mt_advice_pdf -> mt_rebate_pdf -> mt_advice)")
+    bad += not ok
+
+    # ── 7. CÓ ĐƯỜNG BẤM TỚI — tầng đọc không có nút thì bằng không có ──
+    #
+    # `read_sheets_any` nhận PDF từ MT2-W, nhưng ô chọn file của nút "Nạp bảng
+    # kê thanh toán" giữ nguyên `.xlsx,.xls` suốt từ MT2-D. Hộp thoại của trình
+    # duyệt vì vậy LỌC MẤT đúng cái file duy nhất WinCommerce gửi: cả tầng đọc
+    # PDF nằm đó mà không có đường nào bấm tới, và không phép kiểm nào thấy —
+    # sáu mục trên chỉ đo tầng dưới.
+    print("-" * 82)
+    mtjs = open(os.path.join(rc.REPO, "ketoan/public/ketoan/views/mt.js"),
+                encoding="utf-8").read()
+    seg = mtjs.split("function pickFile(")[1].split("input.click()")[0]
+    # Đọc CHÍNH GIÁ TRỊ `accept`, không quét cả thân hàm: chú thích ngay trên nó
+    # có chữ `.pdf` và `.PDF`, nên `".pdf" in seg` xanh cả khi ô chọn file đã bị
+    # sửa về `.xlsx,.xls` — một mục canh dối, đúng kiểu lỗi nó sinh ra để bắt.
+    m = re.search(r'input\.accept\s*=\s*"([^"]*)"', seg)
+    exts = [x.strip().lower() for x in (m.group(1) if m else "").split(",")]
+    ok = ".pdf" in exts
+    print(f"  {'✅' if ok else '❌'} ô chọn file của 'Nạp bảng kê thanh toán' CÓ mời PDF "
+          f"(tầng đọc nhận PDF thì cửa vào phải mở)  [{m.group(1) if m else 'KHÔNG THẤY'}]")
+    bad += not ok
+    ok = m is not None and ".PDF" in m.group(1)
+    print(f"  {'✅' if ok else '❌'} và cả đuôi VIẾT HOA — backend so chữ ký byte, hộp thoại "
+          f"trình duyệt so đuôi tên")
     bad += not ok
 
     print("=" * 82)
