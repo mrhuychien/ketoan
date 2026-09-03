@@ -1,305 +1,252 @@
-# Prompt: đưa cơ chế "ghi số hóa đơn MISA vào Sales Invoice" sang app khác
+# Prompt: số hóa đơn MISA cho `nppsale` (Next.js 14 + Supabase)
 
-Copy nguyên khối dưới đây làm prompt. Nó mô tả **cơ chế đã chạy thật** trong app
-`ketoan` (`ketoan/api/misa_*.py`), kèm những chốt chặn mà chỉ dữ liệu thật mới
-dạy ra được — phần đắt nhất của bản này nằm ở các chốt đó, không nằm ở luồng
-chính.
+Copy từ `## PROMPT` trở xuống.
 
-> ⚠ Viết bởi phiên **không có repo `nppsale` trong tay**. Mọi tên field/module là
-> của `ketoan`; người áp dụng phải đối chiếu lại với quy ước của app đích.
+Phiên này **đã đọc `mrhuychien/nppsale` @ `c45f82b`** (read-only). App đó **đã có**
+tích hợp MISA — `src/lib/misa/*`, `src/app/api/einvoice/*`, migration 072→079.
+Nên đây không phải prompt dựng từ đầu, mà là: **một lỗi đang chạy phải sửa
+trước**, rồi bốn thứ đang thiếu, đo được từ chính mã nguồn của nó.
+
+Nguồn của các bất biến ở §4: app `ketoan` (Frappe/ERPNext), nơi cùng cơ chế này
+đã chạy trên dữ liệu thật và va đủ các cạnh. Chúng **không phụ thuộc stack**.
 
 ---
 
 ## PROMPT
 
-Tôi cần bạn dựng cơ chế **kéo số hóa đơn điện tử MISA meInvoice về `Sales
-Invoice` của ERPNext v16** cho app này. Dưới đây là thiết kế đã chạy thật ở một
-app khác cùng hệ thống. Hãy đọc hết trước khi viết dòng code nào, rà lại xem app
-này đã có phần nào chưa, rồi mới làm.
+Bạn đang làm trên `nppsale` (Next.js 14 App Router + Supabase). App đã có tích
+hợp MISA meInvoice. Đọc hết dưới đây trước khi sửa dòng nào; mọi khẳng định đều
+đã đối chiếu với mã tại `c45f82b`, nhưng repo có thể đã đi tiếp — **kiểm lại
+từng chỗ trước khi tin**.
 
-### 0. Nguyên tắc bao trùm — vi phạm cái nào là hỏng cả cơ chế
+### 1. LỖI ĐANG CHẠY — sửa trước mọi thứ khác
 
-1. **Chứng từ đã ghi sổ chỉ được ghi bằng `frappe.db.set_value(...,
-   update_modified=False)`.** TUYỆT ĐỐI không `save()`, không `submit()`,
-   không đụng `GL Entry`. `save()` một Sales Invoice `docstatus=1` sẽ chạy lại
-   `validate()` và có thể chặn giữa lô.
-2. **Cô lập blast radius:** chỉ MỘT module được ghi vào `Sales Invoice`. Module
-   đối soát/khớp chỉ ghi vào bảng snapshot của nó.
-3. **Không đoán.** Không khớp được thì để trống + gắn nhãn "chưa xác định". Ghi
-   sai một số hóa đơn là sai báo cáo thuế, mà nó vẫn trông hợp lý trên màn hình.
-4. **Không bao giờ chặn `submit`.** Kế toán phải ghi sổ được kể cả khi tích hợp
-   MISA hỏng hoàn toàn. Hook `before_submit` phải bọc `try/except` nuốt lỗi.
+**`invoices.misa_invoice_id` đang kiêm hai vai, và vai sau xóa mất vai trước.**
 
-### 1. Kiến trúc hai khóa
+`publish/route.ts` ghi vào đó **RefID (GUID)** — và ghi rõ trong chú thích:
 
-Số hóa đơn KHÔNG có lúc ghi sổ — MISA cấp sau. Nên cần **khóa nối sinh trước**:
-
-```
-before_submit  ->  sinh custom_misa_ref_id = uuid4()   (khóa nối, của mình)
-push           ->  gửi ERPNext -> MISA kèm ref_id
-(MISA phát hành, cấp số)
-poll_pending   ->  GET afterpublishing/{ref_id}  ->  ghi số về Sales Invoice
+```ts
+// misa_invoice_id luôn lưu RefID (GUID) — đây là khoá build URL admin MISA
+const sentRefId = Array.isArray(payload) && payload[0]?.RefID ? payload[0].RefID : null
+... misa_invoice_id: sentRefId,
 ```
 
-Sai lầm của bản đầu: sinh uuid rồi **vứt đi**, không lưu — sau đó không còn
-đường nào hỏi lại MISA "hóa đơn này của tôi được cấp số chưa".
+`refresh-status/route.ts` đọc nó làm RefID để tra cứu, rồi **ghi đè bằng số hóa
+đơn**:
 
-### 2. Custom field cần tạo trên Sales Invoice
+```ts
+const refId = invoice.misa_invoice_id || invoice.misa_lookup_code
+...
+if (invNo && !invNo.startsWith("<")) updates.misa_invoice_id = invNo   // ⚠
+```
 
-Tất cả `read_only = 1`, `no_copy = 1`, gom vào một tab/section riêng.
+Hệ quả dây chuyền:
 
-| fieldname | type | vai trò |
+1. Lần refresh **đầu tiên** chạy đúng và ghi `InvNo` đè lên GUID.
+2. Lần refresh **thứ hai** gọi `?refID=<số hóa đơn>` → MISA không biết → API trả
+   `404 "MISA không trả về dữ liệu HD."` — một câu chỉ người dùng đi soi **MISA**,
+   trong khi lỗi nằm ở chính chỗ này.
+3. **Không bao giờ biết hóa đơn bị hủy hay bị thay thế trên MISA sau đó** — mất
+   khóa là mất luôn đường hỏi.
+4. URL admin `app.meinvoice.vn/sainvoice/edit/{RefID}` gãy.
+5. Chốt idempotency của `publish` đã phải đi vòng bằng
+   `uuidRe.test(misa_invoice_id)` — tức là **có người đã thấy cột này lúc thì
+   GUID lúc thì không, và vá ở chỗ dùng thay vì chỗ gây ra**.
+
+**Sửa: hai khóa, hai cột.** Đây là ràng buộc kiến trúc, không phải chuyện đặt tên.
+
+| cột | giữ gì | ai ghi |
 |---|---|---|
-| `custom_misa_ref_id` | Data | **khóa nối**, uuid4 sinh trước khi ghi sổ |
-| `custom_misa_inv_series` | Data | ký hiệu (`1C25MHG`) |
-| `custom_misa_inv_no` | Data | **số hóa đơn** |
-| `custom_misa_inv_date` | Date | ngày phát hành (KHÁC `posting_date`) |
-| `custom_misa_transaction_id` | Data | mã tra cứu |
-| `custom_misa_invoice_code` | Data | mã CQT |
-| `custom_misa_link` | Data | URL tra cứu, dựng từ mẫu trong Settings |
-| `custom_misa_status` | Select | vòng đời (xem §5) |
-| `custom_misa_relation` | Select | quan hệ thay thế/điều chỉnh (xem §5) |
-| `custom_misa_org_ref_id` | Data | ref_id hóa đơn gốc (nếu đây là bản thay thế) |
-| `custom_misa_org_inv` | Data | ký hiệu+số của hóa đơn bên kia quan hệ |
-| `custom_misa_pushed_at` | Datetime | đã đẩy lúc nào |
-| `custom_misa_last_checked` | Datetime | hỏi MISA lần cuối lúc nào |
-| `custom_misa_note` | Small Text | cảnh báo lệch / ghi chú xử lý |
-| `custom_misa_no_locked` | Check | **số do người gán — đồng bộ không được đè** |
+| `misa_ref_id` | GUID mình sinh, **BẤT BIẾN** | chỉ `publish` |
+| `misa_inv_no` | số hóa đơn MISA cấp | chỉ `refresh` |
+| `misa_inv_series` | ký hiệu (`1C25MHG`) | chỉ `refresh` |
+| `misa_lookup_code` | TransactionID | chỉ `refresh` |
 
-Nếu app đã có ô số hóa đơn nhập tay (ví dụ `vn_einvoice_number`), **giữ nguyên**
-và coi nó là *mặt hiển thị*, còn nhóm `custom_misa_*` là *dữ liệu kỹ thuật*.
-Xem §7 để đồng bộ hai nhóm mà không đè nhau.
+Migration phải **backfill**: `misa_ref_id = misa_invoice_id` cho những dòng còn
+đúng khuôn UUID; dòng nào `misa_invoice_id` **không** khớp khuôn UUID thì RefID
+đã mất — để `misa_ref_id = NULL`, chép giá trị đó sang `misa_inv_no`, và
+**đếm rồi báo ra** số dòng mất khóa. Đừng dọn im lặng: chúng cần phát hành lại
+hoặc gán tay, và không ai biết là bao nhiêu tờ thì không ai làm.
 
-### 3. `ensure_ref_id` — hook `Sales Invoice.before_submit`
+### 2. BỐN THỨ ĐANG THIẾU
 
-```python
-def ensure_ref_id(doc, method=None):
-    try:
-        if not doc.meta.has_field("custom_misa_ref_id"):
-            return                      # chưa migrate -> im lặng bỏ qua
-        if doc.get("amended_from"):
-            # XÓA SẠCH nhóm MISA rồi cấp ref_id MỚI.
-            ...
-            doc.custom_misa_ref_id = str(uuid.uuid4())
-            doc.custom_misa_status = "Chưa đẩy"
-            return
-        if (doc.get("custom_misa_ref_id") or "").strip():
-            return
-        doc.custom_misa_ref_id = str(uuid.uuid4())
-    except Exception:
-        pass        # KHÔNG BAO GIỜ chặn submit
+**2.1 — `PublishStatus >= 1` không phải là "đã ký."**
+
+```ts
+if (publishStatus >= 1) nextStatus = "signed"   // ⚠
 ```
 
-⚠ **Nhánh `amended_from` là bắt buộc, và đừng trông vào `no_copy`:**
-`frappe.model.copy_doc` **bỏ qua cờ `no_copy` khi amend**. Không dọn thì bản sửa
-đổi mang theo nguyên `ref_id` + số hóa đơn + `pushed_at` của bản ĐÃ HỦY ⇒
-`push` trả về "đã xuất rồi", bản sửa đổi **vĩnh viễn không được phát hành**,
-trong khi màn hình vẫn hiện số hóa đơn của bản đã hủy.
+Đo trên hóa đơn thật ở hệ thống kia: `0` = nháp, `3` = **đã cấp mã**. Các giá
+trị giữa là *đang phát hành · phát hành lỗi · chờ cấp mã · từ chối cấp mã* —
+`>= 1` đang dán nhãn "đã ký" cho hóa đơn **bị từ chối cấp mã**. Và
+`order-pipeline.tsx` đọc đúng cờ đó (`misa_status !== "signed"`) để quyết còn
+phải xuất hóa đơn nữa không, nên một hóa đơn hỏng sẽ **biến khỏi việc cần làm**.
 
-Cần thêm hai method vá dữ liệu cũ: `count_missing_ref_id()` và
-`backfill_ref_id(limit)` cho hóa đơn ghi sổ trước khi có tích hợp.
+Đúng: chỉ `3` là đã phát hành. Giá trị lạ thì **không đoán** — lùi về mốc chắc
+chắn là **mã CQT** (`InvoiceCode`): có mã ⇒ hợp lệ, chưa có ⇒ `"waiting_code"`.
+Và nhớ: đơn vị dùng hóa đơn **không mã** thì không bao giờ có `InvoiceCode` —
+phải đọc cờ `company_einvoice_config.misa_is_invoice_with_code` (app đã có sẵn
+cột này), không thì mọi hóa đơn của họ đứng vĩnh viễn ở "chờ cấp mã".
 
-### 4. `poll_pending` — vòng kéo số về
+**2.2 — Không có trục QUAN HỆ. Đây là rủi ro thuế, không phải thiếu tính năng.**
 
-**PHẢI có HAI vòng quét, không phải một.**
+Code hiện chỉ đọc `InvNo`, `TransactionID`, `PublishStatus`. **Không đọc
+`EInvoiceStatus`** — trục cho biết hóa đơn là bản mới / thay thế / điều chỉnh /
+**bị thay thế** / bị điều chỉnh:
 
-```python
-# Vòng 1 — chưa có số: hỏi xem MISA cấp chưa
-filters = {"docstatus": 1,
-           "custom_misa_ref_id": ("is", "set"),
-           "custom_misa_inv_no": ("is", "not set"),
-           "posting_date": (">=", since)}
-
-# Vòng 2 — ĐÃ có số nhưng chưa ở trạng thái cuối
-filters = {"docstatus": 1,
-           "custom_misa_ref_id": ("is", "set"),
-           "custom_misa_inv_no": ("is", "set"),
-           "custom_misa_status": ("not in", ["Đã hủy", "Đã thay thế"]),
-           "posting_date": (">=", since)}
-if frappe.db.has_column("Sales Invoice", "custom_misa_no_locked"):
-    filters["custom_misa_no_locked"] = 0
+```
+1 = Hóa đơn mới      3 = Hóa đơn thay thế     4 = Hóa đơn điều chỉnh
+7 = Bị thay thế      8 = Bị điều chỉnh
 ```
 
-⚠ Thiếu **vòng 2** thì hóa đơn bị HỦY hoặc bị THAY THẾ trên MISA *sau khi đã cấp
-số* không bao giờ bị phát hiện — bộ lọc vòng 1 loại chúng ra, nên hai nhánh xử
-lý đó thành **code chết**. Sổ vẫn ghi một hóa đơn hợp lệ trong khi bên MISA nó
-đã bị hủy. Đây là rủi ro thuế thật, không phải chuyện giao diện.
+Hai trục nằm ở **hai field khác nhau**, không phải hai cách đọc một field: đã đo
+5 hóa đơn thật — `PublishStatus` giữ nguyên `3` ở cả 5, trong khi
+`EInvoiceStatus` chạy 1/3/4/7/8 đúng theo quan hệ.
 
-⚠ `custom_misa_no_locked` trong vòng 2: chứng từ đã được người gán số hóa đơn
-thay thế thì `ref_id` trên đó vẫn trỏ hóa đơn **đã chết** — vòng 2 sẽ ghi số
-chết đè lên số người vừa gán, lặng lẽ, mỗi lần đồng bộ.
+Bốn hệ quả bắt buộc:
 
-⚠ Dùng `frappe.db.has_column` chứ không phải `meta.has_field` khi lọc: site chưa
-chạy patch mà lọc theo cột chưa tồn tại là gãy nguyên job.
+- **"Bị thay thế" ⇒ hết hiệu lực**, bất kể đã cấp mã. **"Bị điều chỉnh" thì
+  KHÔNG** — hóa đơn điều chỉnh chỉ cộng phần chênh, bản gốc vẫn còn hiệu lực và
+  vẫn phải kê khai. Gộp hai loại là **khai thiếu doanh thu bản gốc**.
+- Đọc được `OrgRefID` ⇒ **phải đánh dấu hóa đơn GỐC là "đã thay thế"**. Không
+  làm thì hai hóa đơn cùng hiện "đã ký" cho một lần bán ⇒ doanh thu và thuế đầu
+  ra khai **gấp đôi**.
+- Phải đọc quan hệ từ `EInvoiceStatus`, **đừng chỉ suy ngược từ `OrgRefID`**:
+  bản **bị** thay thế không hề mang `Org*` (đã đo — trống sạch), nên hóa đơn hết
+  hiệu lực nào mà ta chưa thấy bản thay thế của nó sẽ vĩnh viễn không lộ.
+- Hóa đơn **điều chỉnh mang số CHÊNH**, không phải tổng — đừng đem so với
+  `invoices.total`.
 
-Với mỗi hóa đơn: `GET afterpublishing/{ref_id}`, rồi:
+`misa_status` đang có `CHECK (misa_status IN ('pending','sent','signed','error'))`
+và `MisaStatus` ở `src/types/index.ts` — phải nới cả hai, thêm ít nhất
+`cancelled` · `replaced` · `waiting_code` · `amount_mismatch`.
 
-- API không biết hóa đơn → nếu đã có số thì **chỉ** cập nhật `last_checked`
-  (đừng hạ trạng thái đang đúng — có thể lỗi tạm); nếu chưa có số thì đặt
-  `"Đã đẩy (nháp)"` **chỉ khi thật sự đã đẩy** (`pushed_at` có giá trị), ngược
-  lại `"Chưa đẩy"`. Ghi bừa "đã đẩy" là khẳng định sai về nghĩa vụ thuế.
-- Số hóa đơn rỗng hoặc bắt đầu bằng `<` (MISA giữ chỗ `<Chưa cấp số>`) → coi như
-  chưa có số.
-- Có số → ghi cả cụm, so tiền, cập nhật trạng thái.
-- **Luôn** cập nhật `custom_misa_last_checked`, kể cả khi chưa có số.
-- `commit()` mỗi 50 dòng; gom lỗi vào `error_log` chứ không dừng cả job.
+**2.3 — Không có vòng quét tự động.** `refresh-status` nhận **một `invoiceId`**
+và phải có người bấm. Hóa đơn được ký trên MISA lúc 22h sẽ đứng ở `sent` cho tới
+khi ai đó mở đúng tờ đó ra. Cần một vòng quét **hai lượt** — xem §3.
 
-Ghi lại mỗi lượt chạy vào một DocType `MISA Sync Run` (job_type, trigger_type,
-from/to date, fetched/updated/matched/mismatched, error_log, status) — không có
-nó thì không ai biết job có chạy không và chạy ra sao.
+**2.4 — Không so tiền, không lưu ký hiệu/ngày/mã CQT.** Chỉ có `InvNo`. Số hóa
+đơn mà thiếu **ký hiệu** thì không định danh được (hai ký hiệu khác nhau dùng
+chung dải số là chuyện thường). Thiếu **`InvDate`** thì không biết kỳ thuế —
+ngày phát hành khác ngày ghi sổ.
 
-### 5. HAI TRỤC TRẠNG THÁI — nằm ở HAI field khác nhau
+### 3. VIỆC CẦN LÀM
 
-Đây là chỗ bản đầu suy sai và phải đo lại trên hóa đơn thật mới vỡ ra:
+**3.1 Migration** (`supabase/migrations/0xx_einvoice_refid_split.sql`)
 
-| trục | field API | ý nghĩa |
-|---|---|---|
-| **giá trị pháp lý** | `PublishStatus` | `0` = nháp · `3` = đã cấp mã |
-| **quan hệ** | `EInvoiceStatus` | `1` mới · `3` thay thế · `4` điều chỉnh · `7` bị thay thế · `8` bị điều chỉnh |
+Tách `misa_ref_id` khỏi `misa_invoice_id`; thêm `misa_inv_no`, `misa_inv_series`,
+`misa_inv_date` (date), `misa_invoice_code`, `misa_relation`,
+`misa_org_ref_id`, `misa_last_checked_at`, `misa_note`,
+`misa_no_locked` (boolean default false). Nới CHECK của `misa_status`. Backfill
+như §1. Đặt `UNIQUE (org_id, misa_inv_series, misa_inv_no)` **partial** trên
+`misa_inv_no IS NOT NULL` — hai hóa đơn cùng số là lỗi phải chặn ở tầng DB.
+Nhớ RLS: bảng này đang bật RLS, cột mới không tự có policy nhưng phải kiểm lại
+`GRANT`.
 
-Bằng chứng: 5 hóa đơn đọc sẵn trạng thái "Đã cấp mã" trên màn hình MISA đều giữ
-`PublishStatus = 3`, trong khi `EInvoiceStatus` chạy 1/3/4/7/8 đúng theo quan hệ.
-**Đừng suy trạng thái phát hành từ `EInvoiceStatus`.**
+**3.2 Vòng quét — `POST /api/einvoice/sync` + cron**
 
-Bốn hệ quả bắt buộc phải cài:
+App chưa có hạ tầng cron (không có `vercel.json`, `.github/workflows` chỉ có
+`verify.yml`). Chọn **một** rồi khai rõ: Vercel Cron (`vercel.json` →
+`/api/cron/einvoice-sync`) hoặc `pg_cron` + `pg_net` trên Supabase. Route phải
+xác thực bằng `CRON_SECRET` (header), **không** dùng session người dùng.
 
-1. **"Bị thay thế" ⇒ hết hiệu lực**, bất kể từng được cấp mã. **"Bị điều chỉnh"
-   thì KHÔNG** — hóa đơn điều chỉnh chỉ cộng phần chênh, bản gốc vẫn còn hiệu
-   lực và vẫn phải kê khai. Gộp hai loại này là khai thiếu doanh thu bản gốc.
-2. **Hóa đơn điều chỉnh mang số CHÊNH, không phải tổng.** Đem so với
-   `grand_total` là ra "Lệch tiền" **giả** cho mọi hóa đơn điều chỉnh. Phải bỏ
-   qua phép so tiền và **nói ra trên màn hình vì sao bỏ qua** — im lặng thì kế
-   toán tưởng đã đối chiếu xong.
-3. **Hóa đơn thay thế khai lại TOÀN BỘ.** Bên ERPNext phần hàng bị từ chối đi
-   bằng một **hóa đơn trả về** (`is_return=1`, `return_against` trỏ bản gốc),
-   nên vế ERPNext đem so phải là **(hóa đơn − trả về)**. Dùng CHUNG một hàm
-   `erp_totals(si, relation)` cho mọi màn hình, để hai chỗ không bao giờ nói hai
-   con số khác nhau về cùng một hóa đơn.
-4. **Đọc được `OrgRefID` ⇒ phải đánh dấu hóa đơn GỐC là "Đã thay thế".** Không
-   làm thì hai hóa đơn cùng hiện "Đã phát hành" cho một lần bán ⇒ doanh thu và
-   thuế đầu ra khai **gấp đôi**.
-   ⚠ Và phải đọc trục quan hệ từ `EInvoiceStatus` chứ đừng chỉ suy ngược từ
-   `OrgRefID`: bản **bị** thay thế không hề mang `Org*` (đã đo trên hóa đơn
-   thật — trống sạch), nên hóa đơn hết hiệu lực nào mà ta chưa thấy bản thay thế
-   của nó sẽ vĩnh viễn không bị phát hiện.
+**PHẢI có HAI lượt quét, không phải một:**
 
-Trạng thái lạ (đang phát hành / phát hành lỗi / từ chối cấp mã…) thì **không
-đoán** — lùi về mốc chắc chắn là mã CQT. Và nhớ: đơn vị dùng hóa đơn **không
-mã** thì không bao giờ có mã đó, phải đọc cờ `use_code_route` trong Settings,
-không thì mọi hóa đơn của họ đứng vĩnh viễn ở "Chờ cấp mã".
+```sql
+-- Lượt 1 — chưa có số: hỏi xem MISA cấp chưa
+WHERE misa_ref_id IS NOT NULL AND misa_inv_no IS NULL
+  AND issued_at >= now() - interval '60 days'
 
-### 6. So tiền ba vế
-
-So `net_total` · `total_taxes_and_charges` · `grand_total`, dung sai lấy từ
-Settings (mặc định 1đ). Lệch thì đặt trạng thái `"Lệch tiền"` **và tạo `ToDo`**
-— một cảnh báo không ai được giao thì không phải cảnh báo.
-
-⚠ **Chỉ so vế nào API THẬT SỰ trả số.** Endpoint *danh sách* của MISA không tách
-thuế: `TotalAmountWithoutVAT` và `TotalVATAmount` về `0.0` ở cả 30/30 bản ghi
-thật. So số 0 đó với `net_total` thật thì **mọi hóa đơn khớp đều bị gắn "Lệch
-tiền"** — rổ cảnh báo đầy báo động giả, kế toán mất niềm tin rồi bỏ qua cả cảnh
-báo thật. Riêng tổng tiền thì luôn có nên luôn so, và một mình nó đã đủ bắt lệch.
-
-Tách **VẤN ĐỀ** (lệch tiền, xung đột số) khỏi **THÔNG TIN** (đây là hóa đơn điều
-chỉnh nên không so tiền). Gộp chung thì hóa đơn điều chỉnh — vốn hoàn toàn bình
-thường — bị đếm vào ô "lệch" và sinh ToDo giả.
-
-### 7. Đồng bộ ngược sang ô số hóa đơn nhập tay
-
-Nếu app có sẵn ô nhập tay mà nhiều màn hình đang đọc:
-
-- **Chỉ ghi khi ô đó đang TRỐNG.** Không đè số kế toán đã điền.
-- Nhưng **cũng không được im lặng**: khác nhau thì ghi vào `custom_misa_note`
-  một dòng `"Số hóa đơn lệch: sổ ghi X, MISA cấp Y"` và nâng trạng thái lên
-  `"Lệch tiền"`. Im lặng thì các màn hình kia tiếp tục hiện số sai.
-- Ô "mã tra cứu" cũ thường là **uuid rác** của luồng cũ (tra cứu ra 0 kết quả) —
-  cái này thì được đè bằng mã thật.
-
-### 8. Link tra cứu — đừng gán `None`
-
-Dựng URL từ mẫu khai trong Settings. **Chỉ ghi khi dựng được**: gán `None` vào
-payload là **xóa trắng link tốt đang có** ở lượt quét sau, mà API có lúc trả
-thiếu `TransactionID` (hóa đơn đang "Chờ cấp mã").
-
-### 9. Đối soát hai chiều — DocType snapshot riêng
-
-Kéo danh sách hóa đơn từ MISA về một DocType `MISA Invoice Snapshot` (ref_id,
-transaction_id, inv_series, inv_no, **inv_no_norm**, inv_date, buyer_tax_code,
-total_amount, amount_before_vat, vat_amount, is_deleted, einvoice_status,
-sales_invoice, match_method, match_confidence, match_status, origin).
-
-Không có bảng này thì **hóa đơn phát hành thẳng trên MISA (không qua ERPNext)
-là vô hình** — đúng loại hóa đơn ngoài sổ mà kiểm toán sẽ hỏi.
-
-**Khớp bốn tầng, dừng ở tầng đầu tiên trúng:**
-
-| tầng | khóa | độ tin |
-|---|---|---|
-| 1 | `ref_id` | Chắc chắn |
-| 2 | `transaction_id` | Chắc chắn |
-| 3 | (ký hiệu chuẩn hóa, số chuẩn hóa) | Chắc chắn |
-| 4 | (MST gốc, ngày, tiền làm tròn) | **Cần review** |
-
-⚠ Tầng 4 **chỉ nhận khi DUY NHẤT một hóa đơn trùng cả ba vế**. Nhiều hóa đơn
-cùng MST/ngày/tiền là chuyện thường; đoán bừa là sai báo cáo thuế.
-
-⚠ Module khớp **chỉ ghi vào snapshot, không bao giờ ghi ngược vào Sales
-Invoice** (nguyên tắc §0.2).
-
-⚠ **Không đè bản ghi người đã chốt tay** (`match_method == 'thu_cong'`).
-
-**Chuẩn hóa — hai hàm, khai một chỗ, dùng chung mọi nơi:**
-
-```python
-def norm_inv_no(s):     # '00000123' -> '123'; giữ nguyên nếu toàn 0 / không phải số
-def norm_series(s):     # '1C25MHG' == 'C25MHG'  (re.sub(r'^\d+', '', s.upper()))
-def base_taxcode(v):    # '0301175691-044' -> '0301175691'  (MST chi nhánh)
+-- Lượt 2 — ĐÃ có số nhưng chưa ở trạng thái cuối
+WHERE misa_ref_id IS NOT NULL AND misa_inv_no IS NOT NULL
+  AND misa_status NOT IN ('cancelled', 'replaced')
+  AND misa_no_locked = false
+  AND issued_at >= now() - interval '60 days'
+ORDER BY misa_last_checked_at NULLS FIRST
 ```
 
-Cùng một file thật dùng lẫn `1C25MHG` (35 dòng) và `C25MHG` (10 dòng) cho cùng
-dải số. Không chuẩn hóa là mất 10 dòng, im lặng.
+⚠ Thiếu **lượt 2** thì hóa đơn bị hủy hoặc bị thay thế trên MISA *sau khi đã cấp
+số* không bao giờ bị phát hiện — bộ lọc lượt 1 loại chúng ra, nên cả hai nhánh
+xử lý đó thành **code chết**. Sổ vẫn ghi một hóa đơn hợp lệ trong khi bên MISA
+nó đã bị hủy.
 
-### 10. Chép số hóa đơn nhập tay sang nhóm MISA (nếu có dữ liệu cũ)
+⚠ `misa_no_locked`: hóa đơn mà người đã **gán tay** số thay thế thì `misa_ref_id`
+trên đó vẫn trỏ hóa đơn **đã chết** — lượt 2 sẽ ghi số chết đè lên số người vừa
+gán, lặng lẽ, mỗi lần chạy.
 
-Hóa đơn cũ chỉ có số ở ô nhập tay sẽ rơi hết vào rổ "chỉ có trên phần mềm", bản
-MISA tương ứng rơi vào rổ "chỉ có trên MISA" — hai rổ cảnh báo đầy báo động giả.
-Cần một job chép ngược, với **năm chốt chặn**:
+Trong vòng lặp:
 
-1. **XEM TRƯỚC bắt buộc**, và `commit` phải mang **vân tay của đúng kế hoạch vừa
-   xem** (sha1 của `name|series|no|date` từng dòng). Giữa lúc xem và lúc bấm
-   nạp, người khác sửa một ô là số đó được ghi mà chẳng ai thấy.
-2. **Không đè** `custom_misa_inv_no` đang có số — luồng tự động đáng tin hơn.
-3. **Không cấp trùng số.** Phải có chỉ mục cả `(ký hiệu, số)` **và chỉ theo số**:
-   luồng đồng bộ có thể đã ghi số mà bỏ trống ký hiệu, nên khóa `('', '123')`
-   không bao giờ đụng `('1C25MHG', '123')` — chỉ so khóa đủ cặp thì hai hóa đơn
-   cùng mang số 123 mà không ai biết. Bắt trùng **ngay trong chính lô** nữa.
-4. **Tách chuỗi thì kiểm và ghi CÙNG MỘT giá trị đã chuẩn hóa.** Kiểm ở dạng đã
-   bỏ khoảng trắng rồi ghi dạng còn khoảng trắng là vô hiệu cả hai chốt: ô chứa
-   hai số `'1C25MHG 123, 124'` lọt khuôn, ghi ký hiệu rác và **âm thầm vứt mất
-   số 124**. Khuôn ký hiệu phải **bắt buộc có ít nhất một chữ cái**, nếu không
-   `'2025-000123'` sẽ nhận nhầm `2025` làm ký hiệu.
-5. **Không đoán ngày.** Không có ngày phát hành thì để TRỐNG — lấy
-   `posting_date` thay là bịa: hóa đơn ghi sổ 31/03 phát hành 02/04 sẽ khai sai
-   kỳ thuế. Và ô ngày cũ có thể là fieldtype `Data` chứa `'chưa có'` — parse
-   hỏng giữa vòng lặp là lô ghi dở, không biết dừng ở đâu.
+- MISA không trả gì: **đã có số** ⇒ chỉ cập nhật `misa_last_checked_at`, **đừng
+  hạ trạng thái đang đúng** (có thể lỗi tạm). **Chưa có số** ⇒ để nguyên `sent`.
+- `InvNo` rỗng hoặc bắt đầu bằng `<` (MISA giữ chỗ `<Chưa cấp số>`) ⇒ coi như
+  chưa có số. Code hiện đã bắt `startsWith("<")` — giữ.
+- **Luôn** cập nhật `misa_last_checked_at`, kể cả khi chưa có số.
+- Lỗi một hóa đơn **không được kéo theo cả lượt**: gom vào mảng, trả về, ghi
+  `einvoice_logs` (bảng đã có).
+- Giới hạn mỗi lượt (vd 200 tờ) — Vercel function có trần thời gian.
 
-Dòng nào không chắc thì **bỏ lại kèm lý do đọc được** (`REASON_LABEL`), không
-đoán. Và ô ghi chú đang mang cảnh báo đối soát thật + chữ kế toán tự gõ — chỉ
-ghi khi đang trống.
+**3.3 So tiền ba vế**, dung sai 1đ, lệch thì `misa_status = 'amount_mismatch'`
+và ghi `misa_note`. ⚠ **Chỉ so vế nào MISA THẬT SỰ trả số**: endpoint *danh
+sách* của MISA không tách thuế (`TotalAmountWithoutVAT`/`TotalVATAmount` về
+`0.0` ở cả 30/30 bản ghi thật đo được ở hệ thống kia). So số 0 đó với `subtotal`
+thì **mọi** hóa đơn khớp đều bị gắn lệch — rổ cảnh báo đầy báo động giả, rồi
+không ai nhìn cả cảnh báo thật. Tổng tiền thì luôn có nên luôn so, và một mình
+nó đã đủ bắt lệch.
 
-### 11. Lịch chạy
+### 4. BẤT BIẾN — đúng bất kể stack
 
-`scheduler_events` gọi `poll_pending` trong **khung giờ khai trong Settings**
-(công tắc bật/tắt + giờ bắt đầu/kết thúc), không chạy 24/7. Method whitelisted
-phải qua guard quyền (`guard_manager`), không để ai gọi cũng được.
+1. **Khóa nối phải sinh TRƯỚC và BẤT BIẾN.** Số hóa đơn về sau; ai ghi đè lên
+   khóa là cắt đường hỏi lại.
+2. **Không đoán.** Không chắc thì để trống + gắn nhãn "chưa xác định". Sai một
+   số hóa đơn là sai báo cáo thuế, mà nó vẫn trông hợp lý trên màn hình.
+3. **Không đè số người nhập tay** — nhưng **cũng không im lặng**: khác nhau thì
+   ghi `misa_note` "sổ ghi X, MISA cấp Y" và nâng trạng thái lên lệch.
+4. **Đừng gán `null` vào cột đang có giá trị tốt.** MISA có lúc trả thiếu
+   `TransactionID` (hóa đơn "chờ cấp mã"); ghi đè `null` là **xóa trắng** mã tra
+   cứu đang đúng ở lượt quét sau. Chỉ đưa vào object `updates` những khóa có giá
+   trị — code hiện đã làm đúng kiểu này, giữ nguyên.
+5. **Tách VẤN ĐỀ khỏi THÔNG TIN.** Gộp chung thì hóa đơn điều chỉnh — vốn hoàn
+   toàn bình thường — bị đếm vào ô "lệch" và sinh cảnh báo giả.
+6. **Chuẩn hóa khi so, giữ nguyên khi lưu.** `'00000123' == '123'`;
+   `'1C25MHG' == 'C25MHG'` (bỏ số ở đầu ký hiệu). Cùng một file thật dùng lẫn
+   hai dạng cho cùng dải số — không chuẩn hóa là mất dòng, im lặng.
+7. **Thao tác hàng loạt phải XEM TRƯỚC**, và lệnh ghi mang **vân tay của đúng
+   kế hoạch vừa xem**. Giữa lúc xem và lúc bấm, người khác sửa một ô là số đó
+   được ghi mà chẳng ai thấy.
 
-### 12. Cần làm gì
+### 5. CÁCH LÀM
 
-1. Rà app này xem đã có phần nào (custom field, hook, doctype, job).
-2. Nêu ĐÚNG những chỗ khác biệt với thiết kế trên trước khi code — đừng chép mù.
-3. Viết custom field + hook + `poll_pending` + `MISA Sync Run` trước; snapshot và
-   đối soát hai chiều sau; job chép dữ liệu cũ sau cùng.
-4. Với **mỗi** chốt chặn ⚠ ở trên, viết một phép kiểm chạy được không cần bench
-   (stub `frappe`), rồi **thử phá**: sửa mã sản xuất cho hỏng đúng chốt đó và
-   xác nhận phép kiểm ĐỎ. Chốt nào phá mà vẫn xanh thì phép kiểm đó đang nói dối.
-5. Không tự chạy `bench migrate` / không tự submit gì. Báo lại lệnh cần chạy.
+1. Đọc `src/lib/misa/client.ts`, `mapper.ts`, `src/app/api/einvoice/*`,
+   migration 072→079 — rồi **nói lại cho tôi những chỗ mô tả trên đã lệch với
+   repo hiện tại**. Đừng chép mù.
+2. Sửa §1 trước, một PR riêng, có migration + backfill + số liệu "bao nhiêu dòng
+   mất khóa".
+3. §2, §3 sau.
+4. Với **mỗi** ⚠ ở trên, viết một test `vitest` (repo đã có `vitest.config.ts`,
+   `npm test`), rồi **thử phá**: sửa mã sản xuất cho hỏng đúng chốt đó và xác
+   nhận test **ĐỎ**. Chốt nào phá mà test vẫn xanh thì test đó đang nói dối —
+   sửa test, đừng bỏ qua.
+5. `npm run verify` (typecheck + lint + test + build) phải xanh trước khi báo
+   xong.
+6. Không tự chạy migration lên Supabase production. Báo lại lệnh cần chạy.
+
+---
+
+## Phụ lục — bản Frappe/ERPNext của cùng cơ chế
+
+App `ketoan` cài cơ chế này trên Frappe. Đọc để lấy chi tiết, đừng chép cấu trúc:
+
+| việc | file |
+|---|---|
+| sinh RefID ở `before_submit`, dọn khi amend | `ketoan/api/misa_sync.py::ensure_ref_id` |
+| vòng quét hai lượt, hai trục trạng thái, so tiền | `ketoan/api/misa_sync.py::_poll_pending` |
+| khớp bốn tầng ref_id → txn → ký hiệu+số → MST/ngày/tiền | `ketoan/api/misa_reconcile.py::_match_one` |
+| chép số nhập tay, 5 chốt chặn | `ketoan/api/misa_legacy.py` |
+| chuẩn hóa số/ký hiệu | `ketoan/misa_integration/doctype/misa_invoice_snapshot/` |
+| hợp đồng API MISA đã xác minh | `docs/misa/misa_api_contract.md` |
+
+Hai thứ `nppsale` **chưa có mà nên có sau**: bảng **snapshot** hóa đơn kéo từ
+MISA về (không có nó thì hóa đơn phát hành thẳng trên MISA — đúng loại hóa đơn
+ngoài sổ kiểm toán sẽ hỏi — là **vô hình**), và **khớp bốn tầng** để đối soát hai
+chiều. Tầng 4 (MST + ngày + tiền) chỉ được nhận khi **duy nhất một** hóa đơn
+trùng cả ba vế, và luôn gắn "cần review".
