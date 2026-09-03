@@ -69,9 +69,29 @@ from ketoan.api.mt import (
     _company,
     _has_si_field,
     _require_tables,
+    _returns_join,
     chain_customers,
     norm_text,
 )
+from ketoan.misa_integration.doctype.misa_invoice_snapshot.misa_invoice_snapshot import (
+    norm_inv_no,
+)
+
+# CÒN PHẢI THU của một hóa đơn, ĐÃ TRỪ hàng trả về.
+#
+# ⚠ Đây là chỗ bản đầu lệch với cả phần còn lại của app. Màn công nợ đo bằng
+# `_NET_DUE` (`mt.py`) — tức đã trừ phiếu trả — còn màn này so thẳng với
+# `ABS(grand_total)`. Quy trình thật của kênh MT là MỘT lần bán ra HAI chứng từ
+# ERPNext: hóa đơn gốc và phiếu trả (`return_against`). Chuỗi trả đúng phần
+# ròng, và màn này chấm nó "trả thiếu" đúng bằng giá trị phiếu trả — một báo
+# động giả trên MỌI hóa đơn từng bị trả hàng, ngay cạnh màn công nợ nói tờ đó
+# đã thu đủ.
+#
+# KHÔNG trừ thêm lần nữa ở đâu khác: phép trừ nằm ở ĐÂY và ở `_NET_DUE`, cùng
+# một `_returns_join`, cùng một `rt.returned`. Thêm một đường trừ thứ hai
+# (chẳng hạn cho người chọn tay "hóa đơn trả về" rồi trừ tiếp) là mở lại đúng
+# lỗ MT2-G.
+_NET = "(ABS(si.grand_total) - IFNULL(rt.returned, 0))"
 
 ADVICE = "MT Payment Advice"
 LINE = "MT Payment Advice Line"
@@ -155,6 +175,11 @@ def _candidates(chain, company, amounts):
     Chuỗi chưa gán khách nào -> rổ RỖNG, không phải "mọi hóa đơn": gợi ý lấy từ
     chuỗi khác là mời người dùng nối tiền LOTTE vào hóa đơn AEON.
 
+    Khoảng tiền quét là phần **RÒNG** (`_NET`) — đúng cái chuỗi phải trả. Quét
+    theo `ABS(grand_total)` thì hóa đơn 100tr đã trả về 20tr KHÔNG BAO GIỜ được
+    gợi ý cho dòng 80tr của chuỗi, và màn hình kết luận "chuỗi chưa gán khách,
+    hoặc hóa đơn chưa ghi sổ" — hai nguyên nhân đều sai.
+
     Hóa đơn ĐÃ THU ĐỦ bị loại khỏi rổ (`pd.paid`). Một hóa đơn đã nhận đủ tiền
     ở bảng kê tháng trước mà vẫn hiện lên như ứng viên "chắc chắn" cho một dòng
     tháng này là mời ghi có hai lần trên cùng một khoản nợ — và vì hai dòng nằm
@@ -183,12 +208,16 @@ def _candidates(chain, company, amounts):
 
     ship = _si_col("shipping_address_name")
     rows = frappe.db.sql(f"""
-        SELECT si.name, si.posting_date, ABS(si.grand_total) AS amount,
+        SELECT si.name, si.posting_date,
+               {_NET} AS amount,
+               ABS(si.grand_total) AS gross,
+               IFNULL(rt.returned, 0) AS returned,
                si.customer, si.customer_name,
                {_si_col(SI_SERIES_FIELD)} AS inv_series,
                {_si_col(SI_NO_FIELD)} AS inv_no,
                {ship} AS ship_to
         FROM `tabSales Invoice` si
+        {_returns_join()}
         LEFT JOIN (
             SELECT l.sales_invoice AS si, SUM(ABS(l.total_amount)) AS paid
             FROM `tab{LINE}` l
@@ -200,8 +229,8 @@ def _candidates(chain, company, amounts):
         ) pd ON pd.si = si.name
         WHERE si.docstatus = 1 AND si.company = %(company)s
           AND si.is_return = 0
-          AND ABS(si.grand_total) BETWEEN %(lo)s AND %(hi)s
-          AND IFNULL(pd.paid, 0) < ABS(si.grand_total) - %(tol)s
+          AND {_NET} BETWEEN %(lo)s AND %(hi)s
+          AND IFNULL(pd.paid, 0) < {_NET} - %(tol)s
           AND {cus}
         ORDER BY si.posting_date DESC
         LIMIT %(cap)s
@@ -227,7 +256,12 @@ def _rank(line, invoices):
         out.append({
             "sales_invoice": si.name,
             "posting_date": cstr(si.posting_date or ""),
+            # `amount` là phần RÒNG. Mang theo cả `gross` và `returned` để màn
+            # hình nói được "80tr = 100tr − 20tr trả về" — bày mỗi 80tr cho một
+            # hóa đơn ghi 100tr trên Desk là mời người dùng nghi gợi ý sai.
             "amount": flt(si.amount),
+            "gross": flt(si.get("gross")),
+            "returned": flt(si.get("returned")),
             "inv_series": cstr(si.inv_series or ""),
             "inv_no": cstr(si.inv_no or ""),
             "ship_to": cstr(si.ship_to or ""),
@@ -252,6 +286,26 @@ def _auto_ok(cands):
     return top[0] if len(top) == 1 else None
 
 
+def _inv_match(line, si):
+    """Số HĐĐT trên bảng kê có TRÙNG số trên hóa đơn ERPNext không.
+
+    `True` trùng · `False` khác · `None` một trong hai phía chưa có số.
+
+    So bằng `norm_inv_no` — CÙNG hàm mà `mt._match_row` dùng để khớp tự động,
+    nên cái mắt người đọc thấy và cái máy đã khớp là một. Bản so chuỗi thô sẽ
+    chấm `0000123` khác `123` và người đi kiểm một tờ hoàn toàn khớp.
+
+    Ký hiệu (`inv_series`) CỐ Ý không so: mỗi chuỗi ghi một kiểu (`1C25TAA`,
+    `1C25TAA/001`, có chuỗi bỏ trống), nên bắt nó trùng là ra `False` hàng loạt
+    trên những dòng đúng — và sau lần thứ ba thì không ai nhìn cái cờ này nữa.
+    """
+    a = norm_inv_no(line.get("inv_no"))
+    b = norm_inv_no(si.get("inv_no"))
+    if not a or not b:
+        return None
+    return a == b
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # ĐỌC
 # ═══════════════════════════════════════════════════════════════════════════
@@ -274,6 +328,7 @@ def get_statement_reconcile(advice, company=None, filter=None, page=1, page_size
     lines = frappe.db.sql(f"""
         SELECT l.name AS line, l.idx, l.row_kind, l.total_amount, l.store_name,
                l.store_code, l.doc_no, l.description, l.inv_series, l.inv_no,
+               l.inv_no_norm, l.inv_date,
                l.sales_invoice, l.match_confidence, l.match_method,
                l.variance_kind, l.variance_amount, l.variance_note,
                IFNULL(l.payment_date, %(pd)s) AS payment_date
@@ -307,18 +362,40 @@ def get_statement_reconcile(advice, company=None, filter=None, page=1, page_size
         """, {"pt": ADVICE, "kind": KIND_PAYMENT,
               "n": tuple(set(linked))}, as_dict=True):
             paid_map[r.si] = flt(r.paid)
-    si_map = {}
+    si_map, ret_map = {}, {}
     if linked:
         ship = _si_col("shipping_address_name")
         for r in frappe.db.sql(f"""
-            SELECT si.name, si.posting_date, ABS(si.grand_total) AS amount,
+            SELECT si.name, si.posting_date,
+                   {_NET} AS amount,
+                   ABS(si.grand_total) AS gross,
+                   IFNULL(rt.returned, 0) AS returned,
                    si.customer_name,
                    {_si_col(SI_SERIES_FIELD)} AS inv_series,
                    {_si_col(SI_NO_FIELD)} AS inv_no,
                    {ship} AS ship_to
-            FROM `tabSales Invoice` si WHERE si.name IN %(n)s
-        """, {"n": tuple(set(linked))}, as_dict=True):
+            FROM `tabSales Invoice` si
+            {_returns_join()}
+            WHERE si.name IN %(n)s
+        """, {"n": tuple(set(linked)), "company": company}, as_dict=True):
             si_map[r.name] = r
+
+        # TỪNG phiếu trả, để màn hình chỉ đích danh chứ không chỉ ghi một con số
+        # tổng: "trừ 20.000.000" không tra được, "trừ ACC-SRET-0007 20.000.000"
+        # thì mở ra xem được ngay.
+        for r in frappe.db.sql("""
+            SELECT r.name, r.return_against AS si, ABS(r.grand_total) AS amount,
+                   r.posting_date
+            FROM `tabSales Invoice` r
+            WHERE r.docstatus = 1 AND r.is_return = 1
+              AND r.company = %(company)s
+              AND r.return_against IN %(n)s
+            ORDER BY r.posting_date, r.name
+        """, {"n": tuple(set(linked)), "company": company}, as_dict=True):
+            ret_map.setdefault(r.si, []).append({
+                "name": r.name, "amount": flt(r.amount),
+                "posting_date": cstr(r.posting_date or ""),
+            })
 
     need = [abs(flt(l.total_amount)) for l in lines if not l.sales_invoice]
     pool, pool_cut = _candidates(a.chain, company, need) if need else ([], False)
@@ -332,24 +409,40 @@ def get_statement_reconcile(advice, company=None, filter=None, page=1, page_size
             "store_name": cstr(l.store_name or "") or cstr(l.store_code or ""),
             "doc_no": cstr(l.doc_no or ""),
             "description": cstr(l.description or ""),
+            # SỐ HÓA ĐƠN ĐIỆN TỬ CHUỖI GHI TRÊN BẢNG KÊ.
+            #
+            # Ba ô này đã được đọc từ file và cất vào bảng từ đầu, và câu SELECT
+            # ở trên vẫn lấy chúng — rồi vứt đi. Người đối soát vì vậy phải mở
+            # từng dòng ra mới biết chuỗi đang trả cho SỐ HĐĐT nào, trong khi đó
+            # đúng là thứ họ so đầu tiên.
+            "inv_series": cstr(l.inv_series or ""),
+            "inv_no": cstr(l.inv_no or ""),
+            "inv_date": cstr(l.inv_date or ""),
             "sales_invoice": cstr(l.sales_invoice or ""),
             "match_confidence": cstr(l.match_confidence or ""),
             "variance_kind": cstr(l.variance_kind or ""),
             "variance_amount": flt(l.variance_amount),
             "variance_note": cstr(l.variance_note or ""),
             "candidates": [], "auto": None, "gap": None, "invoice": None,
-            "paid_total": None, "one_of_many": False,
+            "paid_total": None, "one_of_many": False, "inv_match": None,
         }
         if d["sales_invoice"]:
             si = si_map.get(d["sales_invoice"])
             if si:
                 d["invoice"] = {
                     "name": si.name, "posting_date": cstr(si.posting_date or ""),
-                    "amount": flt(si.amount), "inv_series": cstr(si.inv_series or ""),
+                    # `amount` = phần RÒNG, đúng cái chuỗi phải trả. `gross` là
+                    # mặt hóa đơn, `returns` là các phiếu trả đã trừ vào nó.
+                    "amount": flt(si.amount),
+                    "gross": flt(si.get("gross")),
+                    "returned": flt(si.get("returned")),
+                    "returns": ret_map.get(si.name, []),
+                    "inv_series": cstr(si.inv_series or ""),
                     "inv_no": cstr(si.inv_no or ""), "ship_to": cstr(si.ship_to or ""),
                     "customer_name": cstr(si.customer_name or ""),
                 }
-                # `gap` là của CẢ HÓA ĐƠN, và so hai GIÁ TRỊ TUYỆT ĐỐI.
+                # `gap` là của CẢ HÓA ĐƠN, so PHẦN RÒNG, và so hai GIÁ TRỊ
+                # TUYỆT ĐỐI.
                 #
                 # File của Central Retail / Emart mang số tiền ÂM cho dòng
                 # thanh toán; so thẳng số có dấu với `ABS(grand_total)` thì
@@ -358,6 +451,13 @@ def get_statement_reconcile(advice, company=None, filter=None, page=1, page_size
                                                    abs(d["amount"])))
                 d["gap"] = round(d["paid_total"] - abs(flt(si.amount)), 2)
                 d["one_of_many"] = abs(d["paid_total"] - abs(d["amount"])) > PAID_TOLERANCE
+                # SỐ HĐĐT hai bên có TRÙNG không — câu hỏi đầu tiên của người
+                # đối soát, và hiện họ phải tự đọc hai chuỗi số rồi so bằng mắt.
+                #
+                # `None` khi một trong hai phía KHÔNG CÓ số: đó không phải
+                # "lệch", đó là chưa biết. Vẽ nó thành dấu ✗ là buộc kế toán đi
+                # kiểm một thứ không sai.
+                d["inv_match"] = _inv_match(l, si)
             # LỆCH TIỀN chỉ tính khi CHƯA ai ghi nhãn. Ghi nhãn rồi thì nó
             # không còn là câu hỏi bỏ ngỏ — nhưng tiền vẫn thiếu, và phần thiếu
             # đó nằm ở công nợ chứ không nằm ở đây.
@@ -551,8 +651,17 @@ def explain_variance(line, deduction_type, note=None, company=None):
             "Dòng này chưa nối hóa đơn nào — chưa biết nó trả cho tờ nào thì chưa có "
             "phần lệch để giải trình. Nối hóa đơn trước."))
 
-    si = frappe.db.get_value("Sales Invoice", row.sales_invoice,
-                             ["grand_total"], as_dict=True)
+    # Phần CÒN PHẢI THU, đã trừ hàng trả về — CÙNG mẫu số với màn công nợ và
+    # với `get_statement_reconcile`. Lấy `grand_total` trần ở đây thì cái nhãn
+    # ghi xuống mang một con số mà không màn hình nào khác công nhận.
+    si = frappe.db.sql(f"""
+        SELECT {_NET} AS net, ABS(si.grand_total) AS gross,
+               IFNULL(rt.returned, 0) AS returned
+        FROM `tabSales Invoice` si
+        {_returns_join()}
+        WHERE si.name = %(si)s
+    """, {"si": row.sales_invoice, "company": company}, as_dict=True)
+    si = si[0] if si else None
     if not si:
         frappe.throw(_("Không tìm thấy hóa đơn {0}").format(row.sales_invoice))
 
@@ -571,12 +680,14 @@ def explain_variance(line, deduction_type, note=None, company=None):
     # Âm = chuỗi trả THIẾU. Đúng dấu mà `get_statement_reconcile` trả ra và màn
     # hình in ra. Ghi ngược dấu thì ô `variance_amount` trên Desk đọc +18.000
     # trong khi màn hình ghi −18.000 cho cùng một dòng.
-    gap = round(paid - abs(flt(si.grand_total)), 2)
+    gap = round(paid - flt(si.net), 2)
     if abs(gap) <= PAID_TOLERANCE:
         frappe.throw(_(
-            "Hóa đơn {0} không lệch tiền: chuỗi đã trả {1}đ cho hóa đơn {2}đ (chênh "
-            "{3}đ, trong sai số {4}đ) — không có gì để giải trình."
-        ).format(row.sales_invoice, paid, abs(flt(si.grand_total)), gap, PAID_TOLERANCE))
+            "Hóa đơn {0} không lệch tiền: chuỗi đã trả {1}đ cho phần còn phải thu {2}đ "
+            "(chênh {3}đ, trong sai số {4}đ) — không có gì để giải trình."
+        ).format(row.sales_invoice, paid, flt(si.net), gap, PAID_TOLERANCE)
+        + (_(" Hóa đơn ghi {0}đ nhưng đã trừ {1}đ hàng trả về.")
+           .format(flt(si.gross), flt(si.returned)) if flt(si.returned) else ""))
 
     doc.db_set({"variance_kind": deduction_type,
                 "variance_amount": gap,
@@ -680,14 +791,22 @@ def suggest_for_invoices(invoices, company=None):
             "với quá nhiều tờ, và gợi ý mất hết ý nghĩa."
         ).format(MAX_REVERSE))
 
+    # Phần RÒNG ở đây nữa: chiều ngược cũng đi tìm dòng tiền khớp SỐ CHUỖI PHẢI
+    # TRẢ. Dùng `ABS(grand_total)` thì hóa đơn từng bị trả hàng không bao giờ
+    # tìm thấy dòng tiền của chính nó, và modal kết luận "vẫn còn nợ" cho một
+    # tờ đã được trả đủ.
     ship = _si_col("shipping_address_name")
     sis = frappe.db.sql(f"""
-        SELECT si.name, si.posting_date, ABS(si.grand_total) AS amount,
+        SELECT si.name, si.posting_date,
+               {_NET} AS amount,
+               ABS(si.grand_total) AS gross,
+               IFNULL(rt.returned, 0) AS returned,
                si.customer, si.customer_name, {ship} AS ship_to
         FROM `tabSales Invoice` si
+        {_returns_join()}
         WHERE si.name IN %(n)s AND si.company = %(c)s
           AND si.docstatus = 1 AND si.is_return = 0
-    """, {"n": tuple(names), "c": company}, as_dict=True)
+    """, {"n": tuple(names), "c": company, "company": company}, as_dict=True)
     if not sis:
         frappe.throw(_("Không hóa đơn nào trong danh sách đã chọn thuộc công ty này."))
 
@@ -734,6 +853,8 @@ def suggest_for_invoices(invoices, company=None):
             "sales_invoice": si.name,
             "posting_date": cstr(si.posting_date or ""),
             "amount": amt,
+            "gross": flt(si.get("gross")),
+            "returned": flt(si.get("returned")),
             "customer_name": cstr(si.customer_name or ""),
             "ship_to": cstr(si.ship_to or ""),
             "candidates": cands[:MAX_CANDIDATES],

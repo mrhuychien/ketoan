@@ -309,7 +309,10 @@ def main():
     check("phần lệch đo trên CẢ hóa đơn, không phải một dòng bảng kê",
           "SUM(ABS(l.total_amount))" in ev and "l.sales_invoice = %(si)s" in ev)
     check("và cùng QUY ƯỚC DẤU với màn hình (âm = chuỗi trả thiếu)",
-          "gap = round(paid - abs(flt(si.grand_total)), 2)" in ev)
+          "gap = round(paid - flt(si.net), 2)" in ev)
+    # MỘT mẫu số cho cả app: phần còn phải thu ĐÃ TRỪ hàng trả về.
+    check("phần lệch đo trên phần RÒNG, cùng mẫu số với màn công nợ",
+          "_NET" in ev and "_returns_join()" in ev)
     check("và màn hình NÓI RÕ khoản đó vẫn còn trên công nợ",
           "VẪN còn trên công nợ" in ev)
     rec_src = code_only(os.path.join(API, "mt_reconcile.py"))
@@ -369,6 +372,38 @@ def main():
     check("modal in câu 'vẫn còn nợ' cho hóa đơn không tìm được dòng nào",
           "vẫn còn nợ" in rvj)
 
+    # ── 5d. Hóa đơn đi + hóa đơn trả về, và số HĐĐT trên bảng kê ────────
+    print("-" * 82)
+    print("── 5d. Ba vế nói ĐỦ để đối chiếu mà không phải mở dòng ra ───────────")
+
+    check("vế TRÁI in số HĐĐT chuỗi ghi trên bảng kê",
+          "recStmtInv(r)" in js_body(js, "reconRow")
+          and "r.inv_no" in js_body(js, "recStmtInv"))
+    check("chuỗi không ghi số thì KHÔNG vẽ dòng trống",
+          "if (!r.inv_no && !r.inv_series) return \"\";" in js_body(js, "recStmtInv"))
+    flag = js_body(js, "recInvFlag")
+    check("có cờ KHỚP / KHÁC số HĐĐT giữa hai vế",
+          "r.inv_match === true" in flag and "r.inv_match === false" in flag)
+    check("và `null` (một phía chưa có số) KHÔNG vẽ gì — chưa biết ≠ lệch",
+          flag.rstrip().endswith('return "";\n}') or 'return "";' in flag.split("=== false")[1])
+    rrt = js_body(js, "reconRight")
+    check("cờ khớp HĐĐT thật sự được VẼ RA ở vế phải, không chỉ định nghĩa",
+          "${recInvFlag(r)}" in rrt)
+    check("khối hàng trả về thật sự được VẼ RA ở vế phải",
+          "${recReturns(si)}" in rrt)
+    rr = js_body(js, "recReturns")
+    check("khối hàng trả về bày ra PHÉP TRỪ, không chỉ một con số",
+          "si.gross" in rr and "si.returned" in rr and "si.amount" in rr)
+    check("và gọi ĐÍCH DANH từng phiếu trả (tra được, không phải một con số tổng)",
+          "si.returns" in rr and "/desk/sales-invoice/" in rr)
+    check("hóa đơn KHÔNG có hàng trả về thì không vẽ khối đó",
+          "if (!si || !si.returned) return \"\";" in rr)
+    check("gợi ý cũng nói ra vì sao số của nó khác mặt hóa đơn",
+          "${c.returned ? html`" in rrt and "formatVND(c.gross)" in rrt)
+    rvj = js_body(js, "renderReverseMatch")
+    check("chiều ngược gọi cột đó là CÒN PHẢI THU, không phải 'Số tiền'",
+          "Còn phải thu" in rvj and "r.returned" in rvj)
+
     # ── 5c. Vòng soát 2: những chỗ hai con số cùng nói về một thứ ───────
     #
     # Năm lỗi dưới đây có chung một hình dạng: hai bản ghi CÙNG một sự thật,
@@ -393,9 +428,25 @@ def main():
           "out.clashed" in js_body(js, "bindReconcile"))
     cnd = rb.get("_candidates", "")
     check("rổ ứng viên LOẠI hóa đơn đã thu đủ",
-          "pd.paid" in cnd and "ABS(si.grand_total) - %(tol)s" in cnd)
+          "pd.paid" in cnd and "{_NET} - %(tol)s" in cnd)
     check("nhưng KHÔNG loại hóa đơn mới trả một phần (Co.op tách 8 kỳ)",
           "IFNULL(pd.paid, 0) <" in cnd and "= ABS(si.grand_total)" not in cnd)
+    # Khoảng quét cũng phải là phần RÒNG: quét theo mặt hóa đơn thì tờ từng bị
+    # trả hàng KHÔNG BAO GIỜ được gợi ý cho dòng tiền của chính nó.
+    check("và quét theo phần RÒNG, không theo mặt hóa đơn",
+          "{_NET} BETWEEN %(lo)s AND %(hi)s" in cnd and "_returns_join()" in cnd)
+    check("gợi ý mang theo mặt hóa đơn + phần đã trả về để giải thích con số",
+          '"gross"' in rb.get("_rank", "") and '"returned"' in rb.get("_rank", ""))
+    # MỘT đường trừ duy nhất. `_NET` và `_NET_DUE` cùng dùng `_returns_join`;
+    # thêm đường trừ thứ hai (cho người chọn tay "hóa đơn trả về" rồi trừ tiếp)
+    # là mở lại đúng lỗ MT2-G.
+    rec_all = code_only(os.path.join(API, "mt_reconcile.py"))
+    check("phép trừ hàng trả về viết ĐÚNG MỘT lần (`_NET`), bốn chỗ dùng chung",
+          rec_all.count("- IFNULL(rt.returned") == 1
+          and rec_all.count("_NET = ") == 1
+          and rec_all.count("_returns_join()") >= 4,
+          f"{rec_all.count('- IFNULL(rt.returned')} phép trừ · "
+          f"{rec_all.count('_returns_join()')} chỗ dùng")
 
     # Ngày mặc định: `toISOString()` là ngày Ở UTC. Việt Nam UTC+7 nên từ 00:00
     # tới 07:00 mỗi ngày nó trả HÔM QUA — và `new Date(y, m, 1).toISOString()`
@@ -556,28 +607,72 @@ def main():
                 frappe._dict(line="L1", idx=1, row_kind="Thanh toán",
                              total_amount=2203200.0, store_name="Lotte Go Vap",
                              store_code=None, doc_no="PO1", description="",
-                             inv_series=None, inv_no=None, sales_invoice=None,
+                             inv_series=None, inv_no=None, inv_no_norm=None,
+                             inv_date=None, sales_invoice=None,
                              match_confidence=None, match_method=None,
                              variance_kind=None, variance_amount=0,
                              variance_note=None, payment_date="2026-07-28"),
                 frappe._dict(line="L2", idx=2, row_kind="Thanh toán",
                              total_amount=3276000.0, store_name="Lotte Go Vap",
                              store_code=None, doc_no="PO2", description="",
-                             inv_series=None, inv_no=None, sales_invoice="SI-88",
+                             # Số HĐĐT chuỗi ghi có SỐ 0 ở đầu, hóa đơn ERP thì
+                             # không — `norm_inv_no` phải coi hai cái là một.
+                             inv_series="1C26THG", inv_no="0000006990",
+                             inv_no_norm="6990", inv_date="2026-06-25",
+                             sales_invoice="SI-88",
+                             match_confidence="Chắc chắn", match_method="auto",
+                             variance_kind=None, variance_amount=0,
+                             variance_note=None, payment_date="2026-07-31"),
+                # HÓA ĐƠN ĐI + HÓA ĐƠN TRẢ VỀ: chuỗi trả 80tr cho tờ 100tr đã
+                # bị trả lại 20tr. Đây là ca mà bản cũ chấm "trả thiếu 20tr".
+                frappe._dict(line="L3", idx=3, row_kind="Thanh toán",
+                             total_amount=80000000.0, store_name="Lotte Go Vap",
+                             store_code=None, doc_no="PO3", description="",
+                             inv_series="1C26THG", inv_no="7001",
+                             inv_no_norm="7001", inv_date="2026-06-28",
+                             sales_invoice="SI-77",
+                             match_confidence="Chắc chắn", match_method="auto",
+                             variance_kind=None, variance_amount=0,
+                             variance_note=None, payment_date="2026-07-31"),
+                # Hóa đơn ERP CHƯA điền số HĐĐT: bảng kê có số, ERP không.
+                # Đó là CHƯA BIẾT, không phải lệch.
+                frappe._dict(line="L4", idx=4, row_kind="Thanh toán",
+                             total_amount=5000000.0, store_name="Lotte Go Vap",
+                             store_code=None, doc_no="PO4", description="",
+                             inv_series="1C26THG", inv_no="8888",
+                             inv_no_norm="8888", inv_date="2026-06-30",
+                             sales_invoice="SI-66",
                              match_confidence="Chắc chắn", match_method="auto",
                              variance_kind=None, variance_amount=0,
                              variance_note=None, payment_date="2026-07-31"),
             ]
-        if ql.startswith("SELECT si.name, si.posting_date, ABS(si.grand_total) AS amount, si.customer,"):
+        if "AS gross" in ql and "si.customer, si.customer_name" in ql:
             return [frappe._dict(name="SI-4980", posting_date="2026-06-12",
-                                 amount=2203200.0, customer="KH-1",
+                                 amount=2203200.0, gross=2203200.0, returned=0.0,
+                                 customer="KH-1",
                                  customer_name="LOTTE", inv_series="1C26THG",
                                  inv_no="00006890", ship_to="Lotte Go Vap")]
-        if ql.startswith("SELECT si.name, si.posting_date, ABS(si.grand_total) AS amount, si.customer_name,"):
-            return [frappe._dict(name="SI-88", posting_date="2026-06-25",
-                                 amount=3294000.0, customer_name="LOTTE",
-                                 inv_series="1C26THG", inv_no="00006990",
-                                 ship_to="Lotte Go Vap")]
+        if "AS gross" in ql and "AS returned, si.customer_name" in ql:
+            return [
+                frappe._dict(name="SI-88", posting_date="2026-06-25",
+                             amount=3294000.0, gross=3294000.0, returned=0.0,
+                             customer_name="LOTTE",
+                             inv_series="1C26THG", inv_no="00006990",
+                             ship_to="Lotte Go Vap"),
+                frappe._dict(name="SI-77", posting_date="2026-06-28",
+                             amount=80000000.0, gross=100000000.0,
+                             returned=20000000.0, customer_name="LOTTE",
+                             inv_series="1C26THG", inv_no="7002",
+                             ship_to="Lotte Go Vap"),
+                frappe._dict(name="SI-66", posting_date="2026-06-30",
+                             amount=5000000.0, gross=5000000.0, returned=0.0,
+                             customer_name="LOTTE",
+                             inv_series="1C26THG", inv_no=None,
+                             ship_to="Lotte Go Vap"),
+            ]
+        if ql.startswith("SELECT r.name, r.return_against AS si"):
+            return [frappe._dict(name="SRET-9", si="SI-77", amount=20000000.0,
+                                 posting_date="2026-07-02")]
         if "COUNT(*)" in ql and not as_dict:
             return [[7]]
         return []
@@ -611,7 +706,41 @@ def main():
     check("mức lệch MÁY TÍNH đúng dấu (chuỗi trả thiếu -> âm)",
           r["rows"][1]["gap"] == -18000.0, str(r["rows"][1]["gap"]))
     check("tiến độ khớp đếm dòng ĐÃ NỐI (dòng lệch tiền vẫn là đã nối)",
-          r["matched"] == 1 and r["lines"] == 2, f"{r['matched']}/{r['lines']}")
+          r["matched"] == 3 and r["lines"] == 4, f"{r['matched']}/{r['lines']}")
+
+    # ── HÓA ĐƠN ĐI + HÓA ĐƠN TRẢ VỀ ─────────────────────────────────────
+    #
+    # Quy trình thật của kênh MT: một lần bán, sau khi điều chỉnh, thành HAI
+    # chứng từ ERPNext. Chuỗi trả đúng phần ròng. Bản cũ so với mặt hóa đơn nên
+    # chấm "trả thiếu" đúng bằng giá trị phiếu trả — báo động giả trên MỌI tờ
+    # từng bị trả hàng, ngay cạnh màn công nợ nói tờ đó đã thu đủ.
+    l3 = r["rows"][2]
+    check("chuỗi trả PHẦN RÒNG -> đã khớp, không phải 'trả thiếu'",
+          l3["state"] == "da_khop" and l3["gap"] == 0.0,
+          f"{l3['state']} · lệch {l3['gap']}")
+    check("và màn hình có ĐỦ ba số để giải thích (mặt hóa đơn · trả về · ròng)",
+          l3["invoice"]["gross"] == 100000000.0
+          and l3["invoice"]["returned"] == 20000000.0
+          and l3["invoice"]["amount"] == 80000000.0)
+    check("phiếu trả gọi ĐÍCH DANH, không chỉ một con số tổng",
+          [x["name"] for x in l3["invoice"]["returns"]] == ["SRET-9"],
+          str([x["name"] for x in l3["invoice"]["returns"]]))
+
+    # ── SỐ HĐĐT TRÊN BẢNG KÊ ────────────────────────────────────────────
+    check("bảng kê mang theo số HĐĐT chuỗi ghi, không vứt đi",
+          r["rows"][1]["inv_no"] == "0000006990"
+          and r["rows"][1]["inv_series"] == "1C26THG")
+    check("số 0 ở đầu KHÔNG làm hai số HĐĐT giống nhau thành khác nhau",
+          r["rows"][1]["inv_match"] is True)
+    check("số HĐĐT khác nhau thì nói là KHÁC", l3["inv_match"] is False)
+    # HAI ca `None` khác nhau, và phải kiểm CẢ HAI: dòng chưa nối (chưa có vế
+    # phải để mà so) và dòng đã nối nhưng hóa đơn ERP chưa điền số HĐĐT. Chỉ
+    # kiểm ca đầu thì bẻ `return None` thành `return False` vẫn xanh — mục canh
+    # dối, vì `_inv_match` không hề được gọi cho dòng chưa nối.
+    check("dòng CHƯA NỐI không có cờ khớp (chưa có vế phải để so)",
+          r["rows"][0]["inv_match"] is None)
+    check("đã nối mà hóa đơn ERP chưa có số HĐĐT -> CHƯA BIẾT, không phải lệch",
+          r["rows"][3]["inv_match"] is None, str(r["rows"][3]["inv_match"]))
     check("ba ô đếm rời nhau và cộng lại bằng tổng số dòng",
           sum(r["counts"].values()) == r["lines"], str(r["counts"]))
 

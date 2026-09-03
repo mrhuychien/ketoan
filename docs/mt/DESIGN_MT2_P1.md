@@ -598,6 +598,7 @@ Duyệt xong thì chuyển sang `nextcode-build`, thứ tự **A → C → D →
 | **MT2-AN** màn "Hàng hoàn chờ xử lý" + `mt_hoan.py`, bản vá đã sang repo kia | `8a8a3b9` | `hoan_check` |
 | **MT2-AO** màn làm việc MT xếp lại theo VIỆC · màn đối soát bảng kê | `d14986d`…`8685fd7` | `ui_mt_check` · `table_width_check` |
 | **MT2-AP** mở cửa cho PDF ở nút *Nạp bảng kê thanh toán* | `802c07e` | `win_pdf_check` |
+| **MT2-AQ** đối soát so PHẦN RÒNG (hóa đơn đi + hóa đơn trả về) · số HĐĐT trên bảng kê | *(commit này)* | `ui_mt_check` |
 
 Chạy toàn bộ, không cần bench:
 
@@ -900,6 +901,83 @@ hàng đi 5.893.696  →  siêu thị nhận thiếu vì bẹp méo
   MISA:    tờ thay thế 4.893.696
   ERPNext: hóa đơn 5.893.696 − trả về 1.000.000 = 4.893.696   ✓ khớp
 ```
+
+### MT2-AQ — một lần bán, hai chứng từ, và một màn hình chỉ đếm một
+
+Kênh MT: hàng móp/lỗi → điều chỉnh hóa đơn MISA → **trả lại trên ERPNext**. Một
+lần bán, sau điều chỉnh, thành **hai chứng từ**: hóa đơn gốc và phiếu trả
+(`return_against`). Chuỗi trả đúng phần ròng.
+
+`_returns_join` (MT2-N) đã dạy màn **công nợ** điều đó: `_NET_DUE = mặt hóa đơn
+− đã trả về`. Màn **đối soát** thì không — nó so thẳng với `ABS(grand_total)`.
+
+Hệ quả, trên đúng một màn hình:
+
+```
+Công nợ    hóa đơn A: 100tr − trả về 20tr = 80tr · chuỗi trả 80tr  ->  ĐÃ THU ĐỦ
+Đối soát   dòng 80tr so với 100tr                                  ->  TRẢ THIẾU 20tr
+```
+
+Một báo động giả trên **mọi** hóa đơn từng bị trả hàng — và tệ hơn: rổ gợi ý
+cũng quét theo mặt hóa đơn, nên tờ 100tr **không bao giờ** được gợi ý cho dòng
+80tr. Màn hình kết luận *"chuỗi chưa gán khách, hoặc hóa đơn chưa ghi sổ"* — hai
+nguyên nhân đều sai, và kế toán đi kiểm hai thứ hoàn toàn lành lặn.
+
+#### "Nối một khoản thanh toán với hai hóa đơn" — đã nối rồi, chỉ chưa nói ra
+
+Yêu cầu đọc như một tính năng mới: cho chọn thêm ô "hóa đơn trả về". Nhưng
+ERPNext **đã biết** cặp đó — `return_against` là chính nó. Thêm một ô cho người
+chọn tay rồi trừ tiếp là **trừ hai lần**: đúng lỗ MT2-G, đúng cái MT2-AK đã phải
+tách `return_invoice` ra khỏi đường tiền để bịt.
+
+Nên phép trừ vẫn **đúng một đường** — `_returns_join`, dùng chung với màn công
+nợ — và bốn chỗ của module đối soát cùng gọi nó (`_NET`): rổ gợi ý · vế phải ·
+`explain_variance` · chiều nối ngược. Cái thêm vào là **lời giải thích**:
+
+```
+SI-77   80.000.000   [số HĐĐT khớp]
+28/06/2026 · 1C26THG · 7002 · Lotte Go Vap
+│ Hóa đơn ghi 100.000.000, đã trả về 20.000.000 — SRET-9 20 tr.
+│ Còn phải thu 80.000.000 — đó là số chuỗi phải trả, và là số mức lệch so vào.
+```
+
+Phiếu trả gọi **đích danh**: "trừ 20.000.000" thì không tra được, "trừ SRET-9
+20.000.000" thì mở ra xem ngay. Gợi ý cũng phải nói ra điều này — bày mỗi
+80.000.000 cho một hóa đơn ghi 100.000.000 trên Desk là mời người dùng nghi gợi
+ý sai.
+
+⚠ Phiếu trả **đứng rời** (không khai `return_against`) vẫn không tự trừ vào đâu,
+y như MT2-N đã quyết: đoán xem nó thuộc hóa đơn nào là ghi giảm nhầm hóa đơn.
+Chỗ sửa là khai `return_against` trên chính phiếu trả — rồi cả hai màn tự khớp.
+
+#### Số HĐĐT trên bảng kê: đã đọc, đã cất, rồi vứt đi
+
+Ba ô `inv_series` · `inv_no` · `inv_date` được đọc từ file chuỗi và cất vào bảng
+từ đầu; câu `SELECT` của màn đối soát vẫn lấy chúng — rồi **không đưa ra màn
+hình**. Người đối soát phải mở từng dòng mới biết chuỗi đang trả cho số HĐĐT
+nào, trong khi đó đúng là thứ họ so **đầu tiên**.
+
+Nay vế trái in số đó, và giữa hai vế có một cờ:
+
+| cờ | nghĩa |
+|---|---|
+| `số HĐĐT khớp` | trùng, so bằng `norm_inv_no` — cùng hàm máy dùng để khớp tự động, nên `0000006990` và `00006990` là MỘT |
+| `số HĐĐT khác` | khác thật, tooltip in cả hai số |
+| *(không vẽ gì)* | một phía chưa có số — **chưa biết ≠ lệch** |
+
+Ký hiệu (`inv_series`) cố ý **không** so: mỗi chuỗi ghi một kiểu, bắt nó trùng
+là ra `khác` hàng loạt trên những dòng đúng, và sau lần thứ ba thì không ai nhìn
+cái cờ này nữa.
+
+#### Bốn mục canh dối, bắt được bằng đột biến
+
+Vòng thử phá 14 kiểu bắt đầu bắt được 10. Bốn mục lọt lưới đều cùng một hình
+dạng — **canh định nghĩa, không canh chỗ dùng**: xóa hẳn `${recInvFlag(r)}` và
+`${recReturns(si)}` khỏi vế phải thì hai hàm vẫn còn nguyên nên mục vẫn xanh; và
+`"c.returned" in ...` xanh nhờ chữ trong `title=`, kể cả khi điều kiện vẽ đã bị
+bẻ thành `false`. Mục thứ tư kiểm `inv_match is None` trên một dòng **chưa nối**
+— mà dòng chưa nối thì `_inv_match` không hề được gọi, nên bẻ `return None`
+thành `return False` vẫn xanh. Sửa cả bốn rồi thì 14/14 đỏ đúng lúc cần đỏ.
 
 ### MT2-AP — tầng đọc PDF nằm đó suốt, không có nút nào bấm tới
 

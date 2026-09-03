@@ -8068,12 +8068,39 @@ function reconRow(d, r) {
       <div class="ktmt-rec-amount">${formatVND(r.amount)}</div>
       <div class="ktmt-rec-sub">${r.payment_date ? formatDate(r.payment_date) : "—"}
         ${r.store_name ? ` · ${r.store_name}` : ""}${r.doc_no ? ` · ${r.doc_no}` : ""}</div>
+      ${recStmtInv(r)}
     </div>
     <div class="ktmt-rec-m${cls}">
       ${reconGap(r)}
       ${reconAction(d, r)}
     </div>
     <div class="ktmt-rec-r${cls}">${reconRight(d, r)}</div>`;
+}
+
+// SỐ HÓA ĐƠN ĐIỆN TỬ CHUỖI GHI TRÊN BẢNG KÊ — câu hỏi đầu tiên của người đối
+// soát ("khoản này trả cho tờ nào"), và trước đây phải mở từng dòng ra mới thấy.
+// Chuỗi không ghi số thì KHÔNG vẽ dòng trống: một nhãn "HĐĐT —" trông như một
+// thiếu sót cần đi tìm, trong khi có chuỗi vốn không ghi số bao giờ.
+function recStmtInv(r) {
+  if (!r.inv_no && !r.inv_series) return "";
+  return html`<div class="ktmt-rec-sub"><i class="fas fa-file-invoice"></i>
+    HĐĐT ${r.inv_series || "—"}${r.inv_no ? html` · <b>${r.inv_no}</b>` : ""}
+    ${r.inv_date ? ` · ${formatDate(r.inv_date)}` : ""}</div>`;
+}
+
+// Cờ khớp số HĐĐT. `null` = một phía chưa có số -> KHÔNG vẽ gì: đó là chưa
+// biết, không phải lệch, và một dấu ✗ ở đó là bắt kế toán đi kiểm một tờ không
+// sai. Backend so bằng `norm_inv_no`, cùng hàm máy dùng để khớp tự động, nên
+// `0000006990` và `00006990` là MỘT.
+function recInvFlag(r) {
+  if (r.inv_match === true) {
+    return html`<span class="kt-badge kt-badge--green" title="Số HĐĐT trên bảng kê trùng số trên hóa đơn ERPNext">số HĐĐT khớp</span>`;
+  }
+  if (r.inv_match === false) {
+    return html`<span class="kt-badge kt-badge--yellow"
+      title="Bảng kê ghi ${r.inv_no} — hóa đơn ERPNext ghi ${(r.invoice && r.invoice.inv_no) || "(trống)"}">số HĐĐT khác</span>`;
+  }
+  return "";
 }
 
 function reconGap(r) {
@@ -8102,6 +8129,26 @@ function reconAction(d, r) {
     title="Gỡ liên kết dòng này">Gỡ</button>`;
 }
 
+// HÓA ĐƠN ĐI + HÓA ĐƠN TRẢ VỀ.
+//
+// Quy trình thật của kênh MT: một lần bán, sau khi điều chỉnh, thành HAI chứng
+// từ ERPNext — hóa đơn gốc và phiếu trả (`return_against`). Chuỗi trả đúng phần
+// RÒNG, nên con số đậm ở trên là phần còn phải thu, KHÔNG phải mặt hóa đơn.
+//
+// Khối này bày ra phép trừ, và gọi ĐÍCH DANH từng phiếu trả: "trừ 20.000.000"
+// thì không tra được, "trừ ACC-SRET-9 20.000.000" thì mở ra xem được ngay.
+function recReturns(si) {
+  if (!si || !si.returned) return "";
+  return html`<div class="ktmt-rec-sub" style="margin-top:4px;padding-left:8px;border-left:2px solid var(--kt-warning)">
+    Hóa đơn ghi <b>${formatVND(si.gross)}</b>, đã trả về
+    <b>${formatVND(si.returned)}</b>${(si.returns || []).length ? html` — ${
+      (si.returns || []).map((x, i) => html`${i ? ", " : ""}<a target="_blank"
+        href="/desk/sales-invoice/${q(x.name)}">${x.name}</a> ${formatVNDShort(x.amount)}`)}` : ""}.
+    Còn phải thu <b>${formatVND(si.amount)}</b> — đó là số chuỗi phải trả, và là
+    số mức lệch bên trái so vào.
+  </div>`;
+}
+
 function reconRight(d, r) {
   if (r.state === "chua_noi") {
     if (!r.candidates.length) {
@@ -8114,6 +8161,9 @@ function reconRight(d, r) {
         <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-top:4px">
           <a target="_blank" href="/desk/sales-invoice/${q(c.sales_invoice)}"><b>${c.sales_invoice}</b></a>
           <span>${formatVND(c.amount)}</span>
+          ${c.returned ? html`<span class="kt-sub"
+            title="Hóa đơn ghi ${formatVND(c.gross)}, đã trừ ${formatVND(c.returned)} hàng trả về"
+            >(${formatVNDShort(c.gross)} − ${formatVNDShort(c.returned)} trả về)</span>` : ""}
           <span class="kt-sub">${c.posting_date ? formatDate(c.posting_date) : ""}${
             c.ship_to ? ` · ${c.ship_to}` : ""}</span>
           <span class="kt-badge kt-badge--${c.level === "chac_chan" ? "green" : (c.level === "khac_diem" ? "yellow" : "gray")}">${c.level_label}</span>
@@ -8126,10 +8176,12 @@ function reconRight(d, r) {
     <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
       <a target="_blank" href="/desk/sales-invoice/${q(r.sales_invoice)}"><b>${r.sales_invoice}</b></a>
       ${si ? html`<b>${formatVND(si.amount)}</b>` : html`<span class="kt-sub">không đọc được hóa đơn</span>`}
+      ${recInvFlag(r)}
     </div>
     ${si ? html`<div class="ktmt-rec-sub">${si.posting_date ? formatDate(si.posting_date) : ""}
       ${si.inv_series ? ` · ${si.inv_series}` : ""}${si.inv_no ? ` · ${si.inv_no}` : ""}
       ${si.ship_to ? ` · ${si.ship_to}` : ""}</div>` : ""}
+    ${recReturns(si)}
     ${r.one_of_many
       ? html`<div class="ktmt-rec-sub">Hóa đơn này được trả làm nhiều lần —
           tổng đã trả <b>${formatVND(r.paid_total)}</b>. Mức lệch bên trái tính trên
@@ -8318,13 +8370,16 @@ async function renderReverseMatch(container, state, modal, invoices) {
             khớp số tiền. Chúng vẫn còn nợ.</p></div>`
       : html`<div class="kt-table-wrap"><table class="kt-table">
           <thead><tr>
-            <th>Hóa đơn</th><th class="num">Số tiền</th>
+            <th>Hóa đơn</th><th class="num" title="Đã trừ hàng trả về — đúng số chuỗi phải trả">Còn phải thu</th>
             <th class="kt-col-wide">Dòng bảng kê khớp</th><th class="kt-col-role"></th>
           </tr></thead>
           <tbody>${hit.map((r) => html`<tr>
             <td><a target="_blank" href="/desk/sales-invoice/${q(r.sales_invoice)}">${r.sales_invoice}</a>
               <div class="kt-sub">${r.posting_date ? formatDate(r.posting_date) : ""}</div></td>
-            <td class="num">${formatVND(r.amount)}</td>
+            <td class="num">${formatVND(r.amount)}
+              ${r.returned ? html`<div class="kt-sub"
+                title="Hóa đơn ghi ${formatVND(r.gross)}, đã trừ ${formatVND(r.returned)} hàng trả về"
+                >${formatVNDShort(r.gross)} − ${formatVNDShort(r.returned)} trả về</div>` : ""}</td>
             <td class="kt-col-wide">${r.candidates.map((c) => html`
               <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:4px">
                 <b>${c.advice_no}</b>
