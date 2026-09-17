@@ -154,7 +154,17 @@ const PB = (function () {
     luongsanpham: "luongsanpham",
   };
   var SIGN_DAY = 10;
-  var BANLANHDAO_TONG = 166000000;
+  // ── LƯƠNG BAN LÃNH ĐẠO ───────────────────────────────────────────────
+  // NGUỒN SỰ THẬT DUY NHẤT của khối này. Tổng trang 1 và cột "Lương thực
+  // nhận" của bảng bù trừ đều DẪN XUẤT từ đây; gõ lại con số ở chỗ thứ hai
+  // là sớm muộn hai chỗ nói hai điều khác nhau trên cùng một tờ trình.
+  var BLD_LUONG = [
+    { ten: "Nguyễn Thị Nga", luong: 42000000 },
+    { ten: "Nguyễn Thị Miên", luong: 47000000 },
+    { ten: "Khương Thị Minh Lý", luong: 64000000 },
+    { ten: "Lê Thị Phượng", luong: 13000000 },
+  ];
+  var BANLANHDAO_TONG = BLD_LUONG.reduce(function (a, b) { return a + flt(b.luong); }, 0);
   var CK_NOIDUNG = "CK LUONG";
   var CK_ROUND = 1;
   var PERIOD = {
@@ -171,12 +181,24 @@ const PB = (function () {
     { ten: "LE THI PHUONG", tk: "4681673079", tien: 13000000, cn: "NHTMCP DTPT VN-CN HAI DUONG - 31202005" },
     { ten: "DOAN THI HUONG", tk: "8828988889", tien: 15500000, cn: "NHTMCP DTPT VN-CN HAI DUONG - 31202005" },
   ];
-  var BLD_BUTRU = [
-    { ten: "Nguyễn Thị Nga", ltn: 42000000, lck: 31000000 },
-    { ten: "Nguyễn Thị Miên", ltn: 47000000, lck: 37200000 },
-    { ten: "Khương Thị Minh Lý", ltn: 64000000, lck: 37200000 },
-    { ten: "Đoàn Thị Hương", ltn: 0, lck: 15500000 },
+  // Bảng bù trừ chỉ cần biết ĐÃ CHUYỂN KHOẢN cho người này bao nhiêu — số đó
+  // có thể gộp nhiều tài khoản đứng tên người khác (bà Nga 31.000.000 =
+  // 15.500.000 vào tài khoản của bà + 15.500.000 vào tài khoản bà Trang
+  // Nhung). Phần còn thiếu trả tiền mặt. Bà Đoàn Thị Hương KHÔNG thuộc Ban
+  // lãnh đạo nhưng có đứng tên nhận hộ, nên bù trừ của bà là số ÂM.
+  var BLD_CK_DA_NHAN = [
+    { ten: "Nguyễn Thị Nga", lck: 31000000 },
+    { ten: "Nguyễn Thị Miên", lck: 37200000 },
+    { ten: "Khương Thị Minh Lý", lck: 37200000 },
+    { ten: "Đoàn Thị Hương", lck: 15500000 },
   ];
+  function bldLuongCua(ten) {
+    for (var i = 0; i < BLD_LUONG.length; i++) if (BLD_LUONG[i].ten === ten) return flt(BLD_LUONG[i].luong);
+    return 0;
+  }
+  var BLD_BUTRU = BLD_CK_DA_NHAN.map(function (b) {
+    return { ten: b.ten, ltn: bldLuongCua(b.ten), lck: flt(b.lck) };
+  });
   var FIXED_NHAT = [];
 
   var COLSPEC_NHAT = [
@@ -412,23 +434,52 @@ const PB = (function () {
 
   // ── TRANG 4: BẢNG LƯƠNG BAN LÃNH ĐẠO ─────────────────────────────────
   //
-  // ⚠ App chỉ có DỮ LIỆU GỘP cho khối này: `BLD_NGANHANG` (từng khoản chuyển
-  // khoản) và `BLD_BUTRU` (phần nhận tiền mặt của 4 người). Hai danh sách khớp
-  // nhau ở TỔNG (133.900.000 + 32.100.000 = 166.000.000 = `BANLANHDAO_TONG`)
-  // nhưng KHÔNG khớp theo từng người — ví dụ NGUYEN THI NGA có 15.500.000 ở
-  // danh sách chuyển khoản trong khi dòng bù trừ của bà ghi lương chuyển khoản
-  // 31.000.000. Nên KHÔNG dựng một bảng "thực nhận từng người": nó sẽ cộng ra
-  // đúng 166 triệu mà sai với từng cá nhân — đúng kiểu sai tiền im lặng.
-  //
-  // In ra ĐÚNG hai thứ app biết, mỗi thứ một bảng, và một dòng tổng nối chúng.
+  // Ba bảng, ba việc khác nhau, cùng chốt về một số:
+  //   1. AI ĐƯỢC BAO NHIÊU  — `BLD_LUONG`, thứ người ta ký nhận.
+  //   2. TIỀN ĐI ĐƯỜNG NGÂN HÀNG — `BLD_NGANHANG`, kể cả khoản vào tài khoản
+  //      người đứng tên hộ.
+  //   3. TIỀN MẶT BÙ TRỪ — `BLD_BUTRU`, phần còn thiếu và phần đòi lại của
+  //      người nhận hộ (số âm).
+  // Cộng (2) + (3) phải ra đúng tổng của (1). Không khớp thì in cảnh báo lên
+  // chính tờ giấy — chứ không phải để giám đốc ký rồi mới phát hiện.
+  function _bldKey(s) {
+    return String(s == null ? "" : s).normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase().replace(/đ/g, "d").replace(/\s+/g, " ").trim();
+  }
+  // Đã chuyển khoản cho MỘT lãnh đạo. Ưu tiên số gộp ở `BLD_CK_DA_NHAN` vì nó
+  // đã tính cả tiền vào tài khoản người khác đứng tên hộ; không có tên trong
+  // đó thì người này nhận thẳng vào tài khoản mình — dò danh sách ngân hàng
+  // theo tên bỏ dấu (bảng lương ghi "Lê Thị Phượng", ngân hàng ghi "LE THI
+  // PHUONG").
+  function bldCkCua(ten) {
+    for (var i = 0; i < BLD_CK_DA_NHAN.length; i++) if (BLD_CK_DA_NHAN[i].ten === ten) return flt(BLD_CK_DA_NHAN[i].lck);
+    var k = _bldKey(ten), s = 0;
+    BLD_NGANHANG.forEach(function (b) { if (_bldKey(b.ten) === k) s += flt(b.tien); });
+    return s;
+  }
+
   function htmlBanLanhDao(thang, nam) {
     var ck = BLD_NGANHANG.reduce(function (a, b) { return a + flt(b.tien); }, 0);
     var bt = BLD_BUTRU.reduce(function (a, b) { return a + (flt(b.ltn) - flt(b.lck)); }, 0);
 
+    // 1. Bảng lương từng người — cột chính của trang.
+    var b0 = "", k0 = 0, sL = 0, sCk = 0, sTm = 0;
+    BLD_LUONG.forEach(function (e) {
+      k0++; var l = flt(e.luong), c = bldCkCua(e.ten), t = l - c;
+      sL += l; sCk += c; sTm += t;
+      b0 += '<tr><td class="c">' + k0 + "</td><td>" + esc(e.ten) + '</td><td class="n">' + fmtVND(l)
+        + '</td><td class="n">' + fmtVND(c) + '</td><td class="n">' + fmtVND(t) + "</td><td></td></tr>";
+    });
+    var t0 = '<div class="sub">1. Lương từng người</div><table class="mid">'
+      + '<colgroup><col style="width:7%"><col style="width:33%"><col style="width:15%"><col style="width:15%"><col style="width:15%"><col style="width:15%"></colgroup>'
+      + "<thead><tr><th>STT</th><th>Họ và tên</th><th>Lương tháng</th><th>Chuyển khoản</th><th>Tiền mặt</th><th>Ký nhận</th></tr></thead><tbody>"
+      + b0 + '<tr class="tot"><td class="c b" colspan="2">Tổng</td><td class="n b">' + fmtVND(sL)
+      + '</td><td class="n b">' + fmtVND(sCk) + '</td><td class="n b">' + fmtVND(sTm) + "</td><td></td></tr></tbody></table>";
+
     var b1 = "", i = 0;
     BLD_NGANHANG.forEach(function (b) { i++; b1 += '<tr><td class="c">' + i + "</td><td>" + esc(b.ten)
       + '</td><td class="n">' + fmtVND(b.tien) + "</td><td></td></tr>"; });
-    var t1 = '<div class="sub">1. Phần chuyển khoản</div><table class="mid">'
+    var t1 = '<div class="sub gap">2. Phần chuyển khoản</div><table class="mid">'
       + '<colgroup><col style="width:8%"><col style="width:46%"><col style="width:26%"><col style="width:20%"></colgroup>'
       + "<thead><tr><th>STT</th><th>Họ và tên</th><th>Số tiền chuyển khoản</th><th>Ký nhận</th></tr></thead><tbody>"
       + b1 + '<tr class="tot"><td class="c b" colspan="2">Tổng</td><td class="n b">' + fmtVND(ck) + "</td><td></td></tr></tbody></table>";
@@ -437,22 +488,36 @@ const PB = (function () {
     BLD_BUTRU.forEach(function (b) { j++; var d = flt(b.ltn) - flt(b.lck);
       b2 += '<tr><td class="c">' + j + "</td><td>" + esc(b.ten) + '</td><td class="n">' + fmtVND(b.ltn)
         + '</td><td class="n">' + fmtVND(b.lck) + '</td><td class="n">' + fmtVND(d) + "</td><td></td></tr>"; });
-    var t2 = '<div class="sub gap">2. Phần bù trừ (nhận tiền mặt)</div><table class="mid">'
+    var t2 = '<div class="sub gap">3. Phần bù trừ (nhận tiền mặt)</div><table class="mid">'
       + '<colgroup><col style="width:8%"><col style="width:32%"><col style="width:16%"><col style="width:16%"><col style="width:16%"><col style="width:12%"></colgroup>'
       + "<thead><tr><th>STT</th><th>Họ và tên</th><th>Lương thực nhận</th><th>Lương chuyển khoản</th><th>Bù trừ</th><th>Ký nhận</th></tr></thead><tbody>"
       + b2 + '<tr class="tot"><td class="c b" colspan="4">Tổng</td><td class="n b">' + fmtVND(bt) + "</td><td></td></tr></tbody></table>";
 
-    // Con số này phải bằng ô "Lương Ban lãnh đạo" ở trang 1 (`BANLANHDAO_TONG`),
-    // nếu không thì hai trang của CÙNG một tờ trình nói hai điều khác nhau.
     var tong = ck + bt;
     var foot = '<div class="sub gap">Tổng lương Ban lãnh đạo: <b>' + fmtVND(tong)
       + "</b> &nbsp;(chuyển khoản " + fmtVND(ck) + " + bù trừ " + fmtVND(bt) + ")</div>";
+
+    // Con số này phải bằng ô "Lương Ban lãnh đạo" ở trang 1 — nay `BANLANHDAO_TONG`
+    // cộng thẳng từ `BLD_LUONG`, nên đây là phép đối chiếu THẬT giữa bảng lương
+    // và hai đường tiền, không còn là so một hằng số với chính nó.
     if (Math.abs(tong - flt(BANLANHDAO_TONG)) > 1) {
-      foot += '<div class="warn">⚠ Số này KHÁC ô “Lương Ban lãnh đạo” ở trang Tổng hợp ('
+      foot += '<div class="warn">⚠ Tiền đã chi (' + fmtVND(tong) + ") KHÁC tổng bảng lương ("
         + fmtVND(BANLANHDAO_TONG) + "), lệch " + fmtVND(tong - flt(BANLANHDAO_TONG))
-        + " — sửa hằng số trong mã nguồn cho khớp trước khi trình ký.</div>";
+        + " — kiểm lại trước khi trình ký.</div>";
     }
-    return sectionRaw({ company: COMPANY, title: titleFor("bld", thang, nam) }, t1 + t2 + foot);
+
+    // Tiền rời ngân hàng nhiều hơn phần ghi cho 4 lãnh đạo đúng bằng khoản
+    // chuyển vào tài khoản người đứng tên hộ, và khoản đó phải được đòi lại
+    // bằng các dòng bù trừ ÂM. Lệch nghĩa là có một khoản chuyển khoản không
+    // ai đứng ra chịu — tiền ra khỏi công ty mà không vào bảng lương ai cả.
+    var chuyenHo = ck - sCk;
+    var truLai = -BLD_BUTRU.reduce(function (a, b) { return a + (flt(b.ltn) > 0 ? 0 : flt(b.ltn) - flt(b.lck)); }, 0);
+    if (Math.abs(chuyenHo - truLai) > 1) {
+      foot += '<div class="warn">⚠ Chuyển vào tài khoản đứng tên hộ ' + fmtVND(chuyenHo)
+        + " nhưng chỉ trừ lại " + fmtVND(truLai) + ", lệch " + fmtVND(chuyenHo - truLai)
+        + " — có khoản chuyển khoản chưa vào lương của ai.</div>";
+    }
+    return sectionRaw({ company: COMPANY, title: titleFor("bld", thang, nam) }, t0 + t1 + t2 + foot);
   }
 
   function buildPrintHTML(group, nhat, khoan, thang, nam) {

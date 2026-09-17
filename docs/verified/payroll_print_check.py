@@ -25,12 +25,20 @@ Ba chốt chặn phép kiểm này canh — mỗi cái là một cách tờ trì
      chép lại. Bản Excel "tonghop" đọc cùng hàm đó; hai đường tính riêng sẽ
      lệch ngay kỳ đầu có người vào/ra.
 
-⚠ Ban lãnh đạo: app CHỈ có dữ liệu gộp — `BLD_NGANHANG` (từng khoản chuyển
-khoản) và `BLD_BUTRU` (phần tiền mặt của 4 người). Hai danh sách khớp ở TỔNG
-(133.900.000 + 32.100.000 = 166.000.000) nhưng KHÔNG khớp theo từng người
-(NGUYEN THI NGA: chuyển khoản 15.500.000, trong khi dòng bù trừ ghi lương
-chuyển khoản 31.000.000). Vì vậy trang 4 CỐ Ý không dựng bảng "thực nhận từng
-người": bảng đó sẽ cộng ra đúng 166 triệu mà sai với từng cá nhân.
+Trang 4 dựng từ BA danh sách, mỗi danh sách một việc:
+
+  * `BLD_LUONG`     — ai được bao nhiêu (nguồn sự thật, 4 người, 166.000.000)
+  * `BLD_NGANHANG`  — tiền đi đường ngân hàng (8 khoản, 133.900.000), kể cả
+                      khoản vào tài khoản người đứng tên hộ
+  * `BLD_BUTRU`     — tiền mặt bù phần còn thiếu, và phần ĐÒI LẠI của người
+                      nhận hộ (số âm) — tổng 32.100.000
+
+Cộng hai đường tiền phải ra đúng tổng bảng lương: 133.900.000 + 32.100.000 =
+166.000.000. Riêng cột "Chuyển khoản" của từng lãnh đạo lấy từ `BLD_CK_DA_NHAN`
+(số gộp, đã tính tiền nhờ người khác đứng tên); ai không có tên ở đó thì dò
+danh sách ngân hàng theo TÊN BỎ DẤU — bảng lương ghi "Lê Thị Phượng", ngân
+hàng ghi "LE THI PHUONG". Mục 4c ép hỏng đúng phép dò tên này để chắc rằng
+chốt cảnh báo thứ hai thật sự đang canh nó.
 
 Chạy KHÔNG cần bench (nạp thẳng payroll.js bằng node, thay import bằng bộ giả):
     python3 docs/verified/payroll_print_check.py   # exit 0 = đạt
@@ -125,6 +133,29 @@ def money_in(section, label):
     return None
 
 
+def cong_cot(seg, col):
+    """Cộng cột tiền thứ `col` của các DÒNG DỮ LIỆU (bỏ dòng Tổng)."""
+    tong = 0
+    for row in re.findall(r'<tr(?! class="tot")[^>]*>(.*?)</tr>', seg, re.S):
+        cells = re.findall(r'<td class="n">([^<]*)</td>', row)
+        if len(cells) > col:
+            raw = cells[col].strip()
+            n = int(re.sub(r"[^\d]", "", raw) or 0)
+            tong += -n if raw.startswith("(") else n
+    return tong
+
+
+def o_tong(seg):
+    """Các ô tiền trên dòng Tổng của một bảng."""
+    m = re.search(r'<tr class="tot">(.*?)</tr>', seg, re.S)
+    out = []
+    for c in re.findall(r'<td class="n b">([^<]*)</td>', m.group(1) if m else ""):
+        c = c.strip()
+        n = int(re.sub(r"[^\d]", "", c) or 0)
+        out.append(-n if c.startswith("(") else n)
+    return out
+
+
 def main():
     print("=" * 78)
     print("payroll_print_check — In bảng lương: 4 trang, đúng thứ tự, số khớp")
@@ -195,15 +226,48 @@ def main():
     bld_p4 = int(re.sub(r"[^\d]", "", m4.group(1))) if m4 else None
     check("tổng trang 4 = ô Ban lãnh đạo trang 1", bld_p4 == bld_p1,
           f"trang 4 {bld_p4} vs trang 1 {bld_p1}")
-    check("trang 4 tách rõ HAI phần: chuyển khoản và bù trừ",
-          "1. Phần chuyển khoản" in p4 and "2. Phần bù trừ" in p4)
+    check("trang 4 tách rõ BA phần: lương từng người, chuyển khoản, bù trừ",
+          "1. Lương từng người" in p4 and "2. Phần chuyển khoản" in p4
+          and "3. Phần bù trừ" in p4)
     check("và nói ra phép cộng, không bắt người đọc tự dò",
           "chuyển khoản" in p4 and "bù trừ" in p4 and "133,900,000" in p4)
-    # Không dựng bảng "thực nhận từng người" — hai danh sách nguồn không khớp
-    # theo người, bảng đó sẽ cộng đúng mà sai từng cá nhân.
-    check("KHÔNG có cột “Tổng thu nhập” từng người ở trang 4 (dữ liệu không có)",
-          "Tổng thu nhập" not in p4)
+
+    # Bảng lương từng người — thứ Ban lãnh đạo ký nhận. Ghim thẳng số nghiệp
+    # vụ: cộng đúng 166 triệu mà sai một cá nhân thì không ai phát hiện ra.
+    t1_p4 = p4.split("1. Lương từng người")[1].split("2. Phần chuyển khoản")[0]
+    for ten, luong, ck in [("Nguyễn Thị Nga", 42000000, 31000000),
+                           ("Nguyễn Thị Miên", 47000000, 37200000),
+                           ("Khương Thị Minh Lý", 64000000, 37200000),
+                           ("Lê Thị Phượng", 13000000, 13000000)]:
+        row = next((r for r in re.findall(r"<tr[^>]*>(.*?)</tr>", t1_p4, re.S)
+                    if ten in re.sub(r"<[^>]+>", "", r)), None)
+        cells = [re.sub(r"[^\d]", "", c) for c in
+                 re.findall(r'<td class="n">([^<]*)</td>', row or "")]
+        got = [int(c) for c in cells if c]
+        check(f"“{ten}”: lương {luong:,} = CK {ck:,} + tiền mặt {luong - ck:,}",
+              got == [luong, ck, luong - ck], str(got))
+    # Dòng Tổng của bảng này có ô "Ký nhận" trống ở cuối -> `money_in` (lấy ô
+    # CUỐI) sẽ trả 0 rồi so 0 == 166 triệu và báo hỏng oan. Bóc ô tiền đầu tiên.
+    m_t1 = re.search(r'<tr class="tot">.*?<td class="n b">([^<]*)</td>', t1_p4, re.S)
+    tot_t1 = int(re.sub(r"[^\d]", "", m_t1.group(1))) if m_t1 else None
+    check("bảng lương trang 4 cộng ra đúng ô Ban lãnh đạo của trang 1",
+          tot_t1 == bld_p1, f"{tot_t1} vs {bld_p1}")
     check("KHÔNG có cảnh báo lệch trên trang 4", "class=\"warn\"" not in p4)
+
+    # Người cầm tờ giấy sẽ cộng tay cột tiền rồi soi dòng "Tổng". Ba bảng của
+    # trang 4 đều tính tổng bằng một phép reduce RIÊNG, không cộng lại từ hàng
+    # đã in — nên một hàng in sai (hay bị kẹp về 0) vẫn để dòng Tổng đẹp
+    # nguyên. Ở đây cộng đúng những con số ĐÃ IN và bắt chúng khớp dòng Tổng.
+    t2_p4 = p4.split("2. Phần chuyển khoản")[1].split("3. Phần bù trừ")[0]
+    t3_p4 = p4.split("3. Phần bù trừ")[1].split("Tổng lương Ban lãnh đạo")[0]
+    for ten_bang, seg, cot in [("1. Lương từng người", t1_p4, [0, 1, 2]),
+                               ("2. Phần chuyển khoản", t2_p4, [0]),
+                               ("3. Phần bù trừ", t3_p4, [2])]:
+        tots = o_tong(seg)
+        sums = [cong_cot(seg, c) for c in cot]
+        check(f"“{ten_bang}”: cộng tay các dòng = dòng Tổng",
+              len(tots) == len(sums) and tots == sums,
+              f"dòng Tổng {tots} vs cộng tay {sums}")
 
     # ── 4b. CHUÔNG CÓ KÊU KHÔNG — ép số liệu lệch rồi xem ─────────────
     #
@@ -227,17 +291,42 @@ def main():
         check("gọi được `htmlTonghop` với số liệu lệch", False, str(e)[:80])
 
     try:
-        # Trang 4: đổi hằng số tổng Ban lãnh đạo -> hai trang nói hai con số.
+        # Trang 4, chốt 1: nâng lương một người lên -> tiền đã chi không còn
+        # bằng tổng bảng lương. `BANLANHDAO_TONG` nay cộng thẳng từ `BLD_LUONG`
+        # nên phải đụng vào chính bảng lương, không còn hằng số để sửa.
         src2 = open(JS, encoding="utf-8").read().replace(
-            "var BANLANHDAO_TONG = 166000000;", "var BANLANHDAO_TONG = 170000000;", 1)
+            '{ ten: "Lê Thị Phượng", luong: 13000000 }',
+            '{ ten: "Lê Thị Phượng", luong: 17000000 }', 1)
         # `split` để lại phần tử rỗng ở đầu -> trang 4 là index 4, không phải 3.
         p4b = run_js(src_override=src2)["bl"].split("<section>")[1:][3]
-        check("hằng số tổng Ban lãnh đạo lệch -> trang 4 kêu",
-              'class="warn"' in p4b)
-        check("và chỉ đích danh số của trang Tổng hợp để đối chiếu",
-              "170,000,000" in p4b)
+        check("bảng lương lệch tiền đã chi -> trang 4 kêu", 'class="warn"' in p4b)
+        check("và chỉ đích danh tổng bảng lương để đối chiếu", "170,000,000" in p4b)
     except Exception as e:  # noqa: BLE001
-        check("chạy được bản đổi hằng số Ban lãnh đạo", False, str(e)[:80])
+        check("chạy được bản nâng lương một lãnh đạo", False, str(e)[:80])
+
+    # ── 4c. Chốt “chuyển hộ” — tiền ra ngân hàng mà không vào lương ai ─
+    #
+    # Mục 4b không đụng tới chốt này. Ở đây làm HỎNG đúng phép dò tên bỏ dấu:
+    # đổi tên bà Phượng ở bảng lương thì dòng ngân hàng "LE THI PHUONG" không
+    # còn khớp ai, 13.000.000 rời ngân hàng mà không nằm trong lương người nào.
+    # Tổng vẫn 166 triệu nguyên vẹn nên chốt 4b IM — đúng thứ chỉ chốt này bắt
+    # được, và cũng đúng kiểu sai mà cộng tổng không bao giờ lộ ra.
+    print("-" * 78)
+    print("── 4c. Khoản chuyển khoản không vào lương ai -> phải kêu ───────────")
+    try:
+        src3 = open(JS, encoding="utf-8").read().replace(
+            '{ ten: "Lê Thị Phượng", luong: 13000000 }',
+            '{ ten: "Lê Thị Phượng (ngưng)", luong: 13000000 }', 1)
+        p4c = run_js(src_override=src3)["bl"].split("<section>")[1:][3]
+        check("tiền chuyển khoản mất chủ -> trang 4 kêu", 'class="warn"' in p4c)
+        check("và nói đúng chuyện “chưa vào lương của ai”",
+              "chưa vào lương của ai" in p4c)
+        check("và nói ra lệch bao nhiêu", "13,000,000" in p4c)
+        n_warn = p4c.count('class="warn"')
+        check("tổng vẫn 166 triệu -> chốt tổng KHÔNG kêu oan (đúng 1 cảnh báo)",
+              n_warn == 1, f"{n_warn} cảnh báo")
+    except Exception as e:  # noqa: BLE001
+        check("chạy được bản đổi tên một lãnh đạo", False, str(e)[:80])
 
     # ── 5. Hồi quy: “In phát lương” không bị đụng ──────────────────────
     print("-" * 78)
