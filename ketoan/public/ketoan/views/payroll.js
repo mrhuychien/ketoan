@@ -182,10 +182,12 @@ const PB = (function () {
     { ten: "DOAN THI HUONG", tk: "8828988889", tien: 15500000, cn: "NHTMCP DTPT VN-CN HAI DUONG - 31202005" },
   ];
   // Bảng bù trừ chỉ cần biết ĐÃ CHUYỂN KHOẢN cho người này bao nhiêu — số đó
-  // có thể gộp nhiều tài khoản đứng tên người khác (bà Nga 31.000.000 =
-  // 15.500.000 vào tài khoản của bà + 15.500.000 vào tài khoản bà Trang
-  // Nhung). Phần còn thiếu trả tiền mặt. Bà Đoàn Thị Hương KHÔNG thuộc Ban
-  // lãnh đạo nhưng có đứng tên nhận hộ, nên bù trừ của bà là số ÂM.
+  // gộp cả tiền vào tài khoản người khác đứng tên hộ, nên lớn hơn dòng mang
+  // tên chính họ ở `BLD_NGANHANG` (bà Nga: 31.000.000 ở đây, 15.500.000 ở
+  // danh sách ngân hàng). App KHÔNG ghi ai đứng tên hộ ai — chỉ ghi tổng đã
+  // chuyển cho từng người; đừng suy ra cặp đôi từ việc số cộng vừa khớp.
+  // Phần còn thiếu trả tiền mặt. Bà Đoàn Thị Hương KHÔNG thuộc Ban lãnh đạo
+  // nhưng có đứng tên nhận hộ, nên bù trừ của bà là số ÂM.
   var BLD_CK_DA_NHAN = [
     { ten: "Nguyễn Thị Nga", lck: 31000000 },
     { ten: "Nguyễn Thị Miên", lck: 37200000 },
@@ -450,7 +452,8 @@ const PB = (function () {
   // đã tính cả tiền vào tài khoản người khác đứng tên hộ; không có tên trong
   // đó thì người này nhận thẳng vào tài khoản mình — dò danh sách ngân hàng
   // theo tên bỏ dấu (bảng lương ghi "Lê Thị Phượng", ngân hàng ghi "LE THI
-  // PHUONG").
+  // PHUONG"). Trùng tên bỏ dấu thì CỘNG DỒN các dòng khớp, không lấy dòng
+  // đầu: lấy một dòng sẽ ghi thiếu tiền cho người đó mà tổng vẫn tròn.
   function bldCkCua(ten) {
     for (var i = 0; i < BLD_CK_DA_NHAN.length; i++) if (BLD_CK_DA_NHAN[i].ten === ten) return flt(BLD_CK_DA_NHAN[i].lck);
     var k = _bldKey(ten), s = 0;
