@@ -109,9 +109,10 @@ const HTML = `
   </section>
   <section class="lpay-panel" id="lpay-step3" hidden>
     <h2 class="lpay-h2"><span class="lpay-step-no">3</span> In PDF</h2>
-    <p class="lpay-note">Mở hộp thoại in — chọn “Đích/Máy in” là <b>Lưu thành PDF</b>.</p>
+    <p class="lpay-note">Mở hộp thoại in — chọn “Đích/Máy in” là <b>Lưu thành PDF</b>.<br>
+      <b>In bảng lương</b> ra 4 trang theo thứ tự: Tổng hợp lương → Bộ phận công nhật → Bộ phận công khoán → Ban lãnh đạo.</p>
     <div class="lpay-grid lpay-grid-2">
-      <button class="lpay-btn lpay-btn-print" data-group="bangluong" type="button">In bảng lương</button>
+      <button class="lpay-btn lpay-btn-print" data-group="bangluong" type="button" title="4 trang: Tổng hợp lương → Công nhật → Công khoán → Ban lãnh đạo">In bảng lương</button>
       <button class="lpay-btn lpay-btn-print" data-group="phatluong" type="button">In phát lương</button>
     </div>
     <p class="lpay-note lpay-note-sm">Bảng lương: công nhật + chuyển khoản. Phát lương: tiền mặt công nhật + công khoán + bù trừ (dòng cao để ký nhận).</p>
@@ -210,7 +211,7 @@ const PB = (function () {
 
   var COMPANY = "CÔNG TY CỔ PHẦN HOÀNG GIANG";
   function titleFor(loai, thang, nam) {
-    var T = { thnhat: "BẢNG LƯƠNG CÔNG NHẬT", thkhoan: "BẢNG LƯƠNG CÔNG KHOÁN", tmnhat: "BẢNG THANH TOÁN TIỀN MẶT (CÔNG NHẬT)", tmkhoan: "BẢNG THANH TOÁN TIỀN MẶT (CÔNG KHOÁN)", butru: "BẢNG BÙ TRỪ LƯƠNG", nganhang: "DANH SÁCH CHUYỂN KHOẢN LƯƠNG" };
+    var T = { thnhat: "BẢNG LƯƠNG BỘ PHẬN CÔNG NHẬT", thkhoan: "BẢNG LƯƠNG BỘ PHẬN CÔNG KHOÁN", tmnhat: "BẢNG THANH TOÁN TIỀN MẶT (CÔNG NHẬT)", tmkhoan: "BẢNG THANH TOÁN TIỀN MẶT (CÔNG KHOÁN)", butru: "BẢNG BÙ TRỪ LƯƠNG", nganhang: "DANH SÁCH CHUYỂN KHOẢN LƯƠNG", tonghop: "TỔNG HỢP LƯƠNG", bld: "BẢNG LƯƠNG BAN LÃNH ĐẠO" };
     return (T[loai] || "BẢNG LƯƠNG") + " THÁNG " + pad2(cint(thang)) + "/" + cint(nam);
   }
   function titleRows(ws, opts, nCol) {
@@ -330,7 +331,10 @@ const PB = (function () {
   }
   function buildBank(nhat, khoan) { return buildNganhang(bankRows(nhat, khoan)); }
 
-  function section(opts, inner) { var h = ""; if (opts.company) h += '<div class="co">' + esc(opts.company) + "</div>"; if (opts.title) h += '<div class="ti">' + esc(opts.title) + "</div>"; return "<section>" + h + "<table>" + inner + "</table></section>"; }
+  function secHead(opts) { var h = ""; if (opts.company) h += '<div class="co">' + esc(opts.company) + "</div>"; if (opts.title) h += '<div class="ti">' + esc(opts.title) + "</div>"; return h; }
+  function section(opts, inner) { return "<section>" + secHead(opts) + "<table>" + inner + "</table></section>"; }
+  // Trang có NHIỀU bảng (tổng hợp, ban lãnh đạo) — `section` ép đúng một <table>.
+  function sectionRaw(opts, inner) { return "<section>" + secHead(opts) + inner + "</section>"; }
   var COLW = { stt: "3%", txt: "13%", qty: "4.5%", money: "7.5%", sign: "7%" };
   function colgroupFor(colspec) { return "<colgroup>" + colspec.map(function (cs) { return '<col style="width:' + (COLW[cs[2]] || "8%") + '">'; }).join("") + "</colgroup>"; }
   function htmlSalary(recs, colspec, opts) {
@@ -360,9 +364,113 @@ const PB = (function () {
     var cg = '<colgroup><col style="width:6%"><col style="width:30%"><col style="width:18%"><col style="width:18%"><col style="width:16%"><col style="width:12%"></colgroup>';
     return section(opts, cg + "<thead><tr>" + th + "</tr></thead><tbody>" + body + foot + "</tbody>");
   }
+  // ── TRANG 1: TỔNG HỢP LƯƠNG ──────────────────────────────────────────
+  //
+  // Bản HTML của `buildTonghop` (file Excel "tonghop"). Cùng đọc `computeAgg`
+  // nên hai đường không bao giờ ra hai con số — chép công thức sang đây là tạo
+  // bản sao thứ hai, và bản sao sẽ lệch ngay kỳ đầu có người vào/ra.
+  function htmlTonghop(agg, thang, nam) {
+    var tongBoPhan = flt(agg.tong_nhat) + flt(agg.tong_khoan) + flt(agg.tong_bld);
+    var tienMat = flt(agg.tm_nhat) + flt(agg.tm_khoan) + flt(agg.tm_butru);
+    var tongChi = flt(agg.tong_ck) + tienMat;
+    function r(stt, ten, tien, o) { o = o || {};
+      var cls = o.italic ? ' class="it"' : (o.bold ? ' class="b"' : "");
+      return "<tr" + cls + '><td class="c">' + esc(String(stt)) + "</td><td>" + esc(ten) + '</td><td class="n">' + fmtVND(tien) + "</td></tr>"; }
+    function tot(nhan, tien) { return '<tr class="tot"><td class="c b" colspan="2">' + esc(nhan) + '</td><td class="n b">' + fmtVND(tien) + "</td></tr>"; }
+    var cg = '<colgroup><col style="width:10%"><col style="width:62%"><col style="width:28%"></colgroup>';
+    var th = "<thead><tr><th>STT</th><th>Tên bộ phận</th><th>Số tiền</th></tr></thead>";
+
+    var t1 = '<table class="narrow">' + cg + th + "<tbody>"
+      + r(1, "Bộ phận Công nhật", agg.tong_nhat)
+      + r(2, "Bộ phận Sản Xuất", agg.tong_khoan)
+      + r(3, "Lương Ban lãnh đạo", agg.tong_bld)
+      + tot("Tổng", tongBoPhan) + "</tbody></table>";
+
+    var t2 = '<table class="narrow gap">' + cg + "<tbody>"
+      + r(1, "Lương chuyển khoản", agg.tong_ck, { bold: true })
+      + r(2, "Tiền mặt", tienMat, { bold: true })
+      + r("2.1", "Tiền mặt công nhật", agg.tm_nhat, { italic: true })
+      + r("2.2", "Tiền mặt công khoán", agg.tm_khoan, { italic: true })
+      + r("2.3", "Tiền mặt bù trừ", agg.tm_butru, { italic: true })
+      + tot("Tổng", tongChi) + "</tbody></table>";
+
+    // Hai phép cộng phải ra CÙNG một số: chia theo bộ phận và chia theo hình
+    // thức chi là hai lát cắt của cùng một khoản tiền. Lệch thì NÓI RA ngay
+    // trên giấy — một tờ trình giám đốc ký mà hai ô "Tổng" khác nhau, không ai
+    // đọc bảng Excel nào nữa để biết bên nào đúng.
+    var warn = "";
+    if (Math.abs(tongBoPhan - tongChi) > 1) {
+      warn = '<div class="warn">⚠ Tổng theo bộ phận (' + fmtVND(tongBoPhan) + ') KHÁC tổng theo hình thức chi ('
+        + fmtVND(tongChi) + "), lệch " + fmtVND(tongBoPhan - tongChi) + " — kiểm lại trước khi trình ký.</div>";
+    }
+
+    var tm = cint(thang) + 1, ny = cint(nam); if (tm > 12) { tm = 1; ny++; }
+    var sign = '<div class="sign"><div>Hải Dương, ngày ' + pad2(SIGN_DAY) + " tháng " + pad2(tm) + " năm " + ny
+      + '</div><div class="b">Giám đốc duyệt</div></div>';
+    return sectionRaw({ company: COMPANY, title: titleFor("tonghop", thang, nam) }, t1 + t2 + warn + sign);
+  }
+
+  // ── TRANG 4: BẢNG LƯƠNG BAN LÃNH ĐẠO ─────────────────────────────────
+  //
+  // ⚠ App chỉ có DỮ LIỆU GỘP cho khối này: `BLD_NGANHANG` (từng khoản chuyển
+  // khoản) và `BLD_BUTRU` (phần nhận tiền mặt của 4 người). Hai danh sách khớp
+  // nhau ở TỔNG (133.900.000 + 32.100.000 = 166.000.000 = `BANLANHDAO_TONG`)
+  // nhưng KHÔNG khớp theo từng người — ví dụ NGUYEN THI NGA có 15.500.000 ở
+  // danh sách chuyển khoản trong khi dòng bù trừ của bà ghi lương chuyển khoản
+  // 31.000.000. Nên KHÔNG dựng một bảng "thực nhận từng người": nó sẽ cộng ra
+  // đúng 166 triệu mà sai với từng cá nhân — đúng kiểu sai tiền im lặng.
+  //
+  // In ra ĐÚNG hai thứ app biết, mỗi thứ một bảng, và một dòng tổng nối chúng.
+  function htmlBanLanhDao(thang, nam) {
+    var ck = BLD_NGANHANG.reduce(function (a, b) { return a + flt(b.tien); }, 0);
+    var bt = BLD_BUTRU.reduce(function (a, b) { return a + (flt(b.ltn) - flt(b.lck)); }, 0);
+
+    var b1 = "", i = 0;
+    BLD_NGANHANG.forEach(function (b) { i++; b1 += '<tr><td class="c">' + i + "</td><td>" + esc(b.ten)
+      + '</td><td class="n">' + fmtVND(b.tien) + "</td><td></td></tr>"; });
+    var t1 = '<div class="sub">1. Phần chuyển khoản</div><table class="mid">'
+      + '<colgroup><col style="width:8%"><col style="width:46%"><col style="width:26%"><col style="width:20%"></colgroup>'
+      + "<thead><tr><th>STT</th><th>Họ và tên</th><th>Số tiền chuyển khoản</th><th>Ký nhận</th></tr></thead><tbody>"
+      + b1 + '<tr class="tot"><td class="c b" colspan="2">Tổng</td><td class="n b">' + fmtVND(ck) + "</td><td></td></tr></tbody></table>";
+
+    var b2 = "", j = 0;
+    BLD_BUTRU.forEach(function (b) { j++; var d = flt(b.ltn) - flt(b.lck);
+      b2 += '<tr><td class="c">' + j + "</td><td>" + esc(b.ten) + '</td><td class="n">' + fmtVND(b.ltn)
+        + '</td><td class="n">' + fmtVND(b.lck) + '</td><td class="n">' + fmtVND(d) + "</td><td></td></tr>"; });
+    var t2 = '<div class="sub gap">2. Phần bù trừ (nhận tiền mặt)</div><table class="mid">'
+      + '<colgroup><col style="width:8%"><col style="width:32%"><col style="width:16%"><col style="width:16%"><col style="width:16%"><col style="width:12%"></colgroup>'
+      + "<thead><tr><th>STT</th><th>Họ và tên</th><th>Lương thực nhận</th><th>Lương chuyển khoản</th><th>Bù trừ</th><th>Ký nhận</th></tr></thead><tbody>"
+      + b2 + '<tr class="tot"><td class="c b" colspan="4">Tổng</td><td class="n b">' + fmtVND(bt) + "</td><td></td></tr></tbody></table>";
+
+    // Con số này phải bằng ô "Lương Ban lãnh đạo" ở trang 1 (`BANLANHDAO_TONG`),
+    // nếu không thì hai trang của CÙNG một tờ trình nói hai điều khác nhau.
+    var tong = ck + bt;
+    var foot = '<div class="sub gap">Tổng lương Ban lãnh đạo: <b>' + fmtVND(tong)
+      + "</b> &nbsp;(chuyển khoản " + fmtVND(ck) + " + bù trừ " + fmtVND(bt) + ")</div>";
+    if (Math.abs(tong - flt(BANLANHDAO_TONG)) > 1) {
+      foot += '<div class="warn">⚠ Số này KHÁC ô “Lương Ban lãnh đạo” ở trang Tổng hợp ('
+        + fmtVND(BANLANHDAO_TONG) + "), lệch " + fmtVND(tong - flt(BANLANHDAO_TONG))
+        + " — sửa hằng số trong mã nguồn cho khớp trước khi trình ký.</div>";
+    }
+    return sectionRaw({ company: COMPANY, title: titleFor("bld", thang, nam) }, t1 + t2 + foot);
+  }
+
   function buildPrintHTML(group, nhat, khoan, thang, nam) {
     var nhatAll = (nhat || []).concat(FIXED_NHAT); khoan = khoan || []; var co = COMPANY; var secs = "";
-    if (group === "bangluong") { secs += htmlSalary(nhatAll, COLSPEC_NHAT, { title: titleFor("thnhat", thang, nam), company: co }); secs += htmlSalary(khoan, COLSPEC_KHOAN, { title: titleFor("thkhoan", thang, nam), company: co }); }
+    if (group === "bangluong") {
+      // THỨ TỰ LÀ MỘT YÊU CẦU, không phải chuyện thẩm mỹ: tờ trình để giám đốc
+      // ký mở ra phải thấy con số tổng trước, rồi mới tới từng bộ phận.
+      //   trang 1  Tổng hợp lương
+      //   trang 2  Bảng lương bộ phận công nhật
+      //   trang 3  Bảng lương bộ phận công khoán
+      //   trang 4  Bảng lương Ban lãnh đạo
+      // `PRINT_CSS` đặt `section + section { page-break-before: always }` nên
+      // mỗi section là một trang — thứ tự nối chuỗi ở đây CHÍNH LÀ thứ tự in.
+      secs += htmlTonghop(computeAgg(nhatAll, khoan), thang, nam);
+      secs += htmlSalary(nhatAll, COLSPEC_NHAT, { title: titleFor("thnhat", thang, nam), company: co });
+      secs += htmlSalary(khoan, COLSPEC_KHOAN, { title: titleFor("thkhoan", thang, nam), company: co });
+      secs += htmlBanLanhDao(thang, nam);
+    }
     else { secs += htmlSalary(nhatAll.filter(function (r) { return flt(r.baohiem) <= 0; }), COLSPEC_NHAT, { title: titleFor("tmnhat", thang, nam), company: co, tall: true }); secs += htmlSalary(khoan.filter(function (r) { return flt(r.baohiem) <= 0; }), COLSPEC_KHOAN, { title: titleFor("tmkhoan", thang, nam), company: co, tall: true }); secs += htmlButru(nhatAll.filter(function (r) { return flt(r.luongck) > 0; }), { title: titleFor("butru", thang, nam), company: co, tall: true }); }
     return secs;
   }
@@ -383,6 +491,9 @@ const PB = (function () {
 
   return {
     buildFile: buildFile, computeAgg: computeAgg, buildPrintHTML: buildPrintHTML,
+    // Xuất ra để phép kiểm gọi thẳng với số liệu LỆCH — chốt cảnh báo mà không
+    // ai bắt nó kêu thử thì gỡ đi cũng không ai biết.
+    htmlTonghop: htmlTonghop, htmlBanLanhDao: htmlBanLanhDao,
     COLSPEC_NHAT: COLSPEC_NHAT, COLSPEC_KHOAN: COLSPEC_KHOAN, NHAT_KEYS: NHAT_KEYS, KHOAN_KEYS: KHOAN_KEYS, NEED: NEED,
     FN: FN, DT_NHAT: DT_NHAT, DT_KHOAN: DT_KHOAN, PERIOD: PERIOD, flt: flt, cint: cint,
   };
@@ -494,7 +605,7 @@ function exportFile(loai, btn) {
     downloadWb(out.wb, fn).then(function () { log(LABEL[loai] + ": " + out.rows + " dòng → đang tải file.", "ok"); }).catch(function (e) { log(LABEL[loai] + " lỗi: " + shortErr(e), "err"); }).then(function () { setBusy(btn, false); });
   } catch (e) { log(LABEL[loai] + " lỗi: " + shortErr(e), "err"); setBusy(btn, false); }
 }
-var PRINT_CSS = '*{box-sizing:border-box;}body{font-family:"Times New Roman",serif;color:#000;margin:0;}section{padding:0;}section + section{page-break-before:always;}.co{text-align:center;font-weight:bold;font-size:11pt;margin-bottom:1px;}.ti{text-align:center;font-weight:bold;font-size:13pt;margin:1px 0 6px;}table{width:100%;border-collapse:collapse;table-layout:fixed;}th,td{border:0.5pt solid #000;padding:1.5px 3px;font-size:8.5pt;line-height:1.1;vertical-align:middle;word-wrap:break-word;overflow-wrap:break-word;}th{text-align:center;font-weight:bold;background:#eee;font-size:8pt;}td.c{text-align:center;}td.n{text-align:right;}td.b,.b{font-weight:bold;}tr.tall td{height:42px;}thead{display:table-header-group;}tr{page-break-inside:avoid;}@page{size:A4 landscape;margin:8mm;}';
+var PRINT_CSS = '*{box-sizing:border-box;}body{font-family:"Times New Roman",serif;color:#000;margin:0;}section{padding:0;}section + section{page-break-before:always;}.co{text-align:center;font-weight:bold;font-size:11pt;margin-bottom:1px;}.ti{text-align:center;font-weight:bold;font-size:13pt;margin:1px 0 6px;}table{width:100%;border-collapse:collapse;table-layout:fixed;}th,td{border:0.5pt solid #000;padding:1.5px 3px;font-size:8.5pt;line-height:1.1;vertical-align:middle;word-wrap:break-word;overflow-wrap:break-word;}th{text-align:center;font-weight:bold;background:#eee;font-size:8pt;}td.c{text-align:center;}td.n{text-align:right;}td.b,.b{font-weight:bold;}tr.tall td{height:42px;}thead{display:table-header-group;}tr{page-break-inside:avoid;}table.narrow{width:52%;}table.mid{width:80%;}.gap{margin-top:14px;}.sub{font-size:10pt;font-weight:bold;margin:0 0 4px;}tr.it td{font-style:italic;}tr.b td{font-weight:bold;}.sign{width:52%;margin-top:18px;text-align:right;font-size:11pt;}.sign div:first-child{font-style:italic;}.warn{margin-top:10px;font-size:10pt;font-weight:bold;border:1pt solid #000;padding:4px 6px;}@page{size:A4 landscape;margin:8mm;}';
 function printHTML(inner) {
   var old = $("lpay-print-frame"); if (old) old.parentNode.removeChild(old);
   var ifr = document.createElement("iframe"); ifr.id = "lpay-print-frame"; ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;"; document.body.appendChild(ifr);
