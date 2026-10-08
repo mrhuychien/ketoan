@@ -22,7 +22,7 @@ import uuid
 
 import frappe
 from frappe import _
-from frappe.utils import flt, now_datetime
+from frappe.utils import cstr, flt, now_datetime
 
 from ketoan.api.misa_client import MISAError, call, get_settings
 
@@ -198,6 +198,46 @@ def build_payload(si, settings):
             "rồi xuất lại. Việc đó KHÔNG phát hành lại hóa đơn nào — hóa đơn đã có số "
             "sẽ dừng với 'Hóa đơn đã được xuất trước đó'."
         ).format(si.name))
+
+    # ── Chốt chặn KHỐI NGƯỜI MUA ─────────────────────────────────────────
+    #
+    # Sáu ô người mua trên Sales Invoice đều `fetch_from shipping_address_name.*`
+    # và KHÔNG ô nào có `allow_on_submit`. Nên khi ô địa chỉ bị để trống —
+    # chuyện vẫn xảy ra với hóa đơn tạo từ Nhập đơn tự động — Frappe bỏ qua
+    # fetch IM LẶNG (frappe/model/base_document.py:1070) và hóa đơn ra đời với
+    # cả khối người mua trống. MISA không phát hành được hóa đơn GTGT không có
+    # tên người mua, nhưng lúc biết thì hóa đơn đã GHI SỔ, mà
+    # base_document.py:1155 không fetch lại sau submit ⇒ không còn đường sửa tại
+    # chỗ ⇒ phải HỦY hóa đơn. Và hủy một hóa đơn có thể đã tới MISA là mời gọi
+    # hóa đơn thứ hai cho cùng một lần bán.
+    #
+    # Vì vậy DỪNG Ở ĐÂY, trước mọi lệnh gọi HTTP, và nói đúng việc phải làm.
+    # Chốt chỉ đòi TÊN người mua — hóa đơn nào MISA phát hành được cũng phải có
+    # nó — nên không chặn oan hóa đơn khách lẻ (cá nhân không có MST).
+    ten_dv = cstr(si.get("custom_tên_đơn_vị")).strip()
+    ten_nm = cstr(si.get("custom_tên_người_mua")).strip()
+    mst = cstr(si.get("custom_mã_số_thuế")).strip()
+    if not ten_dv and not ten_nm:
+        frappe.throw(_(
+            "Không đẩy hóa đơn {0}: chưa có TÊN NGƯỜI MUA.\n\n"
+            "Nguyên nhân gần như luôn là ô “Địa chỉ giao hàng” trống — toàn bộ khối "
+            "thông tin người mua (MST, tên đơn vị, địa chỉ, email) được lấy từ ô đó.\n\n"
+            "Hóa đơn đã ghi sổ thì KHÔNG điền lại được ô này: phải hủy, chọn đúng Địa chỉ "
+            "giao hàng trên bản sửa đổi, rồi ghi sổ lại. Lần sau hãy chọn địa chỉ ngay "
+            "trên bản NHÁP, trước khi ghi sổ."
+        ).format(si.name))
+
+    # MST: chỉ đòi khi hóa đơn giao tới MỘT ĐIỂM SIÊU THỊ (có dòng trong bảng
+    # `MT Store` theo đúng `shipping_address_name`). Chuỗi thì luôn có MST, còn
+    # khách lẻ thì không — đòi MST cho mọi hóa đơn là chặn oan bán lẻ.
+    if not mst and si.get("shipping_address_name") and frappe.db.table_exists("MT Store"):
+        if frappe.db.exists("MT Store", {"address": si.get("shipping_address_name")}):
+            frappe.throw(_(
+                "Không đẩy hóa đơn {0}: điểm giao “{1}” là điểm siêu thị nhưng hóa đơn "
+                "chưa có MÃ SỐ THUẾ người mua.\n\n"
+                "Mở Địa chỉ “{1}” và điền ô Mã số thuế, rồi hủy + sửa đổi hóa đơn này để "
+                "nó lấy lại thông tin. Đẩy khi còn thiếu MST là MISA từ chối."
+            ).format(si.name, si.get("shipping_address_name")))
 
     by_box = bool(si.get("custom_xuất_theo_hộp_"))
     fallback = _fallback_rate(si)

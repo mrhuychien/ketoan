@@ -97,6 +97,15 @@ def ensure_ref_id(doc, method=None):
                       "vn_einvoice_number", "vn_einvoice_date", "vn_einvoice_lookup_code"):
                 if doc.meta.has_field(f):
                     doc.set(f, None)
+            # `custom_misa_no_locked` KHÔNG nằm trong vòng trên vì nó phải về 0,
+            # KHÔNG phải None: vòng quét thứ 2 lọc `custom_misa_no_locked = 0`
+            # nên NULL là rơi khỏi bộ lọc — đúng cái mà patch v0_0_17 đã phải
+            # chữa một lần. Field này cũng không khai `no_copy` nên `copy_doc`
+            # chép nó sang bản sửa đổi; thiếu dòng này thì bản mới thừa hưởng cờ
+            # khóa của bản đã hủy và rơi khỏi vòng theo dõi hủy/thay thế VĨNH
+            # VIỄN — tức sổ vẫn ghi một hóa đơn hợp lệ sau khi MISA đã hủy nó.
+            if doc.meta.has_field("custom_misa_no_locked"):
+                doc.custom_misa_no_locked = 0
             doc.custom_misa_ref_id = str(uuid.uuid4())
             if doc.meta.has_field("custom_misa_status"):
                 doc.custom_misa_status = "Chưa đẩy"
