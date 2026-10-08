@@ -36,8 +36,11 @@ KHÔNG phải phát hành trùng: `misa_push.py` chặn hẳn `is_return` ở c�
 BA CẠM BẪY khi sửa, mỗi cái một mục kiểm:
 
   1. Lọc bằng SQL `is_return != 1` ⇒ LOẠI LUÔN hàng NULL (NULL != 1 ra NULL,
-     không phải TRUE). Cột Check trên bảng có sẵn dữ liệu mang NULL chứ không
-     phải 0 — đúng cái bẫy patch v0_0_17 đã phải chữa. Phải lọc ở Python.
+     không phải TRUE). Cột Check của Frappe là NULLABLE trừ khi field khai
+     `not_nullable` (`frappe/model/base_document.py:619`): hàng ghi qua ORM
+     luôn có 0, nhưng phép lọc thì không được dựa vào điều đó — patch v0_0_17
+     đã phải chữa đúng chuyện này cho một cột Check khác. Lọc ở Python thì câu
+     hỏi "NULL hay 0" không còn đặt ra.
   2. Chỉ thêm `no_copy` vào `install.py` mà không có patch ⇒ field ĐÃ TẠO trên
      site không đổi. Phải đặt thẳng bằng `set_value`.
   3. Đặt `no_copy` cho cả field layout (section/column break) ⇒ nhiễu, và danh

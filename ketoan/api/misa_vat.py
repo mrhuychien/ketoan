@@ -73,8 +73,11 @@ def get_overview(company=None, from_date=None, to_date=None):
     #     bằng số của người khác, và `SUM(ABS(grand_total))` cộng thêm trị
     #     tuyệt đối tiền trả hàng vào tổng giá trị hóa đơn đã xuất.
     #
-    # `IFNULL(..., 0)`: cột Check trên bảng có sẵn dữ liệu mang NULL chứ không
-    # phải 0, mà `is_return = 0` trong SQL LOẠI LUÔN hàng NULL.
+    # `IFNULL`/lọc ở Python chứ không `is_return != 1` trong SQL: phép so sánh
+    # với NULL ra NULL chứ KHÔNG ra TRUE, nên một hàng NULL rụng khỏi bộ lọc mà
+    # không ai thấy. Cột Check của Frappe là NULLABLE trừ khi field khai
+    # `not_nullable` (xem `frappe/model/base_document.py:619`), nên phép so sánh
+    # trần không bao giờ an toàn về mặt kiểu.
     linked = frappe.db.sql("""
         SELECT COUNT(*) AS cnt, IFNULL(SUM(ABS(grand_total)), 0) AS amt
         FROM `tabSales Invoice`

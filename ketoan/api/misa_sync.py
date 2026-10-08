@@ -481,10 +481,16 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
     # bình thường, lặp lại mỗi 30 phút. Đúng cái làm kế toán mất niềm tin vào
     # cảnh báo, rồi bỏ qua cả cảnh báo thật.
     #
-    # LỌC Ở PYTHON, không thêm vào `filters`: cột Check trên bảng có sẵn dữ
-    # liệu mang NULL chứ không phải 0, mà `is_return != 1` trong SQL LOẠI LUÔN
-    # hàng NULL (NULL != 1 ra NULL, không phải TRUE). Đúng cái bẫy patch
-    # v0_0_17 đã phải chữa một lần. `is_return` vốn đã nằm trong `fields`.
+    # LỌC Ở PYTHON, không thêm vào `filters`. `is_return != 1` trong SQL LOẠI
+    # LUÔN hàng NULL: so sánh với NULL ra NULL chứ không ra TRUE. Cột Check của
+    # Frappe là NULLABLE trừ khi field khai `not_nullable`
+    # (`frappe/model/base_document.py:619`) — hàng ghi qua ORM thì luôn có 0,
+    # nhưng hàng do ALTER/SQL thô chạm tới thì không chắc, và patch v0_0_17 đã
+    # phải chữa đúng chuyện đó cho một cột Check khác.
+    #
+    # Lọc ở Python thì câu hỏi "NULL hay 0" không còn đặt ra, mà `rows` vốn đã
+    # nằm trong bộ nhớ và `is_return` vốn đã nằm trong `fields` — giá bằng
+    # không. Không đổi lấy một phép lọc đúng-trong-hầu-hết-trường-hợp.
     so_tra_hang = sum(1 for r in rows if cint(r.get("is_return")))
     if so_tra_hang:
         rows = [r for r in rows if not cint(r.get("is_return"))]
