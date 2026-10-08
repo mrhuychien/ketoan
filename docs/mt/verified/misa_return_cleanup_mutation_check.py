@@ -4,8 +4,12 @@
 
 Công cụ dọn GHI VÀO CHỨNG TỪ ĐÃ GHI SỔ, nên câu hỏi "bộ kiểm có thấy không khi
 nó bị sửa hỏng" không được để ngỏ. Mỗi đột biến dưới đây là một cách làm hỏng
-có hậu quả thật — xoá số của chứng từ người ta sửa tay, dọn theo kế hoạch chưa
-ai đọc, hay dọn xong mà không còn gì để lùi.
+có hậu quả thật — xoá số kế toán gõ tay, đè mất ghi chú, dọn theo kế hoạch
+chưa ai đọc, dọn xong mà không còn gì để lùi.
+
+Đột biến 1 và 2 là ĐÚNG HAI LỖI đã làm bản đầu ra 0 dọn / 479 cần người xem
+trên site — bộ kiểm cũ báo xanh với cả hai. Nếu một ngày chúng quay lại, bộ
+này phải đỏ.
 
     python3 docs/mt/verified/misa_return_cleanup_mutation_check.py
 """
@@ -21,66 +25,109 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 CHECK = "docs/mt/verified/misa_return_cleanup_check.py"
 CL = "ketoan/api/misa_return_cleanup.py"
 
+TAP_A_DUOI = '    "custom_misa_org_inv",\n)\n\n# Tiếng ồn'
+
 M = [
- ("1. bỏ luật 'chỉ xoá cái giống hệt bản gốc' — xoá cả field người sửa tay", CL,
-  """            if cstr(vt) == cstr(vg):
-                cu[f] = vt                    # GIỐNG HỆT bản gốc ⇒ là bản chép
-            else:
-                khac.append(f)""",
-  """            cu[f] = vt  # dot bien: xoa bat ke co giong ban goc hay khong"""),
+    # ── Hai lỗi đã gây ra 0/479 trên site ──────────────────────────────
+    ("1. tiếng ồn thành BẰNG CHỨNG: last_checked vào TAP_A (lỗi 0/479 số 1)", CL,
+     TAP_A_DUOI,
+     '    "custom_misa_org_inv", "custom_misa_last_checked",\n)\n\n# Tiếng ồn'),
 
- ("2. vẫn phát hiện field khác nhưng DỌN NỬA VỜI thay vì để người xem", CL,
-  "        if khac:\n", "        if False:\n"),
+    ("2. chốt 'không có gì để dọn' xét cả tiếng ồn (lỗi 0/479 số 2)", CL,
+     "        if not a and not ref_muon:\n            continue",
+     "        if not a and not ref_muon and not r.get('custom_misa_last_checked'):\n"
+     "            continue"),
 
- ("3. bỏ phép đối vân tay — dọn theo kế hoạch chưa ai đọc", CL,
-  '    if thuc != cstr(van_tay).strip():', '    if False:'),
+    ("3. ghi chú vào TAP_A làm bằng chứng", CL,
+     TAP_A_DUOI,
+     '    "custom_misa_org_inv", "custom_misa_note",\n)\n\n# Tiếng ồn'),
 
- ("4. vân tay chỉ băm TÊN chứng từ, không băm giá trị sắp xoá", CL,
-  '''            {"si": r["si"],
-             "xoa": {k: cstr(v) for k, v in sorted(r["cu"].items())}}''',
-  '''            {"si": r["si"]}'''),
+    ("4. ô số cũ vn_einvoice_number vào TAP_A làm bằng chứng", CL,
+     TAP_A_DUOI,
+     '    "custom_misa_org_inv", "vn_einvoice_number",\n)\n\n# Tiếng ồn'),
 
- ("5. ghi đè TRƯỚC rồi mới lưu giá trị cũ (mất điện là mất đường lùi)", CL,
-  '''            frappe.get_doc({
-                "doctype": "Comment",''',
-  '''            frappe.db.set_value("Sales Invoice", r["si"],
-                                {f: None for f in r["cu"]}, update_modified=False)
-            frappe.get_doc({
-                "doctype": "Comment",'''),
+    # ── Dữ liệu người ──────────────────────────────────────────────────
+    ("5. dọn ô số cũ BẤT KỂ có bằng số đi vay hay không (xoá số gõ tay)", CL,
+     "if _co_gia_tri(r.get(f)) and nguon in a and cstr(r.get(f)) == cstr(a[nguon]):",
+     "if _co_gia_tri(r.get(f)):"),
 
- ("6. cờ khóa để None thay vì 0 (rơi khỏi vòng quét 2)", CL,
-  'gia_tri["custom_misa_no_locked"] = 0', 'gia_tri["custom_misa_no_locked"] = None'),
+    ("6. ĐÈ ô ghi chú thay vì nối thêm", CL,
+     'gia_tri["custom_misa_note"] = (cu_note + "\\n" + dong) if cu_note else dong',
+     'gia_tri["custom_misa_note"] = dong'),
 
- ("7. không cấp RefID mới — vẫn để trùng RefID bản gốc", CL,
-  '            gia_tri["custom_misa_ref_id"] = moi\n', ''),
+    ("7. bỏ chốt 'field khác gốc' — dọn cả chứng từ người đã sửa", CL,
+     "        if khac:\n", "        if False:\n"),
 
- ("8. ghi mà không khai update_modified=False", CL,
-  '''            frappe.db.set_value("Sales Invoice", r["si"], gia_tri, update_modified=False)''',
-  '''            frappe.db.set_value("Sales Invoice", r["si"], gia_tri)'''),
+    # ── Cờ khóa / trạng thái cuối ──────────────────────────────────────
+    ("8. khóa chặn kể cả khi GIỐNG gốc (chép theo) — chặn oan", CL,
+     "if cint(r.no_locked) and not cint(g.no_locked):", "if cint(r.no_locked):"),
 
- ("9. bỏ chốt 'không có gì để dọn thì im lặng' — mọi trả hàng vào can_tay", CL,
-  '''        if all(r.get(f) in (None, "") for f in fields):
-            continue''',
-  '''        if False:
-            continue'''),
+    ("9. bỏ chặn trạng thái cuối khác gốc — dọn 'Đã thay thế' không hỏi ai", CL,
+     "if r.trang_thai in TRANG_THAI_CUOI and cstr(r.trang_thai) != cstr(g.trang_thai):",
+     "if False:"),
 
- ("10. bỏ chốt 'RefID dùng chung với >1 hóa đơn bán' — dọn cả nhóm lạ", CL,
-  '        if len(goc) > 1:', '        if False:'),
+    ("10. bỏ chốt gốc đã hủy", CL,
+     "        if cint(g.docstatus) == 2:", "        if False:"),
 
- ("11. hoan_tac không soi `moc` — lùi theo Comment của nguồn khác", CL,
-  '        if d.get("moc") != MOC or d.get("van_tay") != van_tay:',
-  '        if False:'),
+    ("11. trả hàng không có gốc bị nhồi vào can_tay (nhiễu trở lại)", CL,
+     '            _ngoai("khong_goc", r)\n            continue',
+     '            can_tay.append({"si": r.name, "ly_do": "khong goc"})\n            continue'),
 
- ("12. xem_truoc GHI luôn thay vì chỉ xem", CL,
-  '''    ke_hoach, can_tay, bq = _dung_ke_hoach(bo_qua, limit)
-    return {
-        "van_tay": _van_tay(ke_hoach, bq),''',
-  '''    ke_hoach, can_tay, bq = _dung_ke_hoach(bo_qua, limit)
-    for _r in ke_hoach:
-        frappe.db.set_value("Sales Invoice", _r["si"],
-                            {"custom_misa_status": "Chưa đẩy"}, update_modified=False)
-    return {
-        "van_tay": _van_tay(ke_hoach, bq),'''),
+    # ── Vân tay ────────────────────────────────────────────────────────
+    ("12. bỏ phép đối vân tay", CL,
+     "    if thuc != van_tay:", "    if False:"),
+
+    ("13. vân tay không băm trạng thái + cờ khóa cũ (sẽ bị ghi đè)", CL,
+     '             "tt": cstr(r["trang_thai_cu"]),\n'
+     '             "khoa": cint(r["no_locked_cu"]),\n',
+     ''),
+
+    # (Không có đột biến "vân tay không băm cho_phep / bo_qua": đó là đột biến
+    # TƯƠNG ĐƯƠNG. Hai tham số này chỉ đổi được việc sẽ làm bằng cách đổi KẾ
+    # HOẠCH, mà nội dung kế hoạch — tên, giá trị sắp xoá, RefID/trạng thái/cờ
+    # cũ — đã được băm (đột biến 13, 15). Không có cách nào ghi khác đi mà vân
+    # tay đứng yên. Băm thêm hai tham số là lớp đệm, không phải chốt; viết một
+    # phép kiểm giả vờ chúng là chốt thì bộ kiểm nói dối.)
+
+    ("15. vân tay không băm giá trị sắp xoá", CL,
+     '             "xoa": {k: cstr(v) for k, v in sorted(r["cu"].items())}}',
+     '             }'),
+
+    # ── Ghi ────────────────────────────────────────────────────────────
+    ("16. cờ khóa để None thay vì 0 (rơi khỏi vòng quét 2)", CL,
+     'gia_tri["custom_misa_no_locked"] = 0', 'gia_tri["custom_misa_no_locked"] = None'),
+
+    ("17. không cấp RefID mới", CL,
+     '            gia_tri["custom_misa_ref_id"] = moi\n', ''),
+
+    ("18. ghi mà không khai update_modified=False", CL,
+     'frappe.db.set_value("Sales Invoice", r["si"], gia_tri, update_modified=False)',
+     'frappe.db.set_value("Sales Invoice", r["si"], gia_tri)'),
+
+    ("19. ghi đè TRƯỚC rồi mới lưu giá trị cũ", CL,
+     '            frappe.get_doc({\n                "doctype": "Comment",',
+     '            frappe.db.set_value("Sales Invoice", r["si"], {f: None for f in r["cu"]},\n'
+     '                                update_modified=False)\n'
+     '            frappe.get_doc({\n                "doctype": "Comment",'),
+
+    ("20. xem_truoc GHI luôn", CL,
+     "    van_tay = _van_tay(ke_hoach, bo_qua, cho_phep)\n    co_so =",
+     "    for _r in ke_hoach:\n"
+     "        frappe.db.set_value('Sales Invoice', _r['si'], {'custom_misa_status': 'x'},"
+     " update_modified=False)\n"
+     "    van_tay = _van_tay(ke_hoach, bo_qua, cho_phep)\n    co_so ="),
+
+    # ── Lùi ────────────────────────────────────────────────────────────
+    ("21. hoan_tac không soi `moc` — lùi theo Comment của nguồn khác", CL,
+     '        if d.get("moc") != MOC or d.get("van_tay") != van_tay:', '        if False:'),
+
+    ("22. hoan_tac không trả ghi chú cũ", CL,
+     '                gia_tri["custom_misa_note"] = d.get("note_cu")', '                pass'),
+
+    # ── Hậu quả lên MT Hàng Hoàn ───────────────────────────────────────
+    ("23. đếm MT Hàng Hoàn quên dòng đã có bảng kê siêu thị", CL,
+     "a.docstatus < 2)''' if co_bang_ke else \"\"}",
+     "a.docstatus < 2)''' if False else \"\"}"),
 ]
 
 
@@ -105,17 +152,15 @@ def main():
         print(out0[-2000:])
         return 1
 
-    lot, ap = [], 0
+    lot = []
     for ten, f, old, new in M:
         path = os.path.join(REPO, f)
         src = io.open(path, encoding="utf-8").read()
         n = src.count(old)
         if n != 1:
-            print(f"  ⚠ {ten}: KHÔNG ÁP ĐƯỢC ({n} khớp) — sửa đột biến, "
-                  f"đừng bỏ qua")
+            print(f"  ⚠ {ten}: KHÔNG ÁP ĐƯỢC ({n} khớp) — sửa đột biến, đừng bỏ qua")
             lot.append(ten)
             continue
-        ap += 1
         io.open(path, "w", encoding="utf-8").write(src.replace(old, new, 1))
         try:
             rc1, out1 = run()
@@ -130,7 +175,7 @@ def main():
 
     rc2, _ = run()
     print("\nSau khi phục hồi:", "ĐẠT" if rc2 == 0 else "ĐỎ ❌ (file chưa về nguyên)")
-    print(f"KẾT: {ap - len(lot)}/{ap} đột biến áp được đã bị bắt")
+    print(f"KẾT: {len(M) - len(lot)}/{len(M)} đột biến bị bắt")
     return 0 if (not lot and rc2 == 0) else 1
 
 
