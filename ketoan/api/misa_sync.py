@@ -14,7 +14,7 @@ import uuid
 
 import frappe
 from frappe import _
-from frappe.utils import flt, now_datetime, nowdate
+from frappe.utils import cint, flt, now_datetime, nowdate
 
 from ketoan.api.misa_client import PAGE_SLEEP, MISAError, call, get_settings, invoice_path
 from ketoan.api.misa_desk import invoice_links
@@ -82,14 +82,30 @@ def ensure_ref_id(doc, method=None):
         if not doc.meta.has_field("custom_misa_ref_id"):
             return  # chưa migrate — im lặng bỏ qua
 
-        # Hóa đơn sửa đổi (amend) được sao chép từ bản đã hủy, mang theo nguyên
-        # ref_id và cả số hóa đơn của bản cũ. Không dọn thì: ref_id đã có nên
-        # không sinh mới, pushed_at đã có nên push_invoice trả "đã xuất rồi", và
-        # bản sửa đổi VĨNH VIỄN không bao giờ được phát hành — trong khi màn hình
-        # vẫn hiện số hóa đơn của bản đã hủy.
+        # Chứng từ được CHÉP TỪ CHỨNG TỪ KHÁC phải dọn sạch nhóm field MISA
+        # trước khi cấp khóa nối mới. Có HAI đường chép, và cả hai đã gây sự cố
+        # thật:
         #
-        # Không trông vào no_copy: frappe.model.copy_doc bỏ qua cờ đó khi amend.
-        if doc.get("amended_from"):
+        # 1. BẢN SỬA ĐỔI (amend) — sao từ bản đã hủy, mang nguyên ref_id và số
+        #    hóa đơn cũ. Không dọn thì ref_id đã có nên không sinh mới,
+        #    pushed_at đã có nên push_invoice trả "đã xuất rồi", và bản sửa đổi
+        #    VĨNH VIỄN không được phát hành — trong khi màn hình vẫn hiện số của
+        #    bản đã hủy. Không trông vào no_copy: `frappe.model.copy_doc` bỏ qua
+        #    cờ đó khi amend.
+        #
+        # 2. HÓA ĐƠN TRẢ HÀNG (`is_return`) — nút Return đi qua
+        #    `frappe/model/mapper.py::map_fields`, hàm đó CÓ tôn trọng
+        #    `no_copy`, nhưng 17/17 field `custom_misa_*` trước đây không khai
+        #    cờ ấy (patch v0_0_19 đặt). ĐO ĐƯỢC trên production 08/10/2026:
+        #    90 bản trả hàng chở RefID + số hóa đơn của bản gốc.
+        #
+        #    Giữ nhánh này kể cả sau khi đã có `no_copy`: cờ chỉ ăn sau
+        #    migrate + clear cache, và Data Import / API có thể không đi qua
+        #    mapper. Một bản trả hàng không bao giờ có hóa đơn riêng dưới RefID
+        #    của nó (push_invoice chặn `is_return`), nên cấp RefID mới ở đây chỉ
+        #    để nó KHÔNG trùng với ai — và `poll_pending` đã bỏ qua trả hàng nên
+        #    RefID đó không sinh tiếng ồn.
+        if doc.get("amended_from") or doc.get("is_return"):
             for f in ("custom_misa_inv_no", "custom_misa_inv_series", "custom_misa_inv_date",
                       "custom_misa_transaction_id", "custom_misa_invoice_code", "custom_misa_link",
                       "custom_misa_pushed_at", "custom_misa_last_checked", "custom_misa_note",
@@ -449,7 +465,34 @@ def _poll_pending(limit, lookback_days, trigger_type="Manual"):
     seen_names = {r.name for r in rows}
     rows = rows + [r for r in watch if r.name not in seen_names]
 
-    stat = {"fetched": 0, "updated": 0, "matched": 0, "mismatched": 0}
+    # ── BỎ HÓA ĐƠN TRẢ HÀNG RA KHỎI VÒNG QUÉT ──────────────────────────
+    #
+    # `misa_push.push_invoice` CHẶN HẲN `is_return` ở cổng đẩy (hóa đơn trả
+    # hàng phải đi đường điều chỉnh/thay thế trên MISA), nên một bản trả hàng
+    # KHÔNG BAO GIỜ có hóa đơn của riêng nó dưới RefID của nó. Hỏi MISA về nó
+    # chỉ sinh rác.
+    #
+    # Mà rác đó đã đo được trên production (08/10/2026): 90 bản trả hàng chở
+    # RefID + số hóa đơn của bản gốc (nút Return đi qua `mapper.map_fields`,
+    # mà 17/17 field `custom_misa_*` không khai `no_copy` — xem patch
+    # v0_0_19). Vòng 2 hỏi RefID đi vay đó, nhận về hóa đơn GỐC, rồi
+    # `check_amount_drift` so `abs(m) - abs(e)` giữa tiền gốc và tiền trả hàng
+    # ÂM ⇒ lệch khổng lồ ⇒ dán "Lệch tiền" cho hàng loạt chứng từ hoàn toàn
+    # bình thường, lặp lại mỗi 30 phút. Đúng cái làm kế toán mất niềm tin vào
+    # cảnh báo, rồi bỏ qua cả cảnh báo thật.
+    #
+    # LỌC Ở PYTHON, không thêm vào `filters`: cột Check trên bảng có sẵn dữ
+    # liệu mang NULL chứ không phải 0, mà `is_return != 1` trong SQL LOẠI LUÔN
+    # hàng NULL (NULL != 1 ra NULL, không phải TRUE). Đúng cái bẫy patch
+    # v0_0_17 đã phải chữa một lần. `is_return` vốn đã nằm trong `fields`.
+    so_tra_hang = sum(1 for r in rows if cint(r.get("is_return")))
+    if so_tra_hang:
+        rows = [r for r in rows if not cint(r.get("is_return"))]
+
+    # Nói ra số bị bỏ qua. Cắt bớt phạm vi quét mà im lặng thì nhật ký đọc
+    # thành "đã quét hết", trong khi nó bỏ qua cả một loại chứng từ.
+    stat = {"fetched": 0, "updated": 0, "matched": 0, "mismatched": 0,
+            "skipped_return": so_tra_hang}
     errors = []
 
     for i, si in enumerate(rows):

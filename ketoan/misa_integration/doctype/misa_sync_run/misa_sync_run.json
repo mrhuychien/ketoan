@@ -21,6 +21,7 @@
   "column_break_counter",
   "matched",
   "mismatched",
+  "skipped_return",
   "log_section",
   "note",
   "error_log"
@@ -133,6 +134,14 @@
    "read_only": 1
   },
   {
+   "default": "0",
+   "description": "Hóa đơn TRẢ HÀNG bị bỏ ra khỏi vòng quét. Bản trả hàng không đi đường đẩy trực tiếp sang MISA (misa_push chặn is_return), nên hỏi MISA về nó chỉ sinh cảnh báo lệch tiền giả.",
+   "fieldname": "skipped_return",
+   "fieldtype": "Int",
+   "label": "Bỏ qua (trả hàng)",
+   "read_only": 1
+  },
+  {
    "collapsible": 1,
    "fieldname": "log_section",
    "fieldtype": "Section Break",
@@ -154,7 +163,7 @@
   }
  ],
  "links": [],
- "modified": "2026-08-17 00:00:00.000000",
+ "modified": "2026-10-08 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "MISA Integration",
  "name": "MISA Sync Run",

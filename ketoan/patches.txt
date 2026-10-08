@@ -21,3 +21,4 @@ ketoan.patches.v0_0_15.mt_account_map_seed
 ketoan.patches.v0_0_16.mt_credit_days
 ketoan.patches.v0_0_17.misa_no_locked
 ketoan.patches.v0_0_18.mt_einv_skip
+ketoan.patches.v0_0_19.misa_no_copy

@@ -483,6 +483,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_status",
+            "no_copy": 1,
             "label": "Trạng thái MISA",
             "fieldtype": "Select",
             "options": MISA_STATUS_OPTIONS,
@@ -493,6 +494,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_inv_series",
+            "no_copy": 1,
             "label": "Ký hiệu hóa đơn",
             "fieldtype": "Data",
             "allow_on_submit": 1,
@@ -501,6 +503,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_inv_no",
+            "no_copy": 1,
             "label": "Số hóa đơn MISA",
             "fieldtype": "Data",
             "allow_on_submit": 1,
@@ -510,6 +513,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_inv_date",
+            "no_copy": 1,
             "label": "Ngày phát hành MISA",
             "fieldtype": "Date",
             "allow_on_submit": 1,
@@ -523,6 +527,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_transaction_id",
+            "no_copy": 1,
             "label": "Mã tra cứu MISA",
             "fieldtype": "Data",
             "allow_on_submit": 1,
@@ -532,6 +537,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_invoice_code",
+            "no_copy": 1,
             "label": "Mã CQT",
             "fieldtype": "Data",
             "allow_on_submit": 1,
@@ -541,6 +547,7 @@ MISA_CUSTOM_FIELDS = {
         {
             # Data + options "URL" → Frappe render thành link bấm được.
             "fieldname": "custom_misa_link",
+            "no_copy": 1,
             "label": "Tra cứu hóa đơn MISA",
             "fieldtype": "Data",
             "options": "URL",
@@ -551,6 +558,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_ref_id",
+            "no_copy": 1,
             "label": "RefID (khóa nối MISA)",
             "fieldtype": "Data",
             "read_only": 1,
@@ -560,6 +568,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_relation",
+            "no_copy": 1,
             "label": "Quan hệ thay thế/điều chỉnh",
             "fieldtype": "Select",
             "options": MISA_RELATION_OPTIONS,
@@ -571,6 +580,7 @@ MISA_CUSTOM_FIELDS = {
         {
             # OrgRefID của MISA — khóa để tìm ngược hóa đơn gốc bên ERPNext.
             "fieldname": "custom_misa_org_ref_id",
+            "no_copy": 1,
             "label": "RefID hóa đơn gốc",
             "fieldtype": "Data",
             "allow_on_submit": 1,
@@ -580,6 +590,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_org_inv",
+            "no_copy": 1,
             "label": "Hóa đơn gốc / hóa đơn thay thế",
             "fieldtype": "Data",
             "allow_on_submit": 1,
@@ -589,6 +600,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_pushed_at",
+            "no_copy": 1,
             "label": "Đẩy sang MISA lúc",
             "fieldtype": "Datetime",
             "allow_on_submit": 1,
@@ -597,6 +609,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_last_checked",
+            "no_copy": 1,
             "label": "Kiểm tra lần cuối",
             "fieldtype": "Datetime",
             "allow_on_submit": 1,
@@ -605,6 +618,7 @@ MISA_CUSTOM_FIELDS = {
         },
         {
             "fieldname": "custom_misa_note",
+            "no_copy": 1,
             "label": "Ghi chú xử lý MISA",
             "fieldtype": "Small Text",
             "allow_on_submit": 1,
@@ -626,6 +640,7 @@ MISA_CUSTOM_FIELDS = {
             # được theo dõi hủy/thay thế tự động — nên đây là lựa chọn CUỐI, chỉ
             # dùng khi không repoint được ref_id.
             "fieldname": "custom_misa_no_locked",
+            "no_copy": 1,
             "label": "Số hóa đơn do người gán (đồng bộ không đè)",
             "fieldtype": "Check",
             "default": "0",
