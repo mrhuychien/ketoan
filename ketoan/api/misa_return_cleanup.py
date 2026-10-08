@@ -55,6 +55,11 @@ từ số đi vay khi ô còn trống. Còn lại GIỮ NGUYÊN: "8584", "HOÀN"
 "7894- HOÀN" là kế toán tự gõ — có cái là số hóa đơn điều chỉnh của chính
 bản trả hàng.
 
+Và khi số người gõ là CHÍNH hóa đơn gốc ở dạng rút gọn ("8433" cho
+"00008433" — đo trên site: 21 bản), cả nhóm số + ngày + mã tra cứu là MỘT ghi
+chép của người về hóa đơn gốc: giữ nguyên CẢ NHÓM. Bóc ngày và mã ra mà giữ
+số là để lại ghi chép què.
+
 `custom_misa_note` — CHỈ NỐI THÊM một dòng, không bao giờ đặt trống. Ô này
 `allow_on_submit` mà không `read_only` (install.py): người gõ được vào chứng
 từ đã ghi sổ, và nó đang mang cả nhật ký đổi số của `misa_replace`.
@@ -111,6 +116,10 @@ import uuid
 import frappe
 from frappe import _
 from frappe.utils import cint, cstr, now_datetime
+
+from ketoan.misa_integration.doctype.misa_invoice_snapshot.misa_invoice_snapshot import (
+    norm_inv_no,
+)
 
 MOC = "ketoan.misa_return_cleanup"
 
@@ -183,6 +192,36 @@ def _van_tay(ke_hoach, bo_qua, cho_phep):
         ]},
         ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(loi.encode("utf-8")).hexdigest()[:32]
+
+
+def _ghi_chep_nguoi_ve_goc(r, a):
+    """Ô số cũ là số của CHÍNH hóa đơn gốc, ở dạng người gõ ("8433" cho "00008433").
+
+    Đo trên site: 21 bản trả hàng — kế toán ghi số hóa đơn gốc (rút gọn) lên
+    phiếu trả làm tham chiếu, kèm ngày và mã tra cứu của chính hóa đơn đó. Cả
+    nhóm ô cũ là MỘT ghi chép nhất quán: giữ nguyên cả nhóm.
+
+    Khác hẳn ca người gõ một hóa đơn KHÁC (vd "8584" trên bản trả hàng của gốc
+    "00008234" — thường là số hóa đơn thay thế/điều chỉnh của chính nó): khi đó
+    mã tra cứu đang trỏ hóa đơn GỐC là đồ máy chép sai chỗ, vẫn dọn.
+    """
+    vn = r.get("vn_einvoice_number")
+    so = a.get("custom_misa_inv_no")
+    return bool(_co_gia_tri(vn) and _co_gia_tri(so) and cstr(vn) != cstr(so)
+                and norm_inv_no(vn) == norm_inv_no(so))
+
+
+def _json_an_toan(d):
+    """JSON không chứa '<' / '>'.
+
+    Frappe chạy `sanitize_html` lên MỌI ô chữ có '<' hoặc '>' khi insert
+    (frappe/model/base_document.py::_sanitize_content). Ghi chú người viết có
+    "<50 thùng" hay "->" thì bản sao lưu trong Comment bị sửa, và lúc lùi trả
+    về một ghi chú HỎNG. Viết hai ký tự đó dạng \u003c / \u003e: vẫn là JSON
+    hợp lệ, json.loads trả đúng ký tự gốc, mà bộ lọc HTML không bao giờ chạm vào.
+    """
+    return (json.dumps(d, ensure_ascii=False, default=cstr)
+            .replace("<", "\\u003c").replace(">", "\\u003e"))
 
 
 def _theo_lo(ten, co):
@@ -309,10 +348,11 @@ def _dung_ke_hoach(bo_qua, cho_phep, limit):
         for f in tieng_on:
             if _co_gia_tri(r.get(f)):
                 cu[f] = r.get(f)
-        for f, nguon in o_cu.items():
-            # Chỉ dọn khi BẰNG ĐÚNG giá trị đi vay đang dọn trên chính chứng từ.
-            if _co_gia_tri(r.get(f)) and nguon in a and cstr(r.get(f)) == cstr(a[nguon]):
-                cu[f] = r.get(f)
+        if not _ghi_chep_nguoi_ve_goc(r, a):
+            for f, nguon in o_cu.items():
+                # Chỉ dọn khi BẰNG ĐÚNG giá trị đi vay đang dọn trên chính chứng từ.
+                if _co_gia_tri(r.get(f)) and nguon in a and cstr(r.get(f)) == cstr(a[nguon]):
+                    cu[f] = r.get(f)
 
         ke_hoach.append({
             "si": r.name, "goc": g.name,
@@ -436,14 +476,14 @@ def don(van_tay, limit=5000, bo_qua=None, cho_phep=None):
                 "comment_type": "Info",
                 "reference_doctype": "Sales Invoice",
                 "reference_name": r["si"],
-                "content": json.dumps({
+                "content": _json_an_toan({
                     "moc": MOC, "van_tay": van_tay, "goc": r["goc"],
                     "ref_id_cu": r["ref_id_cu"], "ref_id_moi": moi,
                     "trang_thai_cu": r["trang_thai_cu"],
                     "no_locked_cu": r["no_locked_cu"],
                     "note_cu": r["note_cu"],
                     "cu": {k: cstr(v) for k, v in r["cu"].items()},
-                }, ensure_ascii=False, default=cstr),
+                }),
             }).insert(ignore_permissions=True)
 
             gia_tri = {f: None for f in r["cu"]}

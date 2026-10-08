@@ -124,6 +124,13 @@ M = [
     ("22. hoan_tac không trả ghi chú cũ", CL,
      '                gia_tri["custom_misa_note"] = d.get("note_cu")', '                pass'),
 
+    ("24. bỏ luật 'cả nhóm ô cũ là một ghi chép' — bóc ngày/mã khỏi số người gõ", CL,
+     "        if not _ghi_chep_nguoi_ve_goc(r, a):", "        if True:"),
+
+    ("25. Comment để nguyên '<' '>' — bộ lọc HTML sửa bản sao lưu, lùi ra ghi chú hỏng", CL,
+     r'            .replace("<", "\\u003c").replace(">", "\\u003e"))',
+     '            )'),
+
     # ── Hậu quả lên MT Hàng Hoàn ───────────────────────────────────────
     ("23. đếm MT Hàng Hoàn quên dòng đã có bảng kê siêu thị", CL,
      "a.docstatus < 2)''' if co_bang_ke else \"\"}",

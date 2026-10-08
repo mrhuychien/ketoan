@@ -64,6 +64,8 @@ FIELDS_CO = {
     "return_against",
 }
 
+NOTE_NGUOI = "kế toán: đã gọi siêu thị, chờ biên bản (<50 thùng> -> trả 2 lần)"
+
 DRIFT = ("trước thuế: MISA 15,520,050 ≠ ERPNext 1,783,950 (lệch 13,736,100) · "
          "tổng tiền: MISA 16,761,654 ≠ ERPNext 1,926,666 (lệch 14,834,988)")
 
@@ -112,11 +114,26 @@ def lam_bang():
     # R-2 · ô số cũ là CHỮ kế toán gõ ("7894- HOÀN") + ghi chú người viết.
     them(_goc("G-2", "ref-2", "00007894"),
          _tra("R-2", "G-2", "ref-2", "00007894",
-              custom_misa_note="kế toán: đã gọi siêu thị, chờ biên bản",
+              custom_misa_note=NOTE_NGUOI,
               vn_einvoice_number="7894- HOÀN"))
-    # R-3 · ô số cũ là số gõ tay rút gọn ("8433" ≠ "00008433" từng byte).
-    them(_goc("G-3", "ref-3", "00008433"),
-         _tra("R-3", "G-3", "ref-3", "00008433", vn_einvoice_number="8433"))
+    # R-3 · kế toán ghi số của CHÍNH hóa đơn gốc ở dạng rút gọn ("8433" cho
+    # "00008433") kèm ngày + mã tra cứu của nó — 21 bản như vậy trên site. Cả
+    # nhóm ô cũ là MỘT ghi chép của người: giữ nguyên cả nhóm.
+    them(_goc("G-3", "ref-3", "00008433", custom_misa_inv_date="2026-09-25",
+              custom_misa_transaction_id="Q_FGTP1RKZL3"),
+         _tra("R-3", "G-3", "ref-3", "00008433", custom_misa_inv_date="2026-09-25",
+              custom_misa_transaction_id="Q_FGTP1RKZL3",
+              vn_einvoice_number="8433", vn_einvoice_date="2026-09-25",
+              vn_einvoice_lookup_code="Q_FGTP1RKZL3"))
+    # R-16 · kế toán ghi một hóa đơn KHÁC ("8584", ngày riêng — số hóa đơn thay
+    # thế của chính bản trả hàng, như HD-06949), còn mã tra cứu là của GỐC do
+    # máy chép ⇒ giữ số + ngày của người, dọn mã tra cứu trỏ sai hóa đơn.
+    them(_goc("G-16", "ref-16", "00008234", custom_misa_inv_date="2026-09-19",
+              custom_misa_transaction_id="8BFBT3J49L_7"),
+         _tra("R-16", "G-16", "ref-16", "00008234", custom_misa_inv_date="2026-09-19",
+              custom_misa_transaction_id="8BFBT3J49L_7",
+              vn_einvoice_number="8584", vn_einvoice_date="2026-09-30",
+              vn_einvoice_lookup_code="8BFBT3J49L_7"))
     # R-4 · chỉ mượn RefID, chưa mượn số (gốc chưa phát hành lúc chép).
     them(_goc("G-4", "ref-4"),
          _tra("R-4", "G-4", "ref-4", custom_misa_no_locked=None))
@@ -211,6 +228,11 @@ def gan_bo_gia(frappe, bang, nk, mt=None, pa=None):
 
     class _Doc(_D):
         def insert(self, **kw):
+            # frappe/model/base_document.py::_sanitize_content: ô chữ có '<'
+            # hoặc '>' bị đưa qua sanitize_html. Bộ giả làm hỏng y như vậy.
+            c = self.get("content") or ""
+            if "<" in c or ">" in c:
+                self["content"] = c.replace("<", "&lt;").replace(">", "&gt;")
             nk["insert"].append(dict(self))
             nk["thu_tu"].append(("comment", self.get("reference_name")))
             return self
@@ -268,14 +290,14 @@ def main():
     # ── 1. Thành phần kế hoạch ────────────────────────────────────────
     print("-" * 78)
     print("── 1. Kế hoạch đúng những bản CHÉP TỪ GỐC, không hơn không kém ─────")
-    check("kế hoạch = R-1..R-5 (chép đủ / số gõ tay / chỉ RefID / khóa chép theo)",
-          viec == ["R-1", "R-2", "R-3", "R-4", "R-5"], str(viec))
-    check("trong đó 4 bản có số hóa đơn", kh["trong_do_co_so_hd"] == 4,
+    check("kế hoạch = R-1..R-5 + R-16 (chép đủ / số gõ tay / chỉ RefID / khóa chép theo)",
+          viec == ["R-1", "R-16", "R-2", "R-3", "R-4", "R-5"], str(viec))
+    check("trong đó 5 bản có số hóa đơn", kh["trong_do_co_so_hd"] == 5,
           str(kh["trong_do_co_so_hd"]))
     check("XEM TRƯỚC KHÔNG GHI GÌ", not nk["ghi"] and not nk["insert"],
           f"{len(nk['ghi'])} ghi, {len(nk['insert'])} insert")
-    check("đã quét đủ 14 bản trả hàng ghi sổ, không bị cắt",
-          kh["tong_quet"] == 14 and kh["bi_cat"] is False,
+    check("đã quét đủ 15 bản trả hàng ghi sổ, không bị cắt",
+          kh["tong_quet"] == 15 and kh["bi_cat"] is False,
           f"{kh['tong_quet']} / bi_cat={kh['bi_cat']}")
     check("bán hàng cũ is_return = NULL không bị coi là trả hàng",
           "G-15" not in viec and "G-15" not in tay)
@@ -305,6 +327,13 @@ def main():
           "vn_einvoice_number" not in xoa.get("R-2", {"vn_einvoice_number": 1}))
     check("R-3: '8433' gõ tay rút gọn (khác byte '00008433') ⇒ GIỮ",
           "vn_einvoice_number" not in xoa.get("R-3", {"vn_einvoice_number": 1}))
+    check("R-3: số gõ tay là CHÍNH hóa đơn gốc ⇒ giữ CẢ NHÓM, không bóc ngày/mã",
+          not ({"vn_einvoice_date", "vn_einvoice_lookup_code"} & set(xoa.get("R-3", {}))),
+          str(sorted(xoa.get("R-3", {}))))
+    check("R-16: số gõ tay là hóa đơn KHÁC ⇒ giữ số + ngày của người",
+          not ({"vn_einvoice_number", "vn_einvoice_date"} & set(xoa.get("R-16", {}))))
+    check("R-16: mã tra cứu đang trỏ hóa đơn GỐC (máy chép sai chỗ) ⇒ dọn",
+          xoa.get("R-16", {}).get("vn_einvoice_lookup_code") == "8BFBT3J49L_7")
     check("R-1: dấu giờ kiểm tra lần cuối được dọn kèm",
           "custom_misa_last_checked" in xoa.get("R-1", {}))
     check("không bao giờ đưa ô ghi chú vào danh sách xoá",
@@ -376,7 +405,7 @@ def main():
     print("-" * 78)
     print("── 7. Dọn thật ─────────────────────────────────────────────────────")
     kq = cl.don(van_tay=vt)
-    check("báo dọn 5 chứng từ, không lỗi", kq["da_don"] == 5 and not kq["loi"], str(kq)[:80])
+    check("báo dọn 6 chứng từ, không lỗi", kq["da_don"] == 6 and not kq["loi"], str(kq)[:80])
     r1 = bang["R-1"]
     check("R-1: số, ký hiệu, ngày, txn, đẩy-lúc đi vay đều sạch",
           all(r1.get(f) is None for f in (
@@ -393,8 +422,14 @@ def main():
     check("R-3: số gõ tay '8433' VẪN NGUYÊN", bang["R-3"]["vn_einvoice_number"] == "8433")
     n2 = bang["R-2"]["custom_misa_note"] or ""
     check("R-2: ghi chú người viết GIỮ NGUYÊN ở đầu, chỉ NỐI THÊM một dòng",
-          n2.startswith("kế toán: đã gọi siêu thị, chờ biên bản\n") and n2.count("\n") == 1,
-          n2[:60])
+          n2.startswith(NOTE_NGUOI + "\n") and n2.count("\n") == 1, n2[:60])
+    r3 = bang["R-3"]
+    check("R-3: cả nhóm ô cũ của người VẪN NGUYÊN sau khi dọn",
+          r3["vn_einvoice_number"] == "8433" and r3["vn_einvoice_date"] == "2026-09-25"
+          and r3["vn_einvoice_lookup_code"] == "Q_FGTP1RKZL3")
+    check("Comment không chứa '<' '>' (bộ lọc HTML của Frappe không chạm vào)",
+          all("<" not in c["content"] and ">" not in c["content"] and "&lt;" not in c["content"]
+              for c in nk["insert"]))
     check("R-1: dòng nối thêm giải thích ghi chú lệch tiền phía trên",
           DRIFT in (r1["custom_misa_note"] or "")
           and "lệch tiền phía trên" in (r1["custom_misa_note"] or ""))
@@ -437,7 +472,7 @@ def main():
          "cu": {"custom_misa_inv_no": "99999999"}})})
     ht = cl.hoan_tac(van_tay=vt)
     r1 = bang["R-1"]
-    check("lùi đúng 5 chứng từ của lượt đó", ht["da_tra_lai"] == 5, str(ht)[:60])
+    check("lùi đúng 6 chứng từ của lượt đó", ht["da_tra_lai"] == 6, str(ht)[:60])
     check("R-1 về số, RefID, trạng thái cũ",
           r1["custom_misa_inv_no"] == "00008754" and r1["custom_misa_ref_id"] == "ref-1"
           and r1["custom_misa_status"] == "Lệch tiền")
@@ -445,6 +480,9 @@ def main():
           r1["vn_einvoice_number"] == "00008754"
           and r1["custom_misa_last_checked"] == "2026-10-08 17:02:30.720988")
     check("R-1 ghi chú về NGUYÊN VĂN cũ (bỏ dòng đã nối)", r1["custom_misa_note"] == DRIFT)
+    check("R-2 ghi chú người viết có '<' '>' về NGUYÊN VĂN, không bị bộ lọc HTML sửa",
+          bang["R-2"]["custom_misa_note"] == NOTE_NGUOI,
+          repr(bang["R-2"]["custom_misa_note"])[:70])
     check("Comment của nguồn khác cùng chuỗi vân tay KHÔNG được đem ra lùi",
           bang["G-1"]["custom_misa_inv_no"] == "00008754"
           and bang["G-1"]["custom_misa_ref_id"] == "ref-1")
