@@ -100,6 +100,169 @@ MISA_FIELDS = [
 LAYOUT_FIELDS = ["custom_misa_section", "custom_misa_column_break"]
 
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# Rổ "Trả hàng" của trang Hóa đơn VAT
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Dọn ~90 bản trả hàng đang chở số đi vay sẽ ĐẨY chúng từ rổ "Đã liên kết"
+# sang rổ "Chỉ có trên phần mềm" — tức sáng hôm sau kế toán thấy 90 hóa đơn
+# "bán mà chưa xuất", một tồn giả do chính việc dọn tạo ra. Nên rổ phải tách
+# TRƯỚC khi dọn.
+#
+# KHÔNG quét chữ trong file: ở đây lấy mệnh đề WHERE mà production THẬT SỰ
+# gửi xuống MariaDB, dịch sang Python, rồi xem 4 chứng từ mẫu rơi vào rổ nào.
+# Quét chữ thì đổi `= 0` thành `= 1` vẫn đạt.
+
+import re as _re
+
+_DK = _re.compile(
+    r"IFNULL\(\s*(?:si\.)?(\w+)\s*,\s*(0|'')\s*\)\s*(=|!=)\s*(0|1|'')")
+
+_BO_QUA = (
+    "docstatus = 1", "si.docstatus = 1",
+    "company = %(company)s", "si.company = %(company)s",
+    "posting_date BETWEEN %(fd)s AND %(td)s",
+    "si.posting_date BETWEEN %(fd)s AND %(td)s",
+)
+
+
+def _dich_where(where):
+    """SQL → danh sách hàm vị từ. Mệnh đề lạ ⇒ NỔ, không im lặng cho qua."""
+    # `BETWEEN a AND b` phải bỏ TRƯỚC khi tách theo AND, không thì chính chữ
+    # AND bên trong nó cắt mệnh đề ra làm hai nửa vô nghĩa.
+    where = _re.sub(r"\S*posting_date\s+BETWEEN\s+\S+\s+AND\s+\S+", "", where)
+    vt = []
+    for m in [x.strip() for x in _re.split(r"\bAND\b", where) if x.strip()]:
+        m = m.strip("() \n")
+        if m in _BO_QUA:
+            continue
+        g = _DK.fullmatch(m)
+        if not g:
+            raise AssertionError(f"mệnh đề chưa dịch được: {m!r}")
+        field, mac_dinh, op, mong = g.groups()
+        md = 0 if mac_dinh == "0" else ""
+        mg = 0 if mong == "0" else (1 if mong == "1" else "")
+
+        def f(r, field=field, md=md, op=op, mg=mg):
+            v = r.get(field)
+            if v is None:
+                v = md
+            v = int(v) if isinstance(mg, int) else str(v)
+            return (v == mg) if op == "=" else (v != mg)
+
+        vt.append(f)
+    return vt
+
+
+MAU = [
+    # bán thường, đã có số  → linked
+    _D(name="A-BAN-CO-SO", is_return=0, custom_misa_inv_no="00008040", grand_total=10.8e6),
+    # TRẢ HÀNG chở số ĐI VAY của bản gốc → phải ra rổ trả hàng, KHÔNG phải linked
+    _D(name="B-TRA-SO-VAY", is_return=1, custom_misa_inv_no="00008040", grand_total=-1.08e6),
+    # hàng CŨ: is_return = NULL, chưa có số → erp_only (không được rụng vì NULL)
+    _D(name="C-CU-NULL", is_return=None, custom_misa_inv_no=None, grand_total=5.4e6),
+    # trả hàng đã dọn sạch → rổ trả hàng, KHÔNG phải "bán mà chưa xuất"
+    _D(name="D-TRA-DA-DON", is_return=1, custom_misa_inv_no=None, grand_total=-2e6),
+]
+
+
+def _loc(where):
+    vt = _dich_where(where)
+    return [r["name"] for r in MAU if all(f(r) for f in vt)]
+
+
+def section7(frappe, check):
+    print("-" * 78)
+    print("── 7. Trang Hóa đơn VAT: trả hàng ra rổ riêng, không tạo tồn giả ───")
+    vat = importlib.import_module("ketoan.api.misa_vat")
+
+    # ── 7a. Ba rổ phía ERPNext: soi mệnh đề WHERE THẬT của _si_rows ──
+    bat = {}
+
+    def _sql(q, p=None, as_dict=False):
+        if "tabSales Invoice" in q and "COUNT(*)" in q:
+            w = q.split("WHERE", 1)[1].split("ORDER BY")[0].split("LIMIT")[0]
+            bat["where"] = w
+            return [[0]]
+        return []
+
+    frappe.db.sql = _sql
+    ro = {}
+    for mode in ("linked", "erp_only", "tra_hang"):
+        vat._si_rows("CTY", "2026-01-01", "2026-12-31", mode, None, 20)
+        try:
+            ro[mode] = _loc(bat["where"])
+        except AssertionError as e:
+            check(f"dịch được mệnh đề WHERE của rổ {mode}", False, str(e)[:70])
+            ro[mode] = None
+
+    check("rổ 'Đã liên kết' CHỈ có hóa đơn bán đã có số",
+          ro.get("linked") == ["A-BAN-CO-SO"], str(ro.get("linked")))
+    check("rổ 'Chỉ có trên phần mềm' KHÔNG chứa bản trả hàng nào",
+          ro.get("erp_only") == ["C-CU-NULL"], str(ro.get("erp_only")))
+    check("và hàng CŨ is_return=NULL VẪN vào rổ đó — không rụng vì NULL",
+          ro.get("erp_only") is not None and "C-CU-NULL" in ro["erp_only"])
+    check("rổ 'Trả hàng' gom cả bản chở số đi vay và bản đã dọn",
+          ro.get("tra_hang") == ["B-TRA-SO-VAY", "D-TRA-DA-DON"], str(ro.get("tra_hang")))
+    check("mỗi chứng từ vào ĐÚNG MỘT rổ, không trùng không lọt",
+          ro.get("linked") is not None and
+          sorted(ro["linked"] + ro["erp_only"] + ro["tra_hang"]) ==
+          sorted(r["name"] for r in MAU),
+          str(ro))
+
+    # ── 7b. get_overview: đếm thật trên 4 chứng từ mẫu ──
+    dem = {}
+
+    def _sql_ov(q, p=None, as_dict=False):
+        if "tabSales Invoice" not in q:
+            return [_D(cnt=0, amt=0.0)]
+        if "custom_misa_status" in q:          # si_mismatch — có NOT EXISTS
+            dem["sm_where"] = q
+            return [_D(cnt=0)]
+        w = q.split("WHERE", 1)[1]
+        ten = _loc(w)
+        return [_D(cnt=len(ten), amt=sum(abs(r["grand_total"]) for r in MAU
+                                         if r["name"] in ten))]
+
+    frappe.db.sql = _sql_ov
+    frappe.db.count = lambda *a, **k: 0
+    frappe.get_all = lambda *a, **k: []
+    vat.guard_sales_any = lambda *a, **k: None
+    vat.is_chief = lambda *a, **k: False
+    try:
+        ov = vat.get_overview(company="CTY", from_date="2026-01-01", to_date="2026-12-31")
+    except Exception as e:  # noqa: BLE001
+        check("chạy được get_overview với bộ giả", False, f"{type(e).__name__}: {e}"[:80])
+        return
+    b = ov["buckets"]
+
+    check("overview: rổ 'Đã liên kết' đếm 1 (chỉ hóa đơn bán)",
+          b["linked"]["count"] == 1, str(b["linked"]))
+    check("overview: TỔNG TIỀN rổ đó không cộng thêm trị tuyệt đối tiền trả hàng",
+          abs(b["linked"]["amount"] - 10.8e6) < 1, str(b["linked"]["amount"]))
+    check("overview: rổ 'Chỉ có trên phần mềm' đếm 1, không phải 3",
+          b["erp_only"]["count"] == 1, str(b["erp_only"]))
+    check("overview: có rổ 'Trả hàng' và đếm đúng 2",
+          b.get("tra_hang", {}).get("count") == 2, str(b.get("tra_hang")))
+    # Truy vấn này có `NOT EXISTS (...)` nên không dịch sang vị từ được —
+    # chỗ duy nhất trong mục 7 phải soi chữ, và nói thẳng ra là vậy.
+    sm_ok = "IFNULL(si.is_return, 0) = 0" in dem.get("sm_where", "")
+    check("overview: đếm 'Lệch tiền' phía ERPNext cũng loại trả hàng (soi chữ)",
+          sm_ok, "" if sm_ok else
+          ("chua loai" if "sm_where" in dem else "khong thay truy van"))
+
+    # ── 7c. Rổ mới phải có mặt ở danh sách hợp lệ VÀ trên màn hình ──
+    check("tra_hang nằm trong BUCKETS (get_invoices không chặn)",
+          "tra_hang" in vat.BUCKETS, str(vat.BUCKETS))
+    js = io.open(os.path.join(rc.REPO, "ketoan/public/ketoan/views/vat.js"),
+                 encoding="utf-8").read()
+    check("màn hình có thẻ/tab cho rổ tra_hang",
+          'key: "tra_hang"' in js)
+    check("bảng rổ trả hàng bày cột Số HĐ (chỗ nhìn ra số đi vay)",
+          'tab === "tra_hang"' in js and 'const linked = tab === "linked" || tab === "tra_hang"' in js)
+
+
 def main():
     rc._stub_frappe()
     sys.path.insert(0, rc.REPO)
@@ -291,6 +454,8 @@ def main():
     # site là field mới không bao giờ xuất hiện sau `bench migrate`.
     check("mốc modified của doctype đã được dời lên (>= 2026-10-08)",
           str(dj.get("modified", ""))[:10] >= "2026-10-08", str(dj.get("modified"))[:10])
+
+    section7(frappe, check)
 
     print("=" * 78)
     if ok_all:

@@ -3,14 +3,19 @@
 Chỉ ĐỌC và tổng hợp. Mọi thao tác ghi (đồng bộ, khớp, chốt tay) nằm ở
 misa_sync / misa_reconcile và có guard riêng.
 
-Bốn rổ hóa đơn:
-  · linked    — hóa đơn ERPNext đã có số hóa đơn MISA
-  · erp_only  — đã ghi sổ trên ERPNext mà CHƯA có số MISA (nguy cơ chưa phát hành)
+Năm rổ hóa đơn:
+  · linked    — hóa đơn BÁN đã có số hóa đơn MISA
+  · erp_only  — hóa đơn BÁN đã ghi sổ mà CHƯA có số MISA (nguy cơ chưa phát hành)
   · misa_only — có trên MISA mà không nối được về ERPNext (nguy cơ xuất ngoài sổ)
   · mismatch  — nối được nhưng LỆCH TIỀN
+  · tra_hang  — hóa đơn TRẢ HÀNG, tách riêng khỏi mọi rổ đối soát
 
 Hai rổ giữa mới là thứ đáng lo về thuế: một bên bán mà chưa xuất hóa đơn, một
 bên xuất hóa đơn mà không có trong sổ.
+
+Trả hàng tách riêng vì `misa_push` chặn hẳn `is_return` ở cổng đẩy: bản trả
+hàng đi đường điều chỉnh/thay thế trên MISA, nó KHÔNG BAO GIỜ có hóa đơn riêng
+dưới RefID của nó. Gộp nó vào rổ đối soát là tạo tồn giả không bao giờ hết.
 """
 
 import frappe
@@ -19,7 +24,7 @@ from frappe.utils import add_months, cint, flt, nowdate
 
 from ketoan.api._guard import guard_sales_any, is_chief
 
-BUCKETS = ("linked", "erp_only", "misa_only", "mismatch")
+BUCKETS = ("linked", "erp_only", "misa_only", "mismatch", "tra_hang")
 
 
 def _range(from_date, to_date):
@@ -54,11 +59,28 @@ def get_overview(company=None, from_date=None, to_date=None):
     company = _company(company)
     p = {"company": company, "fd": from_date, "td": to_date}
 
+    # HÓA ĐƠN TRẢ HÀNG RA RỔ RIÊNG, không nằm trong hai rổ đối soát.
+    #
+    # `misa_push` chặn hẳn `is_return` ở cổng đẩy — bản trả hàng đi đường điều
+    # chỉnh/thay thế trên MISA, nó KHÔNG BAO GIỜ có hóa đơn riêng dưới RefID
+    # của nó. Để nó trong rổ đối soát thì nó sai ở cả hai phía:
+    #
+    #   · "Chỉ có trên phần mềm" — rổ này nghĩa là "nguy cơ bán mà chưa xuất
+    #     hóa đơn". Bản trả hàng đứng đó mãi mãi, thành tồn giả, và tồn giả thì
+    #     kế toán học cách lờ cả rổ, kể cả khi có lần bán thật chưa xuất.
+    #   · "Đã liên kết" — tới 08/10/2026 có 90 bản trả hàng chở SỐ ĐI VAY của
+    #     bản gốc (xem patch v0_0_19), nên chúng nằm trong rổ "đã liên kết"
+    #     bằng số của người khác, và `SUM(ABS(grand_total))` cộng thêm trị
+    #     tuyệt đối tiền trả hàng vào tổng giá trị hóa đơn đã xuất.
+    #
+    # `IFNULL(..., 0)`: cột Check trên bảng có sẵn dữ liệu mang NULL chứ không
+    # phải 0, mà `is_return = 0` trong SQL LOẠI LUÔN hàng NULL.
     linked = frappe.db.sql("""
         SELECT COUNT(*) AS cnt, IFNULL(SUM(ABS(grand_total)), 0) AS amt
         FROM `tabSales Invoice`
         WHERE docstatus = 1 AND company = %(company)s
           AND posting_date BETWEEN %(fd)s AND %(td)s
+          AND IFNULL(is_return, 0) = 0
           AND IFNULL(custom_misa_inv_no, '') != ''
     """, p, as_dict=True)[0]
 
@@ -67,7 +89,16 @@ def get_overview(company=None, from_date=None, to_date=None):
         FROM `tabSales Invoice`
         WHERE docstatus = 1 AND company = %(company)s
           AND posting_date BETWEEN %(fd)s AND %(td)s
+          AND IFNULL(is_return, 0) = 0
           AND IFNULL(custom_misa_inv_no, '') = ''
+    """, p, as_dict=True)[0]
+
+    tra_hang = frappe.db.sql("""
+        SELECT COUNT(*) AS cnt, IFNULL(SUM(ABS(grand_total)), 0) AS amt
+        FROM `tabSales Invoice`
+        WHERE docstatus = 1 AND company = %(company)s
+          AND posting_date BETWEEN %(fd)s AND %(td)s
+          AND IFNULL(is_return, 0) = 1
     """, p, as_dict=True)[0]
 
     misa_only = frappe.db.sql("""
@@ -90,6 +121,7 @@ def get_overview(company=None, from_date=None, to_date=None):
         SELECT COUNT(*) AS cnt FROM `tabSales Invoice` si
         WHERE si.docstatus = 1 AND si.company = %(company)s
           AND si.posting_date BETWEEN %(fd)s AND %(td)s
+          AND IFNULL(si.is_return, 0) = 0
           AND si.custom_misa_status = 'Lệch tiền'
           AND NOT EXISTS (
               SELECT 1 FROM `tabMISA Invoice Snapshot` s WHERE s.sales_invoice = si.name
@@ -112,6 +144,7 @@ def get_overview(company=None, from_date=None, to_date=None):
             "erp_only": {"count": erp_only.cnt, "amount": flt(erp_only.amt)},
             "misa_only": {"count": misa_only.cnt, "amount": flt(misa_only.amt)},
             "mismatch": {"count": mismatch.cnt + si_mismatch.cnt, "amount": flt(mismatch.amt)},
+            "tra_hang": {"count": tra_hang.cnt, "amount": flt(tra_hang.amt)},
         },
         "last_sync": last[0] if last else None,
         "has_snapshot": has_snapshot,
@@ -128,9 +161,21 @@ def get_overview(company=None, from_date=None, to_date=None):
 # Danh sách từng rổ
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _si_rows(company, from_date, to_date, linked: bool, search, limit, offset=0):
+def _si_rows(company, from_date, to_date, mode: str, search, limit, offset=0):
+    """Rổ phía ERPNext. mode ∈ linked | erp_only | tra_hang.
+
+    Hai rổ đối soát LOẠI hóa đơn trả hàng — xem lý do ở `get_overview`. Trước
+    đây tham số này là cờ `linked: bool`, mà một cờ hai trạng thái thì không
+    chừa chỗ cho rổ thứ ba: "không phải đã-liên-kết" tự động gom cả trả hàng
+    vào rổ "chỉ có trên phần mềm".
+    """
     p = {"company": company, "fd": from_date, "td": to_date, "limit": limit, "offset": offset}
-    where = "IFNULL(si.custom_misa_inv_no, '') != ''" if linked else "IFNULL(si.custom_misa_inv_no, '') = ''"
+    if mode == "tra_hang":
+        where = "IFNULL(si.is_return, 0) = 1"
+    elif mode == "linked":
+        where = "IFNULL(si.is_return, 0) = 0 AND IFNULL(si.custom_misa_inv_no, '') != ''"
+    else:
+        where = "IFNULL(si.is_return, 0) = 0 AND IFNULL(si.custom_misa_inv_no, '') = ''"
     if search:
         p["kw"] = f"%{search}%"
         where += " AND (si.name LIKE %(kw)s OR si.customer_name LIKE %(kw)s OR si.custom_misa_inv_no LIKE %(kw)s)"
@@ -186,7 +231,7 @@ PAGE_SIZE = 20
 @frappe.whitelist()
 def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None,
                  page=1, page_size=PAGE_SIZE):
-    """Một TRANG hóa đơn của 1 rổ. bucket ∈ linked | erp_only | misa_only | mismatch.
+    """Một TRANG hóa đơn của 1 rổ. bucket ∈ linked | erp_only | misa_only | mismatch | tra_hang.
 
     Phân trang ở tầng SQL chứ không nạp hết rồi cắt ở trình duyệt: một tháng có
     tới hơn nghìn hóa đơn.
@@ -201,10 +246,9 @@ def get_invoices(bucket, company=None, from_date=None, to_date=None, search=None
     offset = (page - 1) * page_size
     search = (search or "").strip()
 
-    if bucket == "linked":
-        source, (rows, total) = "erp", _si_rows(company, from_date, to_date, True, search, page_size, offset)
-    elif bucket == "erp_only":
-        source, (rows, total) = "erp", _si_rows(company, from_date, to_date, False, search, page_size, offset)
+    if bucket in ("linked", "erp_only", "tra_hang"):
+        source, (rows, total) = "erp", _si_rows(
+            company, from_date, to_date, bucket, search, page_size, offset)
     elif bucket == "misa_only":
         source, (rows, total) = "misa", _snapshot_rows(
             from_date, to_date, "IFNULL(s.sales_invoice, '') = '' AND IFNULL(s.is_deleted, 0) = 0",

@@ -1,5 +1,10 @@
 // views/vat.js — Hóa đơn VAT: đối soát ERPNext ↔ MISA.
-// 4 rổ: Đã liên kết / Chỉ có trên phần mềm / Chỉ có trên MISA / Lệch tiền.
+// 5 rổ: Chỉ có trên phần mềm / Chỉ có trên MISA / Lệch tiền / Đã liên kết / Trả hàng.
+//
+// "Trả hàng" là rổ RIÊNG, không nằm trong hai rổ đối soát: bản trả hàng không
+// đi đường đẩy trực tiếp sang MISA (misa_push chặn is_return) nên nó không bao
+// giờ có hóa đơn riêng, để nó trong rổ "Chỉ có trên phần mềm" là tạo tồn giả
+// vĩnh viễn. Xem `misa_vat.get_overview`.
 import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
 import { formatVND, formatVNDShort, formatDate, escapeHtml, isoDate } from "../lib/format.js";
@@ -17,6 +22,9 @@ const BUCKETS = [
     hint: "Nối được nhưng số tiền hai bên không khớp." },
   { key: "linked", label: "Đã liên kết", icon: "fa-link", tone: "ok",
     hint: "Hóa đơn ERPNext đã có số hóa đơn MISA." },
+  { key: "tra_hang", label: "Trả hàng", icon: "fa-rotate-left", tone: "",
+    hint: "Hóa đơn trả hàng — KHÔNG đẩy trực tiếp sang MISA, phải đi đường điều chỉnh/thay thế. "
+      + "Cột Số HĐ ở đây chỉ nên trống; còn số là số ĐI VAY của bản gốc, cần dọn." },
 ];
 
 const todayISO = () => isoDate();
@@ -296,7 +304,9 @@ function bindPager(container, state) {
 
 // ── Bảng phía ERPNext ──────────────────────────────────────────────────────
 function erpTable(tab, rows, res) {
-  const linked = tab === "linked";
+  // Rổ trả hàng cũng bày Ký hiệu / Số HĐ / Ngày HĐ — đó chính là chỗ nhìn ra
+  // bản nào còn chở số đi vay của bản gốc.
+  const linked = tab === "linked" || tab === "tra_hang";
   return html`
     <div class="kt-card"><div class="kt-card-body">
       <div class="kt-table-wrap"><table class="kt-table">
