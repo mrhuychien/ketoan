@@ -354,7 +354,7 @@ async function renderLo(container, name) {
     });
     if ($("#th-ketluan")) $("#th-ketluan").addEventListener("click", () => ketLuan());
     if ($("#th-capnhat")) $("#th-capnhat").addEventListener("click", (e) => act(e.currentTarget, () => api.thCapNhatHd(name), "Đã cập nhật hóa đơn trả về nháp"));
-    if ($("#th-ungvien")) $("#th-ungvien").addEventListener("click", (e) => ungVien(e.currentTarget));
+    if ($("#th-ungvien")) $("#th-ungvien").addEventListener("click", (e) => { UV.d = null; ungVien(e.currentTarget); });
     container.querySelectorAll("[data-xoahd]").forEach((b) => b.addEventListener("click", () => {
       if (!confirm(`Xóa hóa đơn trả về NHÁP ${b.dataset.xoahd}?`)) return;
       act(b, () => api.thXoaHd(name, b.dataset.xoahd), "Đã xóa bản nháp");
@@ -365,35 +365,96 @@ async function renderLo(container, name) {
     });
   }
 
-  async function ungVien(btn) {
+  // Ứng viên hóa đơn gốc: MỌI hóa đơn đã ghi sổ của đúng khách + đúng điểm giao (50 tờ một
+  // trang), mới nhất trước. Tờ không nhận được gì vẫn hiện — chỉ khóa nút lập, kèm lý do.
+  const UV = { tim: "", moi_diem: false, page: 1, rows: [], d: null, luot: 0 };
+  let uvGo = null;
+
+  async function ungVien(btn, { tiep = false } = {}) {
     const box = container.querySelector("#th-uv");
-    btn.disabled = true;
-    setHTML(box, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
+    if (!box) return; // khung đã đóng (vừa lập xong hóa đơn) mà lượt tìm chờ gõ mới tới
+    if (!tiep) { UV.page = 1; UV.rows = []; }
+    const luot = ++UV.luot;
+    if (btn) btn.disabled = true;
+    if (!UV.d) setHTML(box, html`<div class="kt-boot"><div class="kt-spinner"></div></div>`);
     let d;
-    try { d = await api.thUngVien(name); } catch (e) {
-      btn.disabled = false; setHTML(box, html`<div class="kt-alert kt-alert--danger">${e.message}</div>`); return;
-    }
-    btn.disabled = false;
-    const rows = d.rows || [];
-    if (!rows.length) {
-      setHTML(box, html`<div class="kt-alert kt-alert--warning kt-th-mt">Không có hóa đơn gốc nào của khách này còn nhận được các mã cần trả (đã trả hết, hoặc chưa từng bán). Nếu hàng không thuộc hóa đơn nào, nhờ KTT kết luận "không lập hóa đơn trả về".</div>`);
+    try {
+      d = await api.thUngVien(name, { tim: UV.tim || undefined, moi_diem: UV.moi_diem ? 1 : 0, page: UV.page });
+    } catch (e) {
+      if (btn) btn.disabled = false;
+      if (luot === UV.luot) setHTML(box, html`<div class="kt-alert kt-alert--danger">${e.message}</div>`);
       return;
     }
-    setHTML(box, html`<div class="kt-table-wrap kt-th-mt"><table class="kt-table">
-      <thead><tr><th>Hóa đơn gốc</th><th>Ngày · PO</th><th>Nhận được</th><th class="num">Ước tiền trả</th><th></th></tr></thead>
-      <tbody>${rows.map((r) => html`<tr>
-        <td><b>${r.name}</b>${r.cung_diem ? html`<div><span class="kt-badge kt-badge--green">cùng điểm</span></div>` : ""}</td>
-        <td>${formatDate(r.posting_date)}${r.po ? html`<div class="kt-sub">PO ${r.po}</div>` : ""}</td>
-        <td>${Object.entries(r.nhan).map(([it, q]) => `${it}: ${fmtSl(q)}`).join(" · ")}${r.dong_khong_noi ? html`<div class="kt-sub">${r.dong_khong_noi} dòng lẻ không nối dòng gốc</div>` : ""}</td>
-        <td class="num">${formatVND(r.uoc_tien)}</td>
-        <td class="kt-cell-act"><button type="button" class="kt-btn kt-btn--success kt-btn--sm" data-tao="${r.name}">Lập HĐ trả về</button></td>
-      </tr>`)}</tbody></table></div>
-      <div class="kt-sub">Cùng điểm lấy hàng lên trước, rồi hóa đơn gần nhất. "Nhận được" = phần hóa đơn đó còn trả được trong số đang cần (ĐVT kho).</div>`);
+    if (btn) btn.disabled = false;
+    if (luot !== UV.luot || !box.isConnected) return; // gõ tìm nhanh: kết quả cũ về muộn không đè kết quả mới
+    UV.d = d;
+    UV.rows = UV.rows.concat(d.rows || []);
+    veUngVien(box);
+  }
+
+  function veUngVien(box) {
+    const d = UV.d;
+    const rows = UV.rows;
+    const khach = d.khach || {};
+    const diem = d.diem || {};
+    const dangGo = document.activeElement && document.activeElement.id === "uv-tim";
+    // Cùng một dòng, hai cách đọc: bảng trên máy tính, thẻ trên điện thoại (như danh sách lô).
+    const noiDiem = (r) => html`${r.ten_diem || r.address_title || r.shipping_address_name || "—"}${
+      UV.moi_diem && r.cung_diem ? html` <span class="kt-badge kt-badge--green">điểm của lô</span>` : ""}`;
+    const diaChi = (r) => [r.address_line1, r.city].filter(Boolean).join(", ");
+    const nhan = (r) => r.lap_duoc ? html`${Object.entries(r.nhan).map(([it, q]) => `${it}: ${fmtSl(q)}`).join(" · ")}<div class="kt-sub">≈ ${formatVND(r.uoc_tien)}${
+      r.dong_khong_noi ? ` · ${r.dong_khong_noi} dòng lẻ không nối dòng gốc` : ""}</div>` : html`<span class="kt-sub">${r.ly_do_khoa}</span>`;
+    const nut = (r) => html`<button type="button" class="kt-btn kt-btn--success kt-btn--sm" data-tao="${r.name}" ${r.lap_duoc ? "" : "disabled"} title="${r.ly_do_khoa || ""}">Lập HĐ trả về</button>`;
+    setHTML(box, html`<div class="kt-th-uv kt-th-mt">
+      <div class="kt-th-uv-head">
+        <div>Hóa đơn bán đã ghi sổ của <b>${khach.customer_name || khach.customer}</b> <span class="kt-sub">${khach.customer}</span>${
+          UV.moi_diem ? html` — <b>mọi điểm giao</b>` : html` giao <b>${diem.ten || diem.name}</b> <span class="kt-sub">${diem.name}</span>`}
+          · <b>${d.total}</b> hóa đơn</div>
+        <div class="kt-th-uv-tools">
+          <input class="kt-input" id="uv-tim" type="search" autocomplete="off" placeholder="Tìm số hóa đơn / PO / số HĐĐT" value="${UV.tim}">
+          <button type="button" class="kt-btn kt-btn--outline kt-btn--sm" id="uv-diem">${UV.moi_diem ? "Chỉ điểm giao của lô" : "Xem mọi điểm của khách"}</button>
+        </div>
+      </div>
+      ${rows.length ? html`<div class="kt-table-wrap kt-th-desk"><table class="kt-table">
+        <thead><tr><th>Hóa đơn gốc</th><th>Ngày · PO</th><th>Khách · điểm giao</th><th class="num">Số tiền</th><th>Nhận được (ĐVT kho)</th><th></th></tr></thead>
+        <tbody>${rows.map((r) => html`<tr class="${r.lap_duoc ? "" : "kt-th-uv-khoa"}">
+          <td><b>${r.name}</b>${r.so_hddt ? html`<div class="kt-sub">HĐĐT ${r.so_hddt}</div>` : ""}</td>
+          <td>${formatDate(r.posting_date)}${r.po ? html`<div class="kt-sub">PO ${r.po}</div>` : ""}</td>
+          <td>${r.customer_name || r.customer}<div class="kt-sub">${noiDiem(r)}</div>${diaChi(r) ? html`<div class="kt-sub">${diaChi(r)}</div>` : ""}</td>
+          <td class="num">${formatVND(r.grand_total)}<div class="kt-sub">còn nợ ${formatVND(r.outstanding_amount)}</div>${
+            r.da_tra ? html`<div class="kt-sub">đã trả về ${formatVND(r.da_tra)}</div>` : ""}</td>
+          <td>${nhan(r)}</td>
+          <td class="kt-cell-act">${nut(r)}</td>
+        </tr>`)}</tbody></table></div>
+        <div class="kt-th-cards kt-th-mob">${rows.map((r) => html`<div class="kt-th-card kt-th-uv-card${r.lap_duoc ? "" : " kt-th-uv-khoa"}">
+          <div class="kt-th-card-head"><span><b>${r.name}</b>${r.so_hddt ? html` <span class="kt-sub">HĐĐT ${r.so_hddt}</span>` : ""}</span><b class="kt-th-uv-tien">${formatVND(r.grand_total)}</b></div>
+          <div class="kt-sub">${formatDate(r.posting_date)}${r.po ? ` · PO ${r.po}` : ""} · còn nợ ${formatVND(r.outstanding_amount)}${
+            r.da_tra ? ` · đã trả về ${formatVND(r.da_tra)}` : ""}</div>
+          <div class="kt-th-card-meta">${r.customer_name || r.customer} · ${noiDiem(r)}${diaChi(r) ? html`<div>${diaChi(r)}</div>` : ""}</div>
+          <div class="kt-th-uv-nhan">${nhan(r)}</div>
+          ${nut(r)}
+        </div>`)}</div>
+        ${d.has_more ? html`<button type="button" class="kt-btn kt-btn--outline kt-th-more" id="uv-tiep">Xem tiếp (đã hiện ${rows.length}/${d.total})</button>` : ""}
+        <div class="kt-sub">"Nhận được" = phần tờ đó còn trả được trong số đang cần trả. Nút khóa là tờ đó không còn gì để trả.</div>`
+      : html`<div class="kt-alert kt-alert--warning">${UV.tim ? `Không có hóa đơn nào khớp "${UV.tim}".` : UV.moi_diem
+          ? "Khách này chưa có hóa đơn bán nào đã ghi sổ." : "Chưa có hóa đơn bán nào đã ghi sổ giao điểm này."}${
+          UV.moi_diem ? "" : " Thử “Xem mọi điểm của khách”."} Hàng không thuộc hóa đơn nào thì nhờ KTT kết luận "không lập hóa đơn trả về".</div>`}
+    </div>`);
+    const tim = box.querySelector("#uv-tim");
+    if (dangGo) { tim.focus(); tim.setSelectionRange(tim.value.length, tim.value.length); }
+    tim.addEventListener("input", () => {
+      clearTimeout(uvGo);
+      uvGo = setTimeout(() => { UV.tim = tim.value.trim(); ungVien(null); }, 300);
+    });
+    box.querySelector("#uv-diem").addEventListener("click", () => { UV.moi_diem = !UV.moi_diem; ungVien(null); });
+    const tiep = box.querySelector("#uv-tiep");
+    if (tiep) tiep.addEventListener("click", () => { UV.page += 1; ungVien(tiep, { tiep: true }); });
     box.querySelectorAll("[data-tao]").forEach((b) => b.addEventListener("click", async () => {
       b.disabled = true;
       try {
         const r = await api.thTaoHd(name, b.dataset.tao);
         toast(`Đã lập ${r.name} (nháp, ${r.so_dong} dòng)${r.tk_5213 ? "" : " — chưa thấy TK 5213, dòng giữ TK doanh thu gốc"}`, "success");
+        UV.d = null;
         await reload(r.thu_hoi);
       } catch (e) {
         b.disabled = false; toast(e.message, "error");

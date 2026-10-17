@@ -38,8 +38,10 @@ chạy 3 chặng vận chuyển *Tạo yêu cầu → Đã lấy hàng → Đã 
   lưu ngay từng lần; quét lại mã đã có là cộng thêm; chạm số để sửa, ✕ để xóa.
   **Đếm mù**: màn kiểm hàng không nhận số siêu thị khai (cả mail dán nguyên văn); bảng so
   khai / kiểm (lô cũ có bảng hàng khai) chỉ hiện sau khi chốt.
-- **Hóa đơn trả về**: sau khi chốt, chọn hóa đơn gốc (gợi ý cùng khách, ưu tiên cùng điểm
-  giao) → lập **Sales Invoice trả về (nháp)** bằng `make_return_doc`, `update_stock = 0`,
+- **Hóa đơn trả về**: sau khi chốt, chọn hóa đơn gốc trong danh sách MỌI hóa đơn đã ghi sổ
+  của đúng khách + đúng điểm giao của lô (đủ HĐĐT, PO, địa chỉ, số tiền, còn nợ, đã trả về;
+  tìm theo số HĐ / PO / HĐĐT; tờ không còn gì để trả vẫn hiện nhưng khóa nút; "Xem mọi điểm
+  của khách" khi hàng giao điểm khác) → lập **Sales Invoice trả về (nháp)** bằng `make_return_doc`, `update_stock = 0`,
   không vượt số còn được trả của từng dòng gốc; "Cập nhật" dựng lại các bản nháp theo
   số kiểm mới, xóa được bản nháp. Ghi sổ (submit) làm trên Desk.
 - **Trạng thái tự đi**: hook `Sales Invoice` (insert/update/submit/cancel/trash) tính lại

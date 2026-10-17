@@ -362,6 +362,69 @@ def kiem_tren_bo_gia():
           kieu("x.html") == "attachment" and kieu("logo.svg") == "attachment")
     check("file gắn vào DocType khác -> từ chối", raises(lambda: kieu("p.pdf", dt="Sales Invoice")) is not None)
 
+    print("-" * 78)
+    print("── 7c. Ứng viên hóa đơn gốc: ĐÚNG khách + điểm giao, liệt kê HẾT ────────")
+    SQL = []
+    TONG = {"n": 2}
+
+    def sql(q, p=None, as_dict=False, **k):
+        SQL.append((q, dict(p or {})))
+        if "custom_kiem_hang_thu_hoi" in q:          # hoa_don_tra: lô chưa có phiếu trả nào
+            return []
+        if "COUNT(*)" in q:
+            return [[TONG["n"]]]
+        if "LEFT JOIN `tabAddress` a" in q:            # trang ứng viên
+            chung = dict(customer="COOP", customer_name="Saigon Co.op", shipping_address_name="ADDR-HD",
+                         ten_diem="Co.opMart Hà Đông", address_title="CM HĐ", address_line1="1 Quang Trung",
+                         city="Hà Nội", cung_diem=1)
+            return [fr._dict(chung, name="SI-A", posting_date="2026-09-01", grand_total=4800000,
+                             outstanding_amount=0, po="PO-1", so_hddt="0001234"),
+                    fr._dict(chung, name="SI-B", posting_date="2026-08-01", grand_total=900000,
+                             outstanding_amount=900000, po=None, so_hddt=None)]
+        if "SUM(ABS(grand_total))" in q:              # đã trả về trước đó
+            return [fr._dict(goc="SI-A", tien=240000)]
+        if "FROM `tabSales Invoice Item`" in q and "WHERE parent IN" in q:   # dòng gốc có mã cần trả
+            return [fr._dict(parent="SI-A", name="R1", item_code="BDX", qty=10, conversion_factor=24,
+                             uom="Thùng", rate=240000, idx=1)]
+        return []
+
+    fr.db.sql = sql
+    fr.db.table_exists = lambda *a, **k: True
+    fr.get_precision = lambda *a, **k: 3
+    fr.get_doc = lambda *a, **k: phieu(da_chot=1, customer_name="Saigon Co.op", ten_diem="Co.opMart Hà Đông",
+                                       items=[FakeRow(name="r1", item_code="BDX", qty=50, idx=1)])
+
+    def trang():
+        return next(q for q, _p in reversed(SQL) if "LEFT JOIN `tabAddress` a" in q)
+
+    r = api.ung_vien_hoa_don("TH-1")
+    q = trang()
+    check("lọc ĐÚNG khách + ĐÚNG điểm giao của lô (không cần có mã đã kiểm)",
+          "si.customer = %(cu)s" in q and "si.shipping_address_name = %(addr)s" in q and "EXISTS" not in q)
+    check("liệt kê hết: 50 tờ một trang, mới nhất trước",
+          "LIMIT %(lim)s OFFSET %(off)s" in q and "ORDER BY si.posting_date DESC" in q
+          and SQL[-1][1].get("lim", 50) == 50 and api.UNG_VIEN_TRANG == 50)
+    a, b = (r["rows"] + [{}, {}])[:2]
+    check("tờ nhận được mã cần trả: mở nút lập, nhận BDX 50", a.get("lap_duoc") is True and a.get("nhan") == {"BDX": 50},
+          str(a.get("nhan")))
+    check("tờ KHÔNG có mã cần trả: VẪN liệt kê, khóa nút + nói lý do",
+          len(r["rows"]) == 2 and b.get("lap_duoc") is False and "không có mã nào đang cần trả" in b.get("ly_do_khoa", ""),
+          str(b.get("ly_do_khoa")))
+    check("đủ thông tin: khách, điểm giao, số tiền, còn nợ, đã trả về, số HĐĐT, PO",
+          all(a.get(k) not in (None, "") for k in ("customer_name", "ten_diem", "address_line1", "grand_total", "po"))
+          and a.get("da_tra") == 240000 and a.get("so_hddt") == "0001234")
+    check("đầu bảng: khách + điểm đang lọc", r.get("khach", {}).get("customer_name") == "Saigon Co.op"
+          and r.get("diem", {}).get("ten") == "Co.opMart Hà Đông" and r.get("total") == 2 and r.get("has_more") is False)
+    api.ung_vien_hoa_don("TH-1", moi_diem=1)
+    check("'Xem mọi điểm của khách' (moi_diem=1): bỏ lọc điểm, vẫn lọc khách",
+          "si.shipping_address_name = %(addr)s" not in trang() and "si.customer = %(cu)s" in trang())
+    api.ung_vien_hoa_don("TH-1", tim="0001")
+    check("tìm theo số hóa đơn / PO / số HĐĐT", "si.name LIKE %(q)s" in trang() and "custom_misa_inv_no` LIKE %(q)s" in trang())
+    TONG["n"] = 120
+    r2 = api.ung_vien_hoa_don("TH-1", page=2)
+    p2 = next(pp for qq, pp in reversed(SQL) if "LEFT JOIN `tabAddress` a" in qq)
+    check("phân trang: trang 2 bỏ qua 50 tờ đầu, còn nữa thì has_more", p2.get("off") == 50 and r2["has_more"] is True)
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # 6, 8–10. TĨNH

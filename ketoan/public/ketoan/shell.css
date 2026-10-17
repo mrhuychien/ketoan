@@ -188,6 +188,9 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-btn:hover { transform: translateY(-1px); }
 .kt-btn--primary { background: var(--kt-grad); color: #fff; }
 .kt-btn--success { background: var(--kt-grad-success); color: #fff; }
+/* `.kt-app a` (màu chữ link) mạnh hơn `.kt-btn--primary`: nút dựng bằng <a> mất chữ trắng,
+   chữ tím nằm trên nền gradient tím — gần như không đọc được. */
+.kt-app a.kt-btn--primary, .kt-app a.kt-btn--success { color: #fff; }
 .kt-btn--danger { background: var(--kt-grad-danger); color: #fff; }
 .kt-btn--outline { background: #fff; border: 1px solid var(--kt-border); color: var(--kt-text-2); }
 .kt-btn--outline:hover { border-color: var(--kt-primary); color: var(--kt-primary); }
@@ -565,6 +568,15 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-th-card-meta { font-size: 12px; color: var(--kt-text-2); margin-top: 6px; }
 
 /* Một lô */
+/* Ứng viên hóa đơn gốc: đầu bảng nói rõ khách + điểm giao đang lọc, ô tìm + nút mở mọi điểm. */
+.kt-th-uv-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.kt-th-uv-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kt-th-uv-tools .kt-input { width: 260px; max-width: 100%; }
+@media (max-width: 640px) { .kt-th-uv-tools, .kt-th-uv-tools .kt-input { width: 100%; } }
+.kt-th-uv-khoa td, .kt-th-card.kt-th-uv-khoa { background: var(--kt-bg-soft); }
+.kt-th-uv-tien { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kt-th-uv-nhan { margin-top: 8px; font-size: 13px; }
+.kt-th-uv-card .kt-btn { width: 100%; margin-top: 10px; }
 /* Mail siêu thị dán nguyên văn bên vận chuyển: chữ đều + giữ tab để bảng hàng còn thẳng cột;
    mail dài thì gọn trong 14 dòng, bấm "Xem hết" mới bung. */
 .kt-th-mail { margin-top: 10px; }

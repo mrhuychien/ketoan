@@ -21,15 +21,20 @@ NHỮNG ĐIỀU MÀN HÌNH HỨA
    vẫn che nút Chốt phiếu. Người kiểm bấm liên tục nên cú chạm mất là số mất.
 5. **Bảng trên máy tính, thẻ trên điện thoại** — không bao giờ hiện cả hai, bảng không
    cuộn ngang ở 1280px.
-6. **Luồng tới hóa đơn trả về**: chốt → về lô → chọn hóa đơn gốc cùng điểm → bản nháp
-   + deep link Desk + giải thích dòng "không nối dòng gốc"; trang không lỗi JS nào.
+6. **Luồng tới hóa đơn trả về**: chốt → về lô → chọn hóa đơn gốc → bản nháp + deep link
+   Desk + giải thích dòng "không nối dòng gốc"; trang không lỗi JS nào. Danh sách hóa đơn
+   gốc = MỌI tờ đã ghi sổ của đúng khách + đúng điểm giao của lô, đủ thông tin (HĐĐT, PO,
+   địa chỉ, số tiền, còn nợ); tờ không còn gì để trả vẫn hiện, chỉ khóa nút + nói lý do;
+   tìm / "Xem tiếp" / "Xem mọi điểm của khách" đều hỏi lại server.
 7. **Hồ sơ lô theo đúng lô mới**: đơn vị thu hồi · mã vận đơn · ngày thu (không còn xe /
    lái xe), mail dán giữ nguyên tab, file Excel TẢI VỀ còn PDF mở tab; lô mới không có cột
    "Siêu thị khai", lô cũ còn bảng hàng khai thì vẫn so khai / kiểm như trước.
 
 Thử phá (đã làm khi viết): bỏ `pointer-events: none` của `.kt-toast` → bước sửa dòng
 kẹt vì toast chặn nút LƯU; trả `.kt-th-cards { display: flex }` ra ngoài media query →
-"desktop: bảng hiện, thẻ ẩn" đỏ.
+"desktop: bảng hiện, thẻ ẩn" đỏ. Danh sách hóa đơn gốc: tờ khóa vẫn bấm được, "Xem tiếp"
+thay vì nối, tìm không gửi server, kết quả tìm cũ về muộn đè kết quả mới, mất con trỏ ô
+tìm, điện thoại hiện bảng (tràn mép), bỏ chữ trắng nút <a> — mỗi lần đỏ ĐÚNG mục.
 
 Chạy KHÔNG cần bench (cần `pip install playwright`; Chromium có sẵn ở /opt/pw-browsers):
     python3 docs/verified/thu_hoi_ui_check.py [--shots THƯ_MỤC]
@@ -42,6 +47,7 @@ import os
 import re
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -253,11 +259,50 @@ def chot(_a):
     return get_th()
 
 
-def ung_vien(_a):
+def _uv_rows(t):
+    """Mọi hóa đơn đã ghi sổ của khách COOP: 3 tờ giao đúng điểm của lô, 1 tờ giao điểm khác."""
+    base = {"customer": LO["customer"], "customer_name": LO["customer_name"]}
+    tai = {"shipping_address_name": LO["shipping_address_name"], "ten_diem": LO["ten_diem"],
+           "address_title": "Co.opMart HĐ", "address_line1": "1 Quang Trung", "city": "Hà Nội", "cung_diem": 1}
+    mo = {"lap_duoc": True, "nhan": {"BDX": t}, "phu": t, "uoc_tien": t * 10000, "dong_khong_noi": 1,
+          "ly_do_khoa": None}
+    khoa = {"lap_duoc": False, "nhan": {}, "phu": 0, "uoc_tien": 0, "dong_khong_noi": 0}
+    # Mới nhất trước (như ORDER BY posting_date DESC của server).
+    return [
+        dict(base, **mo, name="HD-0950", posting_date="2026-09-10", grand_total=3600000,
+             outstanding_amount=0, po="PO-K", so_hddt="0001300", da_tra=0, cung_diem=0,
+             shipping_address_name="ADDR-TX", ten_diem="Co.opMart Thanh Xuân", address_title="Co.opMart TX",
+             address_line1="9 Nguyễn Trãi", city="Hà Nội"),
+        dict(base, **tai, **mo, name="HD-0900", posting_date="2026-09-01", grand_total=4800000,
+             outstanding_amount=1200000, po="PO-1", so_hddt="0001234", da_tra=0),
+        dict(base, **tai, **khoa, name="HD-0850", posting_date="2026-08-20", grand_total=2400000,
+             outstanding_amount=0, po="PO-0", so_hddt="0001100", da_tra=2400000,
+             ly_do_khoa="Các mã cần trả trên tờ này đã trả hết"),
+        dict(base, **tai, **khoa, name="HD-0801", posting_date="2026-08-02", grand_total=990000,
+             outstanding_amount=0, po=None, so_hddt=None, da_tra=0,
+             ly_do_khoa="Tờ này không có mã nào đang cần trả"),
+    ]
+
+
+UV_TRANG = 2  # server thật 50 tờ một trang; bản giả 2 tờ để thử "Xem tiếp"
+
+
+def ung_vien(a):
+    """Như server: đúng khách; đúng điểm giao trừ khi moi_diem; tìm theo số HĐ / PO / HĐĐT; phân trang."""
+    if (a.get("tim") or "") == "08":
+        time.sleep(1.2)  # lượt tìm "08" về MUỘN hơn lượt gõ sau nó
     t = tong()
-    return {"con_can": {"BDX": t}, "rows": [{
-        "name": "HD-0900", "posting_date": "2026-09-01", "grand_total": 4800000, "po": "PO-1",
-        "cung_diem": 1, "nhan": {"BDX": t}, "phu": t, "uoc_tien": t * 10000, "dong_khong_noi": 1}]}
+    moi = bool(int(a.get("moi_diem") or 0))
+    q = (a.get("tim") or "").strip().lower()
+    page = max(1, int(a.get("page") or 1))
+    ds = [r for r in _uv_rows(t) if moi or r["cung_diem"]]
+    if q:
+        ds = [r for r in ds if any(q in (r[k] or "").lower() for k in ("name", "po", "so_hddt"))]
+    rows = ds[(page - 1) * UV_TRANG:page * UV_TRANG]
+    return {"con_can": {"BDX": t}, "rows": rows, "total": len(ds), "page": page,
+            "has_more": (page - 1) * UV_TRANG + len(rows) < len(ds), "moi_diem": moi,
+            "khach": {"customer": LO["customer"], "customer_name": LO["customer_name"]},
+            "diem": {"name": LO["shipping_address_name"], "ten": LO["ten_diem"]}}
 
 
 def tao_hoa_don_tra(a):
@@ -339,6 +384,15 @@ def make_handler(page):
 # ═══════════════════════════════════════════════════════════════════════════
 # Kịch bản — người kiểm hàng cầm điện thoại, rồi kế toán ngồi máy tính
 # ═══════════════════════════════════════════════════════════════════════════
+
+# Phần tử hiện nào của khung ứng viên thò ra quá mép phải của thẻ chứa nó (px; ≤ 0 là gọn).
+# Phần tử nằm trong khung cuộn (.kt-table-wrap) thì đo chính khung cuộn, không đo bảng bên trong.
+TRAN_JS = """(() => { const b = document.querySelector('#th-uv'), r = b.closest('.kt-card').getBoundingClientRect();
+  let x = 0; b.querySelectorAll('*').forEach((e) => {
+    if (e.offsetParent === null || e.parentElement.closest('.kt-table-wrap')) return;
+    x = Math.max(x, e.getBoundingClientRect().right - r.right); });
+  return x; })()"""
+
 
 def run(pw, exe, root, ok, bad, shots=None):
     """Ghi THẲNG vào `ok` / `bad` của người gọi: dừng giữa chừng thì mục đã đỏ vẫn còn."""
@@ -466,10 +520,62 @@ def run(pw, exe, root, ok, bad, shots=None):
     sau_chot = p.text_content("main")
     expect("sau chốt: lô mới (không bảng khai) -> bảng 'Đã kiểm · đã lập hóa đơn', không cột 'Siêu thị khai'",
            "Đã kiểm · đã lập hóa đơn" in sau_chot and "Siêu thị khai" not in sau_chot)
+    mau = p.evaluate("getComputedStyle(document.querySelector('a.kt-btn--primary[href^=\"#/kiem-hang/\"]')).color")
+    expect("nút 'Xem phiếu kiểm' (thẻ <a>) giữ chữ trắng trên nền gradient", mau == "rgb(255, 255, 255)", mau)
     p.click("#th-ungvien")
     p.wait_for_timeout(500)
-    expect("ứng viên: hóa đơn gốc cùng điểm", "cùng điểm" in p.text_content("#th-uv"))
-    p.click("[data-tao]")
+    uv_head = p.text_content(".kt-th-uv-head")
+    expect("ứng viên: tiêu đề nói đúng khách + điểm giao của lô + tổng số hóa đơn",
+           "Saigon Co.op" in uv_head and "Co.opMart Hà Đông" in uv_head and "3 hóa đơn" in uv_head, uv_head)
+    a0 = calls("ketoan.api.thu_hoi.ung_vien_hoa_don")[-1]
+    expect("ứng viên: mặc định CHỈ điểm giao của lô (moi_diem = 0, trang 1)",
+           int(a0.get("moi_diem", -1)) == 0 and a0.get("page") == 1, str(a0))
+    expect("điện thoại: hóa đơn gốc hiện dạng THẺ, bảng ẩn",
+           p.is_visible("#th-uv .kt-th-card") and not p.is_visible("#th-uv table"))
+    tran = p.evaluate(TRAN_JS)
+    expect("điện thoại: khung hóa đơn gốc nằm gọn trong thẻ (không tràn mép phải)", tran <= 0.5, "%.1fpx" % tran)
+    d900 = p.query_selector('#th-uv .kt-th-mob .kt-th-card:has([data-tao="HD-0900"])')
+    t900 = d900.text_content() if d900 else ""
+    expect("ứng viên: dòng đủ thông tin — HĐĐT, PO, khách, điểm, địa chỉ, số tiền, còn nợ",
+           all(x in t900 for x in ("HĐĐT 0001234", "PO PO-1", "Saigon Co.op", "Co.opMart Hà Đông",
+                                   "1 Quang Trung, Hà Nội", "4.800.000 ₫", "còn nợ 1.200.000 ₫")), t900)
+    k850 = p.query_selector('#th-uv .kt-th-mob [data-tao="HD-0850"]')
+    d850 = p.query_selector('#th-uv .kt-th-mob .kt-th-card:has([data-tao="HD-0850"])')
+    expect("ứng viên: tờ đã trả hết vẫn LIỆT KÊ — nút khóa + lý do + số đã trả về",
+           k850 is not None and k850.is_disabled() and "đã trả hết" in d850.text_content()
+           and "đã trả về 2.400.000 ₫" in d850.text_content())
+    expect("ứng viên: trang 1 có nút Xem tiếp (2/3)", "2/3" in (p.text_content("#uv-tiep") or ""))
+    p.click("#uv-tiep")
+    p.wait_for_timeout(500)
+    a1 = calls("ketoan.api.thu_hoi.ung_vien_hoa_don")[-1]
+    expect("Xem tiếp: gọi trang 2 rồi NỐI thêm (3 dòng, hết nút)",
+           a1.get("page") == 2 and len(p.query_selector_all("#th-uv .kt-th-mob [data-tao]")) == 3
+           and p.query_selector("#uv-tiep") is None, str(a1))
+    p.click("#uv-diem")
+    p.wait_for_timeout(500)
+    a2 = calls("ketoan.api.thu_hoi.ung_vien_hoa_don")[-1]
+    tuv = p.text_content("#th-uv")
+    expect("'Xem mọi điểm của khách': gửi moi_diem = 1, hiện cả điểm khác + nhãn 'điểm của lô'",
+           int(a2.get("moi_diem", 0)) == 1 and a2.get("page") == 1 and "mọi điểm giao" in tuv
+           and "Co.opMart Thanh Xuân" in tuv and "điểm của lô" in tuv, str(a2))
+    p.click("#uv-diem")
+    p.wait_for_timeout(500)
+    p.fill("#uv-tim", "08")
+    p.wait_for_timeout(450)  # lượt "08" đã gửi, đang chờ server (chậm)
+    p.fill("#uv-tim", "0900")
+    p.wait_for_timeout(1600)  # lượt "0900" về trước, lượt "08" về sau
+    expect("gõ tìm nhanh: kết quả cũ ('08') về muộn KHÔNG đè kết quả mới ('0900')",
+           p.query_selector('#th-uv .kt-th-mob [data-tao="HD-0850"]') is None
+           and p.query_selector('#th-uv .kt-th-mob [data-tao="HD-0900"]') is not None)
+    a3 = calls("ketoan.api.thu_hoi.ung_vien_hoa_don")[-1]
+    expect("tìm: gửi `tim` lên server (không lọc trong 1 trang đã tải), còn 1 dòng",
+           a3.get("tim") == "0900" and int(a3.get("moi_diem", -1)) == 0
+           and len(p.query_selector_all("#th-uv .kt-th-mob [data-tao]")) == 1, str(a3))
+    expect("tìm: vẽ lại xong ô tìm vẫn giữ con trỏ (gõ tiếp được)",
+           p.evaluate("document.activeElement && document.activeElement.id") == "uv-tim")
+    if shots:
+        p.screenshot(path=os.path.join(shots, "kt_ung_vien.png"), full_page=True)
+    p.click('#th-uv .kt-th-mob [data-tao="HD-0900"]')
     p.wait_for_timeout(700)
     expect("lập HĐ trả về gọi tao_hoa_don_tra với đúng hóa đơn gốc",
            any(a.get("sales_invoice") == "HD-0900" for a in calls("ketoan.api.thu_hoi.tao_hoa_don_tra")))
@@ -507,6 +613,34 @@ def run(pw, exe, root, ok, bad, shots=None):
         d.evaluate("location.hash = '#/thu-hoi/TH-2026-0007'")
         d.wait_for_timeout(700)
         d.screenshot(path=os.path.join(shots, "kt_lo_desk.png"), full_page=True)
+    # Ứng viên trên máy tính: bảng đủ cột, không cuộn ngang (lô cũ còn cần lập hóa đơn)
+    d.evaluate("location.hash = '#/thu-hoi/TH-2026-0005'")
+    d.wait_for_timeout(700)
+    d.click("#th-ungvien")
+    d.wait_for_timeout(500)
+    expect("desktop: hóa đơn gốc hiện dạng BẢNG, thẻ ẩn",
+           d.is_visible("#th-uv table") and not d.is_visible("#th-uv .kt-th-card"))
+    r900 = d.text_content('#th-uv .kt-th-desk tr:has([data-tao="HD-0900"])') or ""
+    expect("desktop: dòng bảng đủ HĐĐT · PO · khách · điểm · địa chỉ · số tiền · còn nợ",
+           all(x in r900 for x in ("HĐĐT 0001234", "PO PO-1", "Saigon Co.op", "Co.opMart Hà Đông",
+                                   "1 Quang Trung, Hà Nội", "4.800.000 ₫", "còn nợ 1.200.000 ₫")), r900)
+    nk = d.query_selector('#th-uv .kt-th-desk [data-tao="HD-0850"]')
+    expect("desktop: tờ đã trả hết — nút khóa", nk is not None and nk.is_disabled())
+    uw = d.evaluate("(() => { const w = document.querySelector('#th-uv .kt-th-desk'); return [w.scrollWidth, w.clientWidth]; })()")
+    expect("desktop 1280: bảng hóa đơn gốc không cuộn ngang", uw[0] <= uw[1], str(uw))
+    if shots:
+        d.screenshot(path=os.path.join(shots, "kt_ung_vien_desk.png"), full_page=True)
+    tb = browser.new_page(viewport={"width": 720, "height": 900})
+    watch(tb)
+    tb.goto(root + "/#/thu-hoi/TH-2026-0005")
+    tb.wait_for_timeout(800)
+    tb.click("#th-ungvien")
+    tb.wait_for_timeout(500)
+    tran_tb = tb.evaluate(TRAN_JS)
+    expect("máy tính bảng 720px: bảng hóa đơn gốc nằm gọn trong thẻ (cuộn trong khung nếu chật)",
+           tb.is_visible("#th-uv table") and tran_tb <= 0.5, "%.1fpx" % tran_tb)
+    if shots:
+        tb.screenshot(path=os.path.join(shots, "kt_ung_vien_720.png"), full_page=True)
 
     expect("không lỗi trang / console / HTTP", not errs, " | ".join(errs))
     browser.close()

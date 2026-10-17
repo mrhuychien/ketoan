@@ -91,8 +91,12 @@ lô cũ vẫn có số khai — ketoan đọc mềm, lô nào có thì bảng so
 - `return_against` BẮT BUỘC: `mt._returns_join` chỉ trừ phiếu trả có nối hóa đơn gốc;
   phiếu trả đứng rời ghi giảm 131 mà không trừ vào hóa đơn nào.
 - Hàng về từ NHIỀU hóa đơn gốc → nhiều hóa đơn trả về, mỗi tờ một `return_against`.
-  Kế toán chọn hóa đơn gốc trong danh sách ứng viên (cùng khách, cùng điểm lên trước,
-  có mặt hàng cần trả, còn trần trả); làm lại tới khi phủ đủ.
+  Kế toán chọn hóa đơn gốc trong danh sách ứng viên = MỌI hóa đơn bán đã ghi sổ của ĐÚNG
+  khách + ĐÚNG điểm giao của lô (50 tờ một trang, mới nhất trước, tìm theo số HĐ / PO /
+  số HĐĐT), mỗi dòng đủ khách · điểm giao · địa chỉ · số tiền · còn nợ · đã trả về. Không
+  lọc theo mã đã kiểm: tờ không còn gì để trả vẫn hiện, chỉ khóa nút lập + nói lý do. Hàng
+  giao điểm khác rồi siêu thị gom về đây trả → "Xem mọi điểm của khách" (vẫn đúng khách).
+  Làm lại tới khi phủ đủ.
 - TK doanh thu dòng trả → TK `5213` của công ty nếu có (Client Script cũng đặt
   "5213 - Hàng bán bị trả lại"). `update_stock = 0`: hàng vào kho bằng phiếu kho riêng
   sau khi lọc, như `Su Co Van Chuyen` đã ghi.

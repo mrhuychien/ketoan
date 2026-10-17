@@ -95,7 +95,7 @@ _LO_COLS_DS = tuple(c for c in _LO_COLS if c != "chi_tiet_hang")
 DUOI_XEM_TRONG_TAB = frozenset(("jpg", "jpeg", "png", "webp", "gif", "pdf"))
 _DATE_COLS = ("ngay_yeu_cau", "ngay_hen_lay", "lay_luc", "nhan_luc", "chot_luc", "xong_luc",
               "posting_date")
-MAX_UNG_VIEN = 40
+UNG_VIEN_TRANG = 50  # một trang ứng viên hóa đơn gốc; "Xem tiếp" lấy trang sau
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -719,50 +719,78 @@ def _ke_hoach_nhieu(invoices, can, bo_qua=None):
 
 
 @frappe.whitelist()
-def ung_vien_hoa_don(name):
-    """Hóa đơn gốc có thể nhận phần ĐÃ KIỂM mà chưa có phiếu trả.
+def ung_vien_hoa_don(name, tim=None, moi_diem=0, page=1):
+    """MỌI hóa đơn bán đã ghi sổ của ĐÚNG khách + ĐÚNG điểm giao của lô — để chọn hóa đơn gốc.
 
-    Cùng khách, cùng công ty, đã ghi sổ, có ít nhất một mã cần trả. Cùng ĐIỂM lấy hàng
-    lên trước (siêu thị trả hàng ở điểm nào thì gần như luôn là hàng đã giao điểm đó),
-    rồi mới tới hóa đơn gần nhất. Mỗi dòng kèm "nhận được bao nhiêu" — chọn tờ phủ nhiều
-    nhất trước là ít phiếu trả nhất.
+    Liệt kê HẾT (50 tờ một trang, mới nhất trước), KHÔNG lọc theo mã đã kiểm: kế toán nhìn
+    số tiền / số HĐĐT / PO / ngày mà chọn. Mỗi dòng kèm "nhận được bao nhiêu" trong số đang
+    cần trả; tờ không nhận được gì VẪN hiện (biết là có tờ đó) — chỉ khóa nút lập, kèm lý do.
+    `moi_diem=1`: mở ra mọi điểm của khách, khi hàng giao điểm khác rồi siêu thị gom về đây trả.
+    `tim`: số hóa đơn / PO / số HĐĐT.
+
+    SQL thô: lọc + đếm + phân trang một lượt, kèm số đã trả về của từng tờ (GROUP BY).
     """
     guard_sales_any()
     doc = frappe.get_doc(DT, name)
     can = con_can(so_can(doc), hoa_don_tra(name))
-    if not can:
-        return {"con_can": {}, "rows": []}
-    p = {"c": doc.company, "cu": doc.customer, "items": tuple(can),
-         "addr": cstr(doc.shipping_address_name), "lim": MAX_UNG_VIEN}
+    page = max(1, cint(page))
+    p = {"c": doc.company, "cu": doc.customer, "addr": cstr(doc.shipping_address_name),
+         "lim": UNG_VIEN_TRANG, "off": (page - 1) * UNG_VIEN_TRANG}
+    conds = ["si.docstatus = 1", "si.is_return = 0", "si.company = %(c)s", "si.customer = %(cu)s"]
+    if not cint(moi_diem):
+        conds.append("si.shipping_address_name = %(addr)s")
+    so_hddt = f"si.`{SI_NO_FIELD}`" if frappe.db.has_column("Sales Invoice", SI_NO_FIELD) else "NULL"
+    q = cstr(tim).strip()
+    if q:
+        p["q"] = f"%{q}%"
+        conds.append(f"(si.name LIKE %(q)s OR {po_column()} LIKE %(q)s OR {so_hddt} LIKE %(q)s)")
+    where = " AND ".join(conds)
+    total = cint(frappe.db.sql(f"SELECT COUNT(*) FROM `tabSales Invoice` si WHERE {where}", p)[0][0])
+    ten_mt = ("(SELECT ms.store_name FROM `tabMT Store` ms WHERE ms.address = si.shipping_address_name "
+              "AND ms.customer = si.customer LIMIT 1)") if frappe.db.table_exists("MT Store") else "NULL"
     rows = frappe.db.sql(
-        f"""SELECT si.name, si.posting_date, ABS(si.grand_total) AS grand_total, si.outstanding_amount,
-               si.shipping_address_name, {po_column()} AS po,
+        f"""SELECT si.name, si.posting_date, si.customer, si.customer_name, si.shipping_address_name,
+               {ten_mt} AS ten_diem, a.address_title, a.address_line1, a.city,
+               si.grand_total, si.outstanding_amount, {po_column()} AS po, {so_hddt} AS so_hddt,
                (IFNULL(si.shipping_address_name, '') = %(addr)s) AS cung_diem
         FROM `tabSales Invoice` si
-        WHERE si.docstatus = 1 AND si.is_return = 0 AND si.company = %(c)s AND si.customer = %(cu)s
-          AND EXISTS (SELECT 1 FROM `tabSales Invoice Item` it
-                      WHERE it.parent = si.name AND it.parenttype = 'Sales Invoice'
-                        AND it.item_code IN %(items)s)
-        ORDER BY cung_diem DESC, si.posting_date DESC, si.name DESC
-        LIMIT %(lim)s""", p, as_dict=True)
-    kh = _ke_hoach_nhieu([r.name for r in rows], can)
-    out = []
+        LEFT JOIN `tabAddress` a ON a.name = si.shipping_address_name
+        WHERE {where}
+        ORDER BY si.posting_date DESC, si.name DESC
+        LIMIT %(lim)s OFFSET %(off)s""", p, as_dict=True)
+    names = [r.name for r in rows]
+    da_tra = {}
+    if names:
+        da_tra = {r.goc: flt(r.tien) for r in frappe.db.sql(
+            """SELECT return_against AS goc, SUM(ABS(grand_total)) AS tien FROM `tabSales Invoice`
+            WHERE is_return = 1 AND docstatus = 1 AND return_against IN %(inv)s
+            GROUP BY return_against""", {"inv": tuple(names)}, as_dict=True)}
+    kh = _ke_hoach_nhieu(names, can) if can else {}
     for r in rows:
         plan, _thieu, dong = kh.get(r.name, ([], {}, []))
         nhan = {}
         for x in plan:
             nhan[x["item_code"]] = nhan.get(x["item_code"], 0.0) + flt(x["stock_qty"])
-        if not nhan:
-            continue
         gia = {d["name"]: flt(d["rate"]) / (flt(d["conversion_factor"]) or 1.0) for d in dong}
         _str_dates(r)
         r["cung_diem"] = cint(r.cung_diem)
+        r["da_tra"] = da_tra.get(r.name, 0.0)
         r["nhan"] = nhan
         r["phu"] = sum(nhan.values())
         r["uoc_tien"] = sum(flt(x["stock_qty"]) * gia.get(x["src"], 0.0) for x in plan)
         r["dong_khong_noi"] = sum(1 for x in plan if not x["noi"])
-        out.append(r)
-    return {"con_can": can, "rows": out}
+        r["lap_duoc"] = bool(nhan)
+        r["ly_do_khoa"] = "" if nhan else (
+            _("Không còn mã nào cần trả") if not can else
+            _("Tờ này không có mã nào đang cần trả") if not dong else
+            _("Các mã cần trả trên tờ này đã trả hết"))
+    return {
+        "con_can": can, "rows": rows, "total": total, "page": page,
+        "has_more": (page - 1) * UNG_VIEN_TRANG + len(rows) < total,
+        "moi_diem": bool(cint(moi_diem)),
+        "khach": {"customer": doc.customer, "customer_name": doc.customer_name},
+        "diem": {"name": doc.shipping_address_name, "ten": doc.ten_diem},
+    }
 
 
 def _tk_5213(company):
