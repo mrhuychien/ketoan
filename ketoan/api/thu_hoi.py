@@ -79,14 +79,20 @@ DA_NHAN = "Đã nhận hàng"
 CHANG_VC = ("Tạo yêu cầu", "Đã lấy hàng", DA_NHAN)
 CHANG = CHANG_VC + CHANG_KE_TOAN
 
-# Cột lô đọc sang. Tách hằng để danh sách và chi tiết không lệch nhau.
+# Cột lô đọc sang. Tách hằng để danh sách và chi tiết không lệch nhau. Hàng do đơn vị
+# vận chuyển ngoài lấy (Viettel Post / Nhất Tín): đơn vị + mã vận đơn + ngày thu
+# (`ngay_hen_lay`), không còn lái xe / xe. `chi_tiet_hang` = mail siêu thị dán nguyên văn.
 _LO_COLS = (
     "trang_thai", "ngay_yeu_cau", "so_phieu_sieu_thi", "ly_do", "customer", "customer_name",
     "shipping_address_name", "ten_diem", "ma_diem", "dia_chi", "sdt_diem", "nguoi_lien_he",
-    "sdt_lien_he", "ghi_chu", "ngay_hen_lay", "ten_lai_xe", "sdt_lai_xe", "xe", "lay_luc", "lay_boi",
+    "sdt_lien_he", "ghi_chu", "don_vi_thu_hoi", "ma_van_don", "ngay_hen_lay", "lay_luc", "lay_boi",
     "nhan_luc", "nhan_boi", "so_kien_du_kien", "so_kien_nhan", "gia_tri_khai", "so_dinh_kem",
-    "tong_sl_khai",
+    "chi_tiet_hang",
 )
+# Danh sách 30 lô một trang không kéo theo 30 bản mail dán (Long Text) — chỉ màn lô cần.
+_LO_COLS_DS = tuple(c for c in _LO_COLS if c != "chi_tiet_hang")
+# Ảnh / PDF mở trong tab; loại khác (Excel, Word, mail…) TẢI VỀ — cùng luật proxy bên vanchuyen.
+DUOI_XEM_TRONG_TAB = frozenset(("jpg", "jpeg", "png", "webp", "gif", "pdf"))
 _DATE_COLS = ("ngay_yeu_cau", "ngay_hen_lay", "lay_luc", "nhan_luc", "chot_luc", "xong_luc",
               "posting_date")
 MAX_UNG_VIEN = 40
@@ -146,10 +152,16 @@ def _files(name):
         fields=["name", "file_name", "creation"], order_by="creation asc", limit_page_length=0)
     for f in rows:
         f["url"] = "/api/method/ketoan.api.thu_hoi.xem_dinh_kem?file=" + quote(f.name)
-        ext = cstr(f.file_name).rsplit(".", 1)[-1].lower() if "." in cstr(f.file_name) else ""
-        f["is_image"] = ext in ("jpg", "jpeg", "png", "webp", "gif", "heic")
+        f["ext"] = _duoi(f.file_name)
+        f["is_image"] = f["ext"] in ("jpg", "jpeg", "png", "webp", "gif")
         f["creation"] = str(f.creation)
     return rows
+
+
+def _duoi(ten):
+    """Phần mở rộng, chữ thường, không dấu chấm: "DS.XLSX" → "xlsx"."""
+    t = cstr(ten)
+    return t.rsplit(".", 1)[-1].lower() if "." in t else ""
 
 
 def _expr():
@@ -181,7 +193,8 @@ def list_thu_hoi(chang=None, tim=None, tu_ngay=None, den_ngay=None, page=1, page
     if cstr(tim).strip():
         p["q"] = "%" + cstr(tim).strip() + "%"
         conds.append(f"(l.name LIKE %(q)s OR l.customer_name LIKE %(q)s OR {_lo_col('ten_diem')} LIKE %(q)s "
-                     f"OR {_lo_col('ma_diem')} LIKE %(q)s OR {_lo_col('so_phieu_sieu_thi')} LIKE %(q)s)")
+                     f"OR {_lo_col('ma_diem')} LIKE %(q)s OR {_lo_col('so_phieu_sieu_thi')} LIKE %(q)s "
+                     f"OR {_lo_col('ma_van_don')} LIKE %(q)s)")
     if tu_ngay:
         p["tu"] = tu_ngay
         conds.append("l.ngay_yeu_cau >= %(tu)s")
@@ -207,7 +220,7 @@ def list_thu_hoi(chang=None, tim=None, tu_ngay=None, den_ngay=None, page=1, page
     p.update({"c%d" % i: c for i, c in enumerate(CHANG)})
     p["lim"], p["off"] = page_size, (page - 1) * page_size
     order = ", ".join("%(c{0})s".format(i) for i in range(len(CHANG)))
-    cols = ", ".join(f"{_lo_col(c)} AS `{c}`" for c in _LO_COLS)
+    cols = ", ".join(f"{_lo_col(c)} AS `{c}`" for c in _LO_COLS_DS)
     rows = frappe.db.sql(
         f"""SELECT l.name, {cols}, {expr} AS chang,
                k.tong_sl AS kiem_sl, k.so_ma AS kiem_so_ma, k.da_chot
@@ -307,7 +320,8 @@ def _hoa_don_chi_tiet(name):
 
 @frappe.whitelist()
 def get_thu_hoi(name):
-    """Một lô: hồ sơ bên vận chuyển (đính kèm, hàng khai) + phiếu kiểm + phiếu trả + so sánh."""
+    """Một lô: hồ sơ bên vận chuyển (đơn vị thu hồi, mail dán, đính kèm) + phiếu kiểm + phiếu
+    trả + so sánh. Cột "khai" chỉ có với lô CŨ còn bảng hàng khai bên vanchuyen."""
     guard_sales_any()
     lo = _lo(name)
     doc = frappe.get_doc(DT, name) if frappe.db.exists(DT, name) else None
@@ -340,6 +354,8 @@ def get_thu_hoi(name):
     return {
         "lo": lo,
         "khai": [dict(r, qty=flt(r.qty), stock_qty=flt(r.stock_qty)) for r in khai],
+        "co_khai": bool(khai),
+        "tong_khai": sum(flt(r.stock_qty) for r in khai),
         "files": _files(name),
         "phieu": _phieu_dict(doc),
         "hoa_don": hd,
@@ -419,7 +435,9 @@ def _danh_muc(codes=None):
     return out
 
 
-_SO_KHAI = ("tong_sl_khai", "gia_tri_khai")
+# Màn kiểm hàng đếm MÙ: không nhận gì có số siêu thị khai — giá trị phiếu, và cả bản mail
+# dán nguyên văn (`chi_tiet_hang` chính là danh sách hàng + số lượng siêu thị khai).
+_SO_KHAI = ("gia_tri_khai", "chi_tiet_hang")
 
 
 @frappe.whitelist()
@@ -923,7 +941,11 @@ def xem_dinh_kem(file):
     frappe.local.response.filename = f.file_name or "dinh-kem"
     frappe.local.response.filecontent = frappe.get_doc("File", file).get_content()
     frappe.local.response.type = "download"
-    frappe.local.response.display_content_as = "inline"
+    # Chỉ ảnh / PDF inline. File .html / .svg gắn vào lô mà mở inline trên tên miền site là
+    # script chạy bằng phiên của kế toán (Frappe tự ép tải về các loại này ở /private/files).
+    frappe.local.response.display_content_as = (
+        "inline" if _duoi(f.file_name) in DUOI_XEM_TRONG_TAB else "attachment"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

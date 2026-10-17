@@ -138,7 +138,7 @@ export const WORKSPACES = [
     home: "/thu-hoi",
     desc: "Hàng siêu thị xuất trả: xe lấy về → kiểm hàng → hóa đơn trả về",
     guide: [
-      "Bên vận chuyển tạo lô khi siêu thị gọi trả hàng (kèm phiếu xuất trả), giao xe đi lấy, bấm 'Đã nhận hàng' khi hàng xuống kho.",
+      "Bên vận chuyển tạo lô khi siêu thị gọi trả hàng (dán mail danh sách hàng, kèm phiếu xuất trả), giao đơn vị vận chuyển (Viettel Post / Nhất Tín) vào lấy, bấm 'Đã nhận hàng' khi hàng về kho.",
       "Kế toán tiếp nối từ 'Đã nhận hàng': mở lô → 'Kiểm hàng' trên điện thoại → quét mã vạch / tìm mã → nhập số (thùng + hộp) → lưu từng lần.",
       "Đếm MÙ, không nhìn số siêu thị khai; xong thì 'Chốt phiếu' rồi mới so khai / kiểm — lệch là thứ phải hỏi lại siêu thị hoặc nhà xe.",
       "Sau khi chốt: chọn hóa đơn gốc → 'Lập hóa đơn trả về' (NHÁP). Hàng từ nhiều hóa đơn gốc thì lập lại tới khi phủ đủ. Mở Desk soát rồi ghi sổ.",

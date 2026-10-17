@@ -22,18 +22,22 @@ UI là **SPA portal no-build** (vanilla JS, hash router, ES module code-split) p
 
 ## Theo dõi thu hồi — hàng siêu thị xuất trả về công ty
 
-Nối tiếp app **vanchuyen**: bên đó tạo yêu cầu xuất trả (`Lo Thu Hoi`) và chạy 3 chặng
-vận chuyển *Tạo yêu cầu → Đã lấy hàng → Đã nhận hàng*; kế toán nhận tiếp từ chặng
+Nối tiếp app **vanchuyen**: bên đó tạo yêu cầu xuất trả (`Lo Thu Hoi` — khách, điểm, mail
+siêu thị dán nguyên văn, đơn vị thu hồi Viettel Post / Nhất Tín + mã vận đơn, đính kèm) và
+chạy 3 chặng vận chuyển *Tạo yêu cầu → Đã lấy hàng → Đã nhận hàng*; kế toán nhận tiếp từ chặng
 **Đã nhận hàng** với DocType riêng `Kiem Hang Thu Hoi` (tên = mã lô):
 *Đang kiểm → Đã kiểm hàng → Đã nhập chứng từ → Xong*. Blueprint:
 [`docs/thu-hoi/blueprint-thu-hoi.md`](docs/thu-hoi/blueprint-thu-hoi.md).
 
 - **Tab "Thu hồi"** (`#/thu-hoi`): mọi lô bên vận chuyển + chặng gộp, lọc theo chặng,
-  tìm lô / khách / điểm / số phiếu siêu thị; bảng trên máy tính, thẻ trên điện thoại.
+  tìm lô / khách / điểm / số phiếu siêu thị / mã vận đơn; bảng trên máy tính, thẻ trên điện
+  thoại. Màn lô hiện mail siêu thị dán nguyên văn (giữ cột) + file đính kèm: ảnh / PDF mở
+  trong tab, Excel / Word / mail tải về.
 - **Kiểm hàng trên điện thoại** (`#/kiem-hang/<lô>`, dựng theo màn Ghi hộp app sx): quét
   mã vạch (camera / súng quét / gõ tay) hoặc chọn mã → bàn số phím to có tab Thùng/Hộp →
   lưu ngay từng lần; quét lại mã đã có là cộng thêm; chạm số để sửa, ✕ để xóa.
-  **Đếm mù**: số siêu thị khai chỉ hiện sau khi chốt.
+  **Đếm mù**: màn kiểm hàng không nhận số siêu thị khai (cả mail dán nguyên văn); bảng so
+  khai / kiểm (lô cũ có bảng hàng khai) chỉ hiện sau khi chốt.
 - **Hóa đơn trả về**: sau khi chốt, chọn hóa đơn gốc (gợi ý cùng khách, ưu tiên cùng điểm
   giao) → lập **Sales Invoice trả về (nháp)** bằng `make_return_doc`, `update_stock = 0`,
   không vượt số còn được trả của từng dòng gốc; "Cập nhật" dựng lại các bản nháp theo
@@ -44,7 +48,8 @@ vận chuyển *Tạo yêu cầu → Đã lấy hàng → Đã nhận hàng*; k�
 - Quyền: kế toán bán hàng (NPP / MT / Du lịch) + KTT; lập hóa đơn dùng **quyền tạo Sales
   Invoice của chính người bấm**. Ketoan chỉ **đọc** bảng của vanchuyen (đọc mềm — chưa cài
   vanchuyen thì tab rỗng, không lỗi), không bao giờ ghi.
-- Kiểm không cần bench: `python3 docs/verified/thu_hoi_check.py`.
+- Kiểm không cần bench: `python3 docs/verified/thu_hoi_check.py` (server) và
+  `python3 docs/verified/thu_hoi_ui_check.py` (màn hình trong Chromium, cần playwright).
 
 ## Cài đặt
 

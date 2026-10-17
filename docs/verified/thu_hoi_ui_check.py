@@ -10,8 +10,8 @@ chỉ server là giả — trả đúng hình dạng JSON của `ketoan.api.thu_
 NHỮNG ĐIỀU MÀN HÌNH HỨA
 ════════════════════════════════════════════════════════════════════════════
 
-1. **Đếm mù.** Màn kiểm hàng không được hiện số siêu thị khai — hiện ra là mời gõ lại
-   số khai. Số khai chỉ lộ ở màn lô SAU khi chốt.
+1. **Đếm mù.** Màn kiểm hàng không được hiện số siêu thị khai — kể cả mail siêu thị dán
+   nguyên văn (có số lượng) — hiện ra là mời gõ lại số khai.
 2. **Bàn số nhiều ĐVT.** "2 thùng + 3 hộp" = 51 hộp hiện ngay trên nút LƯU; client gửi
    CHI TIẾT từng ĐVT (server tự nhân hệ số, không tin tổng client gửi).
 3. **Quét lại mã đã có = cộng thêm**, mã vạch thùng mở sẵn tab Thùng; máy không có
@@ -23,13 +23,16 @@ NHỮNG ĐIỀU MÀN HÌNH HỨA
    cuộn ngang ở 1280px.
 6. **Luồng tới hóa đơn trả về**: chốt → về lô → chọn hóa đơn gốc cùng điểm → bản nháp
    + deep link Desk + giải thích dòng "không nối dòng gốc"; trang không lỗi JS nào.
+7. **Hồ sơ lô theo đúng lô mới**: đơn vị thu hồi · mã vận đơn · ngày thu (không còn xe /
+   lái xe), mail dán giữ nguyên tab, file Excel TẢI VỀ còn PDF mở tab; lô mới không có cột
+   "Siêu thị khai", lô cũ còn bảng hàng khai thì vẫn so khai / kiểm như trước.
 
 Thử phá (đã làm khi viết): bỏ `pointer-events: none` của `.kt-toast` → bước sửa dòng
 kẹt vì toast chặn nút LƯU; trả `.kt-th-cards { display: flex }` ra ngoài media query →
 "desktop: bảng hiện, thẻ ẩn" đỏ.
 
 Chạy KHÔNG cần bench (cần `pip install playwright`; Chromium có sẵn ở /opt/pw-browsers):
-    python3 docs/verified/thu_hoi_ui_check.py
+    python3 docs/verified/thu_hoi_ui_check.py [--shots THƯ_MỤC]
 Không có trình duyệt thì BỎ QUA (thoát 0) như `table_width_check`.
 """
 
@@ -100,10 +103,14 @@ LO = {
     "so_phieu_sieu_thi": "XT-889", "ly_do": "Hàng date / cận date",
     "customer": "COOP", "customer_name": "Saigon Co.op", "shipping_address_name": "ADDR-HD",
     "ten_diem": "Co.opMart Hà Đông", "ma_diem": "HD01", "dia_chi": "1 Quang Trung, Hà Đông",
-    "ten_lai_xe": "Hùng", "xe": "29C-123", "lay_luc": "2026-10-16 08:10:00", "lay_boi": "Hùng",
+    "don_vi_thu_hoi": "Viettel Post", "ma_van_don": "VTP123", "ngay_hen_lay": "2026-10-16",
+    "lay_luc": "2026-10-16 08:10:00", "lay_boi": "Điều hành",
     "nhan_luc": "2026-10-16 15:00:00", "nhan_boi": "Kho", "so_kien_du_kien": 3, "so_kien_nhan": 3,
-    "tong_sl_khai": 48, "so_dinh_kem": 1,
+    "so_dinh_kem": 2,
 }
+# Mail siêu thị dán nguyên văn bên vanchuyen — cột cách nhau bằng tab, có SỐ KHAI (48).
+CHI_TIET = "\tMã hàng\tTên hàng\tSL\nBDX-170\tBánh đậu xanh 170g\t48"
+LO["chi_tiet_hang"] = CHI_TIET
 UOMS = [{"uom": "Thùng", "he_so": 24}, {"uom": "Hộp", "he_so": 1}]
 TEN = "Bánh đậu xanh 170g"
 KHAI = 48  # siêu thị khai 2 thùng = 48 hộp — con số màn kiểm hàng KHÔNG được để lộ
@@ -134,18 +141,39 @@ def chang():
     return "Xong" if all(h["docstatus"] == 1 for h in S["hd"]) else "Đã nhập chứng từ"
 
 
-def get_th(_a=None):
+def lo_cu():
+    """Lô CŨ (trước khi bỏ bảng hàng khai bên vanchuyen), đã chốt: còn số khai có cấu trúc."""
+    lo = dict(LO, name="TH-2026-0005", chi_tiet_hang=None)
+    return {
+        "lo": lo, "khai": [{"item_code": "BDX", "item_name": TEN, "qty": 2, "uom": "Thùng", "stock_qty": KHAI,
+                            "stock_uom": "Hộp"}],
+        "co_khai": True, "tong_khai": KHAI, "files": [],
+        "phieu": {"name": "TH-2026-0005", "da_chot": 1, "chot_luc": "2026-10-10 10:00:00", "chot_boi": "KT",
+                  "items": [{"name": "r1", "item_code": "BDX", "item_name": TEN, "qty": 50, "stock_uom": "Hộp"}],
+                  "tong_sl": 50, "so_ma": 1, "ghi_chu": ""},
+        "hoa_don": [], "chang": "Đã kiểm hàng", "chang_list": CHANG, "lech": {}, "con_can": {"BDX": 50},
+        "so_sanh": [{"item_code": "BDX", "item_name": TEN, "stock_uom": "Hộp", "khai": KHAI, "kiem": 50, "da_lap": 0}],
+        "flags": {"lap_hd": True, "mo_lai": True}, "is_chief": False,
+    }
+
+
+def get_th(a=None):
+    if (a or {}).get("name") == "TH-2026-0005":
+        return lo_cu()
     p = S["phieu"]
     kiem, lap = tong(), da_lap()
     chot = bool(p and p["da_chot"])
     return {
         "lo": LO,
-        "khai": [{"item_code": "BDX", "item_name": TEN, "qty": 2, "uom": "Thùng", "stock_qty": KHAI, "stock_uom": "Hộp"}],
-        "files": [{"name": "F1", "file_name": "phieu-xuat-tra.pdf", "is_image": False,
-                   "url": "/api/method/ketoan.api.thu_hoi.xem_dinh_kem?file=F1"}],
+        # Lô mới: bên vận chuyển không gõ mã hàng — mail dán nguyên văn nằm ở lo.chi_tiet_hang.
+        "khai": [], "co_khai": False, "tong_khai": 0,
+        "files": [{"name": "F1", "file_name": "phieu-xuat-tra.pdf", "ext": "pdf", "is_image": False,
+                   "url": "/api/method/ketoan.api.thu_hoi.xem_dinh_kem?file=F1"},
+                  {"name": "F2", "file_name": "ds-hang.xlsx", "ext": "xlsx", "is_image": False,
+                   "url": "/api/method/ketoan.api.thu_hoi.xem_dinh_kem?file=F2"}],
         "phieu": phieu_dict(), "hoa_don": S["hd"], "chang": chang(), "chang_list": CHANG, "lech": {},
         "con_can": {"BDX": kiem - lap} if kiem - lap > 0 else {},
-        "so_sanh": [{"item_code": "BDX", "item_name": TEN, "stock_uom": "Hộp", "khai": KHAI,
+        "so_sanh": [{"item_code": "BDX", "item_name": TEN, "stock_uom": "Hộp", "khai": 0,
                      "kiem": kiem, "da_lap": lap}] if p else [],
         "flags": {"bat_dau": not p, "sua": bool(p and not chot),
                   "chot": bool(p and not chot and p["items"]),
@@ -184,8 +212,8 @@ def bat_dau_kiem(_a):
 
 
 def boot_kiem(_a):
-    # Server thật đã bỏ tong_sl_khai khỏi lô ở đây (thu_hoi_check canh). Bản giả CỐ Ý để
-    # lại: có số trong tay thì màn kiểm hàng cũng không được vẽ ra.
+    # Server thật bỏ mail dán (chi_tiet_hang, có số khai 48) khỏi lô ở đây — thu_hoi_check
+    # canh. Bản giả CỐ Ý để lại: có số trong tay thì màn kiểm hàng cũng không được vẽ ra.
     return {
         "lo": LO, "phieu": phieu_dict(),
         "danh_muc": [{"item": "BDX", "ten": TEN, "dvt": "Hộp", "uoms": UOMS},
@@ -312,8 +340,9 @@ def make_handler(page):
 # Kịch bản — người kiểm hàng cầm điện thoại, rồi kế toán ngồi máy tính
 # ═══════════════════════════════════════════════════════════════════════════
 
-def run(pw, exe, root):
-    ok, bad, errs = [], [], []
+def run(pw, exe, root, ok, bad, shots=None):
+    """Ghi THẲNG vào `ok` / `bad` của người gọi: dừng giữa chừng thì mục đã đỏ vẫn còn."""
+    errs = []
 
     def expect(label, cond, detail=""):
         (ok if cond else bad).append(label + (f"  ({detail})" if detail else ""))
@@ -335,6 +364,7 @@ def run(pw, exe, root):
         pg.on("console", on_console)
         pg.on("response", on_response)
         pg.on("dialog", lambda d: d.accept())
+        pg.set_default_timeout(5000)  # thiếu phần tử thì đỏ sau 5 giây, không treo 30 giây
 
     browser = pw.chromium.launch(executable_path=exe)
     ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
@@ -347,6 +377,8 @@ def run(pw, exe, root):
     expect("nav có tab Thu hồi", "Thu hồi" in p.text_content(".kt-nav"))
     expect("list: pill 7 chặng + Đang mở + Tất cả", len(p.query_selector_all(".kt-th-pill")) == 9)
     expect("list mobile: hiện thẻ, ẩn bảng", p.is_visible(".kt-th-cards") and not p.is_visible(".kt-th-desk"))
+    expect("list mobile: thẻ lô ghi đơn vị thu hồi + mã vận đơn",
+           "🚚 Viettel Post · VĐ VTP123" in p.text_content(".kt-th-cards"))
     p.click('.kt-th-pill[data-f="Đã nhận hàng"]')
     p.wait_for_timeout(300)
     expect("list: lọc 'Đã nhận hàng' còn 1 thẻ", len(p.query_selector_all(".kt-th-card")) == 1)
@@ -355,7 +387,21 @@ def run(pw, exe, root):
 
     # 2. Lô → bắt đầu kiểm
     expect("lô: file đính kèm mở qua proxy có guard của ketoan",
-           len(p.query_selector_all('.kt-th-file[href*="ketoan.api.thu_hoi.xem_dinh_kem"]')) == 1)
+           len(p.query_selector_all('.kt-th-file[href*="ketoan.api.thu_hoi.xem_dinh_kem"]')) == 2)
+    pdf = p.query_selector('.kt-th-file[href*="file=F1"]')
+    xl = p.query_selector('.kt-th-file[href*="file=F2"]')
+    expect("lô: PDF mở tab mới; Excel TẢI VỀ + biểu tượng Excel",
+           pdf is not None and pdf.get_attribute("target") == "_blank"
+           and xl is not None and xl.get_attribute("download") == "ds-hang.xlsx"
+           and xl.query_selector(".fa-file-excel") is not None)
+    ho_so = p.text_content(".kt-th-kv")
+    expect("lô: hồ sơ ghi đơn vị thu hồi · vận đơn · ngày thu, không còn 'Xe'",
+           "Viettel Post · VĐ VTP123 · thu 16/10/2026" in ho_so and "chưa giao" not in ho_so, ho_so[:160])
+    if shots:
+        p.screenshot(path=os.path.join(shots, "kt_lo_mobile.png"), full_page=True)
+    mail = p.query_selector("#th-mail")  # tra trước: text_content() trên phần tử thiếu là đứng chờ rồi nổ
+    expect("lô: mail siêu thị dán NGUYÊN VĂN (giữ tab)", mail is not None and mail.text_content() == CHI_TIET,
+           repr(mail.text_content() if mail else None))
     expect("lô: có nút Bắt đầu kiểm hàng", p.query_selector("#th-batdau") is not None)
     p.click("#th-batdau")
     p.wait_for_timeout(900)
@@ -417,7 +463,9 @@ def run(pw, exe, root):
     p.click("#kh-chot")
     p.wait_for_timeout(900)
     expect("chốt -> về màn lô", p.evaluate("location.hash").startswith("#/thu-hoi/TH-2026-0007"))
-    expect("sau chốt mới hiện số siêu thị khai", "Siêu thị khai" in p.text_content("main"))
+    sau_chot = p.text_content("main")
+    expect("sau chốt: lô mới (không bảng khai) -> bảng 'Đã kiểm · đã lập hóa đơn', không cột 'Siêu thị khai'",
+           "Đã kiểm · đã lập hóa đơn" in sau_chot and "Siêu thị khai" not in sau_chot)
     p.click("#th-ungvien")
     p.wait_for_timeout(500)
     expect("ứng viên: hóa đơn gốc cùng điểm", "cùng điểm" in p.text_content("#th-uv"))
@@ -431,6 +479,14 @@ def run(pw, exe, root):
     expect("chặng sang 'Đã nhập chứng từ'", "Đã nhập chứng từ" in txt)
     expect("giải thích dòng không nối dòng gốc", "không nối dòng gốc" in txt)
 
+    # 6b. Lô CŨ còn bảng hàng khai: vẫn so khai / kiểm như trước
+    p.evaluate("location.hash = '#/thu-hoi/TH-2026-0005'")
+    p.wait_for_timeout(600)
+    cu = p.text_content("main")
+    nhat = p.query_selector(".kt-th-sum-so--nhat")
+    expect("lô cũ có bảng khai: vẫn hiện cột 'Siêu thị khai' + tổng khai 48 + lệch +2",
+           "Siêu thị khai" in cu and nhat is not None and nhat.text_content() == "48" and "+2" in cu)
+
     # Toast hết giờ phải ẩn THẬT (trước đây trượt xuống vẫn nằm cách đáy ~25px)
     p.wait_for_timeout(4000)
     vis = p.evaluate("getComputedStyle(document.querySelector('.kt-toast')).visibility")
@@ -442,15 +498,25 @@ def run(pw, exe, root):
     d.goto(root + "/#/thu-hoi")
     d.wait_for_timeout(800)
     expect("desktop: bảng hiện, thẻ ẩn", d.is_visible(".kt-th-desk") and not d.is_visible(".kt-th-cards"))
+    dong = d.text_content(".kt-th-desk tbody tr")
+    expect("desktop: cột Vận chuyển ghi đơn vị thu hồi + mã vận đơn", "Viettel Post" in dong and "VĐ VTP123" in dong)
     sw = d.evaluate("(() => { const w = document.querySelector('.kt-th-desk'); return [w.scrollWidth, w.clientWidth]; })()")
     expect("desktop 1280: bảng không cuộn ngang", sw[0] <= sw[1], str(sw))
+    if shots:
+        d.screenshot(path=os.path.join(shots, "kt_list_desk.png"))
+        d.evaluate("location.hash = '#/thu-hoi/TH-2026-0007'")
+        d.wait_for_timeout(700)
+        d.screenshot(path=os.path.join(shots, "kt_lo_desk.png"), full_page=True)
 
     expect("không lỗi trang / console / HTTP", not errs, " | ".join(errs))
     browser.close()
-    return ok, bad
 
 
 def main():
+    shots = None
+    if "--shots" in sys.argv:
+        shots = sys.argv[sys.argv.index("--shots") + 1]
+        os.makedirs(shots, exist_ok=True)
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -462,12 +528,13 @@ def main():
     srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(build_page()))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     root = "http://127.0.0.1:%d" % srv.server_address[1]
+    ok, bad = [], []
     try:
         with sync_playwright() as pw:
             try:
-                ok, bad = run(pw, exe, root)
+                run(pw, exe, root, ok, bad, shots)
             except Exception as e:  # noqa: BLE001 — kẹt bước nào thì nói bước đó, không traceback trần
-                ok, bad = [], [f"kịch bản dừng giữa chừng: {type(e).__name__}: {str(e).splitlines()[0]}"]
+                bad.append(f"kịch bản dừng giữa chừng: {type(e).__name__}: {str(e).splitlines()[0]}")
     finally:
         srv.shutdown()
 

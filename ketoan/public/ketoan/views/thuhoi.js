@@ -17,6 +17,14 @@ const VC = 3; // ba chặng đầu thuộc bên vận chuyển
 
 const fmtSl = (n) => new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 3 }).format(Number(n) || 0);
 
+// Thẻ file: ảnh / PDF mở tab (proxy trả inline); Excel / Word / mail… proxy trả TẢI VỀ.
+const XEM_TRONG_TAB = new Set(["jpg", "jpeg", "png", "webp", "gif", "pdf"]);
+const ICON_FILE = {
+  pdf: "fa-file-pdf", xls: "fa-file-excel", xlsx: "fa-file-excel", xlsm: "fa-file-excel", ods: "fa-file-excel",
+  csv: "fa-file-csv", doc: "fa-file-word", docx: "fa-file-word", odt: "fa-file-word", rtf: "fa-file-word",
+  txt: "fa-file-lines", eml: "fa-envelope", msg: "fa-envelope", zip: "fa-file-zipper", rar: "fa-file-zipper", "7z": "fa-file-zipper",
+};
+
 // "2026-10-17 09:12:33" → "17/10 09:12" (không qua new Date: Safari không đọc chuỗi có dấu cách).
 function fmtLuc(s) {
   const m = String(s || "").match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
@@ -59,7 +67,7 @@ async function renderList(container, query) {
     </div>
     <div class="kt-th-toolbar">
       <div class="kt-search kt-th-search"><i class="fas fa-magnifying-glass"></i>
-        <input class="kt-input" id="th-tim" type="search" autocomplete="off" placeholder="Tìm lô / khách / điểm / số phiếu siêu thị" value="${S.tim}"></div>
+        <input class="kt-input" id="th-tim" type="search" autocomplete="off" placeholder="Tìm lô / khách / điểm / số phiếu / mã vận đơn" value="${S.tim}"></div>
     </div>
     <div class="kt-th-pills" id="th-pills"></div>
     <div id="th-body"><div class="kt-boot"><div class="kt-spinner"></div></div></div>`);
@@ -121,7 +129,7 @@ async function renderList(container, query) {
           <td><b>${r.name}</b>${r.so_phieu_sieu_thi ? html`<div class="kt-sub">phiếu ${r.so_phieu_sieu_thi}</div>` : ""}</td>
           <td>${formatDate(r.ngay_yeu_cau)}${r.tuoi > 0 ? html`<div class="kt-sub ${r.tuoi > 14 ? "kt-th-tre" : ""}">${r.tuoi} ngày</div>` : ""}</td>
           <td>${r.ten_diem || r.customer_name}<div class="kt-sub">${r.customer_name}${r.ma_diem ? " · " + r.ma_diem : ""}</div></td>
-          <td>${r.ten_lai_xe || html`<span class="kt-sub">chưa giao xe</span>`}<div class="kt-sub">${r.nhan_luc ? "về kho " + fmtLuc(r.nhan_luc) : r.lay_luc ? "lấy " + fmtLuc(r.lay_luc) : ""}</div></td>
+          <td>${r.don_vi_thu_hoi || html`<span class="kt-sub">chưa có đơn vị thu hồi</span>`}${r.ma_van_don ? html`<div class="kt-sub">VĐ ${r.ma_van_don}</div>` : ""}<div class="kt-sub">${r.nhan_luc ? "về kho " + fmtLuc(r.nhan_luc) : r.lay_luc ? "lấy " + fmtLuc(r.lay_luc) : r.ngay_hen_lay ? "thu " + formatDate(r.ngay_hen_lay) : ""}</div></td>
           <td class="num">${kiem(r)}</td>
           <td>${hd(r)}</td>
           <td>${badge(r.chang, ds)}${steps(r.chang, ds)}</td>
@@ -132,6 +140,7 @@ async function renderList(container, query) {
         <div class="kt-sub">${r.customer_name} · ${r.name}${r.so_phieu_sieu_thi ? " · phiếu " + r.so_phieu_sieu_thi : ""}</div>
         ${steps(r.chang, ds)}
         <div class="kt-th-card-meta">📅 ${formatDate(r.ngay_yeu_cau)}${r.tuoi > 0 ? ` · ${r.tuoi} ngày` : ""}${r.kiem_so_ma ? ` · đã kiểm ${fmtSl(r.kiem_sl)}` : ""}${r.so_hd ? ` · ${r.so_hd} HĐ trả về` : ""}</div>
+        ${r.don_vi_thu_hoi || r.ma_van_don ? html`<div class="kt-th-card-meta">🚚 ${[r.don_vi_thu_hoi, r.ma_van_don ? "VĐ " + r.ma_van_don : ""].filter(Boolean).join(" · ")}</div>` : ""}
       </a>`)}</div>
       ${d.has_more ? html`<button type="button" class="kt-btn kt-btn--outline kt-th-more" id="th-more">Xem tiếp (đã hiện ${rows.length}/${d.total})</button>` : ""}`);
     body.querySelectorAll("tr[data-lo]").forEach((tr) => tr.addEventListener("click", () => {
@@ -184,15 +193,17 @@ async function renderLo(container, name) {
               <div><span class="kt-sub">Địa chỉ</span> ${lo.dia_chi || "—"}${lo.sdt_diem ? " · ☎ " + lo.sdt_diem : ""}</div>
               <div><span class="kt-sub">Ngày yêu cầu</span> ${formatDate(lo.ngay_yeu_cau)}${lo.ly_do ? " · " + lo.ly_do : ""}</div>
               ${lo.nguoi_lien_he || lo.sdt_lien_he ? html`<div><span class="kt-sub">Liên hệ</span> ${lo.nguoi_lien_he || ""} ${lo.sdt_lien_he || ""}</div>` : ""}
-              <div><span class="kt-sub">Xe</span> ${lo.ten_lai_xe || "chưa giao"}${lo.xe ? " · " + lo.xe : ""}${lo.ngay_hen_lay ? " · hẹn " + formatDate(lo.ngay_hen_lay) : ""}</div>
+              <div><span class="kt-sub">Thu hồi</span> ${lo.don_vi_thu_hoi || "chưa chọn đơn vị"}${lo.ma_van_don ? " · VĐ " + lo.ma_van_don : ""}${lo.ngay_hen_lay ? " · thu " + formatDate(lo.ngay_hen_lay) : ""}</div>
               ${moc("Lấy hàng", lo.lay_luc, lo.lay_boi)}
               ${moc("Nhận về kho", lo.nhan_luc, lo.nhan_boi)}
-              ${lo.so_kien_du_kien || lo.so_kien_nhan ? html`<div><span class="kt-sub">Kiện</span> dự kiến ${fmtSl(lo.so_kien_du_kien)} · thực nhận ${lo.so_kien_nhan ? fmtSl(lo.so_kien_nhan) : "—"}</div>` : ""}
+              ${lo.so_kien_du_kien || lo.so_kien_nhan ? html`<div><span class="kt-sub">Kiện</span> theo vận đơn ${lo.so_kien_du_kien ? fmtSl(lo.so_kien_du_kien) : "—"} · thực nhận ${lo.so_kien_nhan ? fmtSl(lo.so_kien_nhan) : "—"}</div>` : ""}
               ${lo.gia_tri_khai ? html`<div><span class="kt-sub">Giá trị theo phiếu siêu thị</span> ${formatVND(lo.gia_tri_khai)}</div>` : ""}
               ${lo.ghi_chu ? html`<div><span class="kt-sub">Ghi chú</span> ${lo.ghi_chu}</div>` : ""}
             </div>
-            <div class="kt-th-files">${(D.files || []).length ? D.files.map((x) => html`<a class="kt-th-file" href="${x.url}" target="_blank" rel="noopener">
-              ${x.is_image ? html`<img src="${x.url}" alt="" loading="lazy">` : html`<span class="kt-th-file-ico"><i class="fas fa-file-lines"></i></span>`}<span>${x.file_name}</span></a>`) : html`<div class="kt-sub">Chưa có chứng từ đính kèm.</div>`}</div>
+            ${lo.chi_tiet_hang ? mailBlock(lo.chi_tiet_hang) : ""}
+            <div class="kt-th-files">${(D.files || []).length ? D.files.map((x) => html`<a class="kt-th-file" href="${x.url}" ${
+              XEM_TRONG_TAB.has(x.ext) ? html`target="_blank" rel="noopener"` : html`download="${x.file_name}"`}>
+              ${x.is_image ? html`<img src="${x.url}" alt="" loading="lazy">` : html`<span class="kt-th-file-ico"><i class="fas ${ICON_FILE[x.ext] || "fa-file"}"></i></span>`}<span>${x.file_name}</span></a>`) : html`<div class="kt-sub">Chưa có chứng từ đính kèm.</div>`}</div>
           </div>
         </div>
 
@@ -203,10 +214,10 @@ async function renderLo(container, name) {
       </div>
 
       ${ph && ph.da_chot ? html`<div class="kt-card kt-th-mt">
-        <div class="kt-card-head"><b><i class="fas fa-scale-balanced"></i> Siêu thị khai · đã kiểm · đã lập hóa đơn</b><span class="kt-sub">ĐVT kho</span></div>
+        <div class="kt-card-head"><b><i class="fas fa-scale-balanced"></i> ${D.co_khai ? "Siêu thị khai · đã kiểm · đã lập hóa đơn" : "Đã kiểm · đã lập hóa đơn"}</b><span class="kt-sub">ĐVT kho</span></div>
         ${soSanh()}
       </div>` : ""}
-      ${ph && !ph.da_chot ? html`<div class="kt-sub kt-th-mt">Số siêu thị khai hiện SAU khi chốt phiếu: đếm mù rồi mới so — thấy số khai trước là dễ gõ lại số khai cho nhanh, và lệch thật không bao giờ lộ.</div>` : ""}
+      ${ph && !ph.da_chot && D.co_khai ? html`<div class="kt-sub kt-th-mt">Số siêu thị khai hiện SAU khi chốt phiếu: đếm mù rồi mới so — thấy số khai trước là dễ gõ lại số khai cho nhanh, và lệch thật không bao giờ lộ.</div>` : ""}
 
       ${ph && ph.da_chot ? html`<div class="kt-card kt-th-mt">
         <div class="kt-card-head"><b><i class="fas fa-file-invoice"></i> Hóa đơn trả về</b>
@@ -226,7 +237,7 @@ async function renderLo(container, name) {
     }
     return html`
       <div class="kt-th-sum"><div><div class="kt-sub">Đã kiểm</div><div class="kt-th-sum-so">${fmtSl(ph.tong_sl)}</div><div class="kt-sub">${ph.so_ma || 0} mã · ĐVT kho</div></div>
-        ${ph.da_chot ? html`<div><div class="kt-sub">Siêu thị khai</div><div class="kt-th-sum-so kt-th-sum-so--nhat">${fmtSl(lo.tong_sl_khai)}</div></div>` : ""}</div>
+        ${ph.da_chot && D.co_khai ? html`<div><div class="kt-sub">Siêu thị khai</div><div class="kt-th-sum-so kt-th-sum-so--nhat">${fmtSl(D.tong_khai)}</div></div>` : ""}</div>
       ${ph.khong_lap_hd ? html`<div class="kt-alert kt-alert--warning">KTT kết luận <b>không lập hóa đơn trả về</b>: ${ph.ly_do_khong_lap} — ${ph.ket_luan_boi || ""}</div>` : ""}
       <div class="kt-th-actions">
         <a class="kt-btn kt-btn--primary" href="#/kiem-hang/${encodeURIComponent(ph.name)}"><i class="fas fa-mobile-screen"></i> ${ph.da_chot ? "Xem phiếu kiểm" : "Mở màn kiểm hàng"}</a>
@@ -239,23 +250,41 @@ async function renderLo(container, name) {
         <textarea class="kt-textarea" id="th-ghichu" rows="2" placeholder="Hàng móp, thiếu tem, lệch số kiện...">${ph.ghi_chu || ""}</textarea></div>`;
   }
 
+  // Mail siêu thị dán nguyên văn bên vận chuyển: giữ tab / xuống dòng (<pre>); dài thì gọn lại.
+  function mailBlock(text) {
+    const dai = (text.match(/\n/g) || []).length > 10 || text.length > 900;
+    return html`<div class="kt-th-mail"><div class="kt-sub">Chi tiết hàng siêu thị gửi (dán từ mail)</div>
+      <pre class="kt-th-paste${dai ? " is-gon" : ""}" id="th-mail">${text}</pre>
+      ${dai ? html`<button type="button" class="kt-btn kt-btn--outline kt-btn--sm" id="th-mail-mo">Xem hết</button>` : ""}</div>`;
+  }
+
   function soSanh() {
     const rows = D.so_sanh || [];
-    if (!rows.length) return html`<div class="kt-th-pad kt-sub">Chưa có mã nào — siêu thị không khai chi tiết và chưa kiểm dòng nào.</div>`;
+    if (!rows.length) return html`<div class="kt-th-pad kt-sub">Chưa có mã nào — chưa kiểm dòng nào.</div>`;
+    if (!D.co_khai) {
+      // Lô mới: bên vận chuyển không gõ mã hàng (mail dán nguyên văn ở hồ sơ) — không có cột khai.
+      return html`<div class="kt-table-wrap kt-th-flush"><table class="kt-table">
+        <thead><tr><th>Mã hàng</th><th class="num">Đã kiểm</th><th class="num">Đã lập HĐ trả</th></tr></thead>
+        <tbody>${rows.map((r) => html`<tr><td>${r.item_name}<div class="kt-sub">${r.item_code}${r.stock_uom ? " · " + r.stock_uom : ""}</div></td>
+          <td class="num">${fmtSl(r.kiem)}</td><td class="num">${lapCell(r)}</td></tr>`)}</tbody>
+      </table></div>`;
+    }
     const lech = (r) => {
       const d = (Number(r.kiem) || 0) - (Number(r.khai) || 0);
       if (!r.khai || Math.abs(d) < 1e-6) return html`<span class="kt-sub">—</span>`;
       return html`<span class="${d < 0 ? "danger" : "pos"}">${d > 0 ? "+" : ""}${fmtSl(d)}</span>`;
     };
-    const lap = (r) => {
-      const d = (Number(r.da_lap) || 0) - (Number(r.kiem) || 0);
-      return Math.abs(d) < 1e-6 ? fmtSl(r.da_lap) : html`<span class="danger">${fmtSl(r.da_lap)}</span>`;
-    };
     return html`<div class="kt-table-wrap kt-th-flush"><table class="kt-table">
       <thead><tr><th>Mã hàng</th><th class="num">Siêu thị khai</th><th class="num">Đã kiểm</th><th class="num">Lệch kiểm − khai</th><th class="num">Đã lập HĐ trả</th></tr></thead>
       <tbody>${rows.map((r) => html`<tr><td>${r.item_name}<div class="kt-sub">${r.item_code}${r.stock_uom ? " · " + r.stock_uom : ""}</div></td>
-        <td class="num">${r.khai ? fmtSl(r.khai) : "—"}</td><td class="num">${fmtSl(r.kiem)}</td><td class="num">${lech(r)}</td><td class="num">${lap(r)}</td></tr>`)}</tbody>
+        <td class="num">${r.khai ? fmtSl(r.khai) : "—"}</td><td class="num">${fmtSl(r.kiem)}</td><td class="num">${lech(r)}</td><td class="num">${lapCell(r)}</td></tr>`)}</tbody>
     </table></div>`;
+  }
+
+  // Đã lập lệch số đã kiểm thì tô đỏ — phiếu trả thừa / thiếu so với hàng thật về.
+  function lapCell(r) {
+    const d = (Number(r.da_lap) || 0) - (Number(r.kiem) || 0);
+    return Math.abs(d) < 1e-6 ? fmtSl(r.da_lap) : html`<span class="danger">${fmtSl(r.da_lap)}</span>`;
   }
 
   function hoaDonBlock(ph, f) {
@@ -304,6 +333,10 @@ async function renderLo(container, name) {
 
   function bind() {
     const $ = (id) => container.querySelector(id);
+    if ($("#th-mail-mo")) $("#th-mail-mo").addEventListener("click", (e) => {
+      const gon = $("#th-mail").classList.toggle("is-gon");
+      e.currentTarget.textContent = gon ? "Xem hết" : "Thu gọn";
+    });
     if ($("#th-batdau")) $("#th-batdau").addEventListener("click", async (e) => {
       e.currentTarget.disabled = true;
       try { await api.thBatDau(name); location.hash = "#/kiem-hang/" + encodeURIComponent(name); } catch (err) {

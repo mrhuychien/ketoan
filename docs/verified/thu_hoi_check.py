@@ -218,11 +218,16 @@ def kiem_tren_bo_gia():
 
     sys.modules["frappe.model.document"].Document = Doc
 
+    FILES = {}
+
     class DB(type(fr.db)):
         def get_value(self, dt, name=None, fields=None, **k):
             if dt == "Item":
                 it = ITEMS.get(name)
                 return fr._dict(it) if it else None
+            if dt == "File":
+                f = FILES.get(name)
+                return fr._dict(f) if f else None
             return None
 
         def has_column(self, *a, **k):
@@ -339,6 +344,24 @@ def kiem_tren_bo_gia():
     api.dong_bo_trang_thai(FakeRow(custom_kiem_hang_thu_hoi=None, is_return=1, name="X"), "on_update")
     check("hóa đơn không gắn phiếu kiểm -> hook không làm gì", not WROTE)
 
+    print("-" * 78)
+    print("── 7b. File đính kèm của lô qua proxy: chỉ ảnh / PDF mở trong tab ───────")
+    fr.local.response = fr._dict()
+    fr.get_doc = lambda *a, **k: fr._dict(get_content=lambda: b"noi-dung")
+
+    def kieu(ten, dt="Lo Thu Hoi"):
+        FILES["F1"] = {"attached_to_doctype": dt, "file_name": ten}
+        fr.local.response.clear()
+        api.xem_dinh_kem("F1")
+        return fr.local.response.get("display_content_as")
+
+    check("PDF / ảnh: inline (mở trong tab)", kieu("phieu.pdf") == "inline" and kieu("anh.PNG") == "inline")
+    check("Excel / Word / mail: attachment (tải về)",
+          kieu("ds.xlsx") == "attachment" and kieu("bb.docx") == "attachment" and kieu("mail.eml") == "attachment")
+    check("file .html / .svg gắn vào lô: KHÔNG BAO GIỜ inline (script chạy trên tên miền site)",
+          kieu("x.html") == "attachment" and kieu("logo.svg") == "attachment")
+    check("file gắn vào DocType khác -> từ chối", raises(lambda: kieu("p.pdf", dt="Sales Invoice")) is not None)
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # 6, 8–10. TĨNH
@@ -392,15 +415,17 @@ def kiem_tinh():
     print("-" * 78)
     print("── 10. Màn kiểm hàng đếm MÙ · import map đủ module ─────────────────────")
     kh = read(os.path.join(PUB, "views", "kiemhang.js"))
-    check("kiemhang.js không đọc số siêu thị khai (B.khai / tong_sl_khai)", "B.khai" not in kh and "tong_sl_khai" not in kh)
+    check("kiemhang.js không đọc số siêu thị khai (B.khai / tong_sl_khai / chi_tiet_hang)",
+          "B.khai" not in kh and "tong_sl_khai" not in kh and "chi_tiet_hang" not in kh)
     boot = _fn(tree, "boot_kiem")
     ret = [n.value for n in ast.walk(boot) if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict)]
     keys = {k.value for d in ret for k in d.keys if isinstance(k, ast.Constant)}
     check("boot_kiem: payload màn kiểm KHÔNG mang số khai (không key 'khai')", ret and "khai" not in keys, str(sorted(keys)))
-    check("boot_kiem: lô gửi xuống đã bỏ tong_sl_khai / gia_tri_khai",
-          "if k not in _SO_KHAI" in ast.unparse(boot) and '_SO_KHAI = ("tong_sl_khai", "gia_tri_khai")' in src)
+    check("boot_kiem: lô gửi xuống đã bỏ giá trị khai + mail siêu thị dán nguyên văn",
+          "if k not in _SO_KHAI" in ast.unparse(boot) and '_SO_KHAI = ("gia_tri_khai", "chi_tiet_hang")' in src)
     th = read(os.path.join(PUB, "views", "thuhoi.js"))
-    check("màn lô chỉ hiện số khai khi đã chốt", "ph.da_chot ? html`<div><div class=\"kt-sub\">Siêu thị khai" in th)
+    check("màn lô chỉ hiện tổng khai khi đã chốt (và lô có bảng khai cũ)",
+          "ph.da_chot && D.co_khai ? html`<div><div class=\"kt-sub\">Siêu thị khai" in th)
     page = read(os.path.join(REPO, "ketoan", "www", "ketoan.html"))
     for sub in ("lib", "components"):
         for fn in sorted(os.listdir(os.path.join(PUB, sub))):
@@ -413,6 +438,28 @@ def kiem_tinh():
     guard = read(os.path.join(API, "_guard.py"))
     check("capability thuhoi = salesany", 'caps["thuhoi"] = caps["salesany"]' in guard)
     check("www/ketoan.py đưa thuhoi vào thứ tự workspace", '"thuhoi"' in read(os.path.join(REPO, "ketoan", "www", "ketoan.py")))
+
+    print("-" * 78)
+    print("── 11. Cột đọc sang bảng lô của vanchuyen ──────────────────────────────")
+    m = importlib.import_module("ketoan.api.thu_hoi")
+    cu = {"ten_lai_xe", "sdt_lai_xe", "xe", "tong_sl_khai"}
+    check("không đọc cột lái xe / xe / tổng khai cũ (lô giờ do đơn vị vận chuyển ngoài lấy)",
+          not (cu & set(m._LO_COLS)), str(cu & set(m._LO_COLS)))
+    check("đọc đơn vị thu hồi + mã vận đơn + mail dán",
+          {"don_vi_thu_hoi", "ma_van_don", "chi_tiet_hang"} <= set(m._LO_COLS))
+    ds = ast.unparse(_fn(tree, "list_thu_hoi"))
+    check("danh sách KHÔNG kéo mail dán (Long Text) cho cả trang — dùng _LO_COLS_DS",
+          "chi_tiet_hang" not in m._LO_COLS_DS and "for c in _LO_COLS_DS" in ds and "for c in _LO_COLS)" not in ds)
+    check("tìm lô theo mã vận đơn", "_lo_col('ma_van_don')" in ds)
+    # Gõ sai tên cột thì `_lo_col` trả NULL → màn hình TRỐNG, không báo lỗi. So với JSON thật
+    # của vanchuyen khi repo đó nằm cạnh (máy dev / CI chung); không có thì bỏ qua mục này.
+    vc = os.path.join(REPO, "..", "vanchuyen", "vanchuyen", "van_chuyen", "doctype", "lo_thu_hoi", "lo_thu_hoi.json")
+    if os.path.exists(vc):
+        co = {f["fieldname"] for f in json.load(open(vc, encoding="utf-8"))["fields"]}
+        thieu = [c for c in m._LO_COLS if c not in co]
+        check("mọi cột ketoan đọc đều CÓ trong Lo Thu Hoi của vanchuyen (repo cạnh bên)", not thieu, str(thieu))
+    else:
+        print("  ⚠ bỏ qua so cột với vanchuyen — không thấy repo ../vanchuyen")
 
 
 def main():
