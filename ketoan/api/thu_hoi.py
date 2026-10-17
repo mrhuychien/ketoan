@@ -13,6 +13,8 @@ Chặng TỔNG = `COALESCE(phiếu kiểm, lô)`. Module này ĐỌC SỐNG + M�
 controller bên kia chính là chỗ khóa khách / điểm khi kế toán đã mở phiếu kiểm.
 
 Kế toán chỉ tiếp nối khi lô đã "Đã nhận hàng": đếm hàng chưa về kho là đếm trên giấy.
+Lô bên vận chuyển HỦY yêu cầu ("Đã hủy", kèm lý do) thì chỉ xem — không mở phiếu kiểm;
+`bat_dau_kiem` đọc lô bằng KHÓA để không chạy đua với nút "Hủy yêu cầu" bên kia.
 
 ════════════════════════════════════════════════════════════════════════════
 KIỂM HÀNG — dựng theo màn Ghi hộp của app sx
@@ -56,6 +58,7 @@ from ketoan.api._guard import guard_manager, guard_sales_any, is_chief
 from ketoan.api.mt import SI_NO_FIELD, _company, po_column
 from ketoan.api.thu_hoi_phan_bo import (
     CHANG_KE_TOAN,
+    DA_HUY,
     DANG_KIEM,
     EPS,
     XONG,
@@ -78,6 +81,9 @@ LO_HANG = "Lo Thu Hoi Hang"
 DA_NHAN = "Đã nhận hàng"
 CHANG_VC = ("Tạo yêu cầu", "Đã lấy hàng", DA_NHAN)
 CHANG = CHANG_VC + CHANG_KE_TOAN
+# Lô bị bên vận chuyển hủy yêu cầu (DA_HUY) không phải một nấc của 7 chặng: không tính vào
+# "đang mở", xếp CUỐI danh sách (FIELD() trả 0 cho giá trị lạ = lên ĐẦU).
+_THU_TU = CHANG + (DA_HUY,)
 
 # Cột lô đọc sang. Tách hằng để danh sách và chi tiết không lệch nhau. Hàng do đơn vị
 # vận chuyển ngoài lấy (Viettel Post / Nhất Tín): đơn vị + mã vận đơn + ngày thu
@@ -87,13 +93,13 @@ _LO_COLS = (
     "shipping_address_name", "ten_diem", "ma_diem", "dia_chi", "sdt_diem", "nguoi_lien_he",
     "sdt_lien_he", "ghi_chu", "don_vi_thu_hoi", "ma_van_don", "ngay_hen_lay", "lay_luc", "lay_boi",
     "nhan_luc", "nhan_boi", "so_kien_du_kien", "so_kien_nhan", "gia_tri_khai", "so_dinh_kem",
-    "chi_tiet_hang",
+    "ly_do_huy", "huy_boi", "huy_luc", "huy_tu", "chi_tiet_hang",
 )
 # Danh sách 30 lô một trang không kéo theo 30 bản mail dán (Long Text) — chỉ màn lô cần.
 _LO_COLS_DS = tuple(c for c in _LO_COLS if c != "chi_tiet_hang")
 # Ảnh / PDF mở trong tab; loại khác (Excel, Word, mail…) TẢI VỀ — cùng luật proxy bên vanchuyen.
 DUOI_XEM_TRONG_TAB = frozenset(("jpg", "jpeg", "png", "webp", "gif", "pdf"))
-_DATE_COLS = ("ngay_yeu_cau", "ngay_hen_lay", "lay_luc", "nhan_luc", "chot_luc", "xong_luc",
+_DATE_COLS = ("ngay_yeu_cau", "ngay_hen_lay", "lay_luc", "nhan_luc", "huy_luc", "chot_luc", "xong_luc",
               "posting_date")
 UNG_VIEN_TRANG = 50  # một trang ứng viên hóa đơn gốc; "Xem tiếp" lấy trang sau
 
@@ -126,12 +132,18 @@ def _str_dates(d):
     return d
 
 
-def _lo(name):
-    """Bản ghi SỐNG của lô bên vanchuyen. Không có → throw."""
+def _lo(name, khoa=False):
+    """Bản ghi SỐNG của lô bên vanchuyen. Không có → throw.
+
+    `khoa=True`: đọc KHÓA (`FOR UPDATE`) — thấy bản mới nhất đã commit và giữ khóa hàng lô
+    tới hết giao dịch. Vẫn là ĐỌC (không ghi bảng của vanchuyen); `huy_lo` bên kia khóa
+    cùng hàng, nên "Bắt đầu kiểm" và "Hủy yêu cầu" bấm cùng lúc thì một bên chờ bên kia.
+    """
     _require_lo()
     cols = ", ".join(f"{_lo_col(c)} AS `{c}`" for c in _LO_COLS)
     rows = frappe.db.sql(
-        f"SELECT l.name, {cols} FROM `tab{LO}` l WHERE l.name = %(n)s", {"n": name}, as_dict=True)
+        f"SELECT l.name, {cols} FROM `tab{LO}` l WHERE l.name = %(n)s" + (" FOR UPDATE" if khoa else ""),
+        {"n": name}, as_dict=True)
     if not rows:
         frappe.throw(_("Không tìm thấy lô thu hồi {0} bên vận chuyển.").format(name))
     return _str_dates(rows[0])
@@ -176,7 +188,9 @@ def _expr():
 
 @frappe.whitelist()
 def list_thu_hoi(chang=None, tim=None, tu_ngay=None, den_ngay=None, page=1, page_size=30):
-    """MỌI lô tạo bên vanchuyen + chặng tổng; pill đếm đủ 7 chặng trên cùng bộ tìm.
+    """MỌI lô tạo bên vanchuyen + chặng tổng; pill đếm đủ 7 chặng (+ "Đã hủy") trên cùng bộ tìm.
+
+    `chang` = một trong 7 chặng · "Đã hủy" · "dang_mo" (mặc định: chưa Xong, chưa hủy) · "tat_ca".
 
     Lọc + đếm ở SERVER. Xếp chặng sớm trước, lô cũ trước: việc treo lâu nhất nổi lên đầu.
     SQL thô: JOIN mềm sang bảng app khác, biểu thức chặng dùng chung ba mệnh đề.
@@ -188,7 +202,7 @@ def list_thu_hoi(chang=None, tim=None, tu_ngay=None, den_ngay=None, page=1, page
     page = max(1, cint(page))
     page_size = min(cint(page_size) or 30, 100)
     expr = _expr()
-    p = {"dang_kiem": DANG_KIEM, "xong": XONG}
+    p = {"dang_kiem": DANG_KIEM, "xong": XONG, "huy": DA_HUY}
     conds = ["1 = 1"]
     if cstr(tim).strip():
         p["q"] = "%" + cstr(tim).strip() + "%"
@@ -211,15 +225,15 @@ def list_thu_hoi(chang=None, tim=None, tu_ngay=None, den_ngay=None, page=1, page
     where = base
     chang = cstr(chang).strip() or "dang_mo"
     if chang == "dang_mo":
-        where += f" AND {expr} != %(xong)s"
-    elif chang in CHANG:
+        where += f" AND {expr} NOT IN (%(xong)s, %(huy)s)"
+    elif chang in _THU_TU:
         p["chang"] = chang
         where += f" AND {expr} = %(chang)s"
     total = cint(frappe.db.sql(f"SELECT COUNT(*) FROM `tab{LO}` l {join} WHERE {where}", p)[0][0])
 
-    p.update({"c%d" % i: c for i, c in enumerate(CHANG)})
+    p.update({"c%d" % i: c for i, c in enumerate(_THU_TU)})
     p["lim"], p["off"] = page_size, (page - 1) * page_size
-    order = ", ".join("%(c{0})s".format(i) for i in range(len(CHANG)))
+    order = ", ".join("%(c{0})s".format(i) for i in range(len(_THU_TU)))
     cols = ", ".join(f"{_lo_col(c)} AS `{c}`" for c in _LO_COLS_DS)
     rows = frappe.db.sql(
         f"""SELECT l.name, {cols}, {expr} AS chang,
@@ -234,7 +248,7 @@ def list_thu_hoi(chang=None, tim=None, tu_ngay=None, den_ngay=None, page=1, page
     today = nowdate()
     for r in rows:
         _str_dates(r)
-        r["tuoi"] = date_diff(today, r.ngay_yeu_cau) if r.ngay_yeu_cau and r.chang != XONG else None
+        r["tuoi"] = date_diff(today, r.ngay_yeu_cau) if r.ngay_yeu_cau and r.chang not in (XONG, DA_HUY) else None
         r.update(hd.get(r.name) or {"so_hd": 0, "so_hd_ghi_so": 0, "tien_hd": 0.0})
     return {
         "rows": rows, "total": total, "page": page, "page_size": page_size,
@@ -384,10 +398,19 @@ def get_thu_hoi(name):
 
 @frappe.whitelist()
 def bat_dau_kiem(name):
-    """Mở phiếu kiểm cho một lô ĐÃ NHẬN HÀNG. Gọi lại khi đã có phiếu → trả phiếu cũ."""
+    """Mở phiếu kiểm cho một lô ĐÃ NHẬN HÀNG. Gọi lại khi đã có phiếu → trả phiếu cũ.
+
+    Đọc lô bằng KHÓA (`_lo(khoa=True)`): bên vận chuyển bấm "Hủy yêu cầu" cùng lúc thì hai
+    bên lần lượt, bên sau thấy kết quả bên trước — không có lô vừa hủy vừa đang kiểm.
+    """
     guard_sales_any()
-    lo = _lo(name)
+    lo = _lo(name, khoa=True)
     if not frappe.db.exists(DT, name):
+        if lo["trang_thai"] == DA_HUY:
+            frappe.throw(_(
+                "Lô {0} đã bị bên vận chuyển HỦY yêu cầu ({1}) — không kiểm hàng. Hủy nhầm thì nhờ "
+                "điều phối bấm 'Khôi phục' bên app vận chuyển."
+            ).format(name, lo.get("ly_do_huy") or _("không ghi lý do")))
         if lo["trang_thai"] != DA_NHAN:
             frappe.throw(_(
                 "Lô {0} đang ở '{1}' bên vận chuyển. Kiểm hàng khi hàng đã về kho — nhờ điều phối "

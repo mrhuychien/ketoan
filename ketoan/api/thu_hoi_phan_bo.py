@@ -49,6 +49,9 @@ DA_KIEM = "Đã kiểm hàng"
 DA_NHAP = "Đã nhập chứng từ"
 XONG = "Xong"
 CHANG_KE_TOAN = (DANG_KIEM, DA_KIEM, DA_NHAP, XONG)
+# Lô bên vanchuyen bị HỦY yêu cầu (`lo_thu_hoi.DA_HUY`) — trạng thái của LÔ, không phải một
+# nấc của phiếu kiểm. Một chỗ khai cho api/thu_hoi.py và controller phiếu kiểm.
+DA_HUY = "Đã hủy"
 
 
 def _f(v):

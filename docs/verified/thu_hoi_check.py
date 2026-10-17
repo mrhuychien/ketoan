@@ -22,6 +22,8 @@ NHỮNG CÁI LỖ BỘ KIỂM NÀY CANH
 8. **Lập hóa đơn trả về bỏ qua quyền người bấm** — `si.insert()` không ignore_permissions.
 9. **Màn kiểm hàng hiện số khai** — đếm MÙ, so sau khi chốt.
 10. **Mọi whitelisted method có guard ở dòng đầu**, import map đủ module dùng chung.
+11. **Lô bên vận chuyển đã HỦY vẫn bị đếm "đang mở" / vẫn mở được phiếu kiểm** — và nút
+    "Bắt đầu kiểm" chạy đua với nút "Hủy yêu cầu" (phải đọc lô bằng KHÓA).
 
 Chạy KHÔNG cần bench — stub frappe của `docs/mt/verified/regression_check`:
     python3 docs/verified/thu_hoi_check.py   # exit 0 = đạt
@@ -425,6 +427,57 @@ def kiem_tren_bo_gia():
     p2 = next(pp for qq, pp in reversed(SQL) if "LEFT JOIN `tabAddress` a" in qq)
     check("phân trang: trang 2 bỏ qua 50 tờ đầu, còn nữa thì has_more", p2.get("off") == 50 and r2["has_more"] is True)
 
+    print("-" * 78)
+    print("── 7d. Lô bên vận chuyển ĐÃ HỦY: không 'đang mở', không kiểm hàng ─────")
+    SQL.clear()
+    ROWS = [dict(name="TH-H", chang="Đã hủy", trang_thai="Đã hủy", ngay_yeu_cau="2026-10-01"),
+            dict(name="TH-M", chang="Đã nhận hàng", trang_thai="Đã nhận hàng", ngay_yeu_cau="2026-10-01")]
+    LO_HUY = dict(name="TH-H", trang_thai="Đã hủy", ly_do_huy="Siêu thị rút yêu cầu", customer="COOP",
+                  customer_name="Saigon Co.op", shipping_address_name="ADDR-HD", ten_diem="Co.opMart Hà Đông")
+
+    def sql_huy(q, p=None, as_dict=False, **k):
+        SQL.append((q, dict(p or {})))
+        if "ORDER BY FIELD" in q:                     # trang danh sách
+            return [fr._dict(r) for r in ROWS]
+        if "COUNT(*)" in q and "GROUP BY" not in q:
+            return [[len(ROWS)]]
+        if "FROM `tabLo Thu Hoi` l WHERE l.name" in q:  # _lo
+            return [fr._dict(LO_HUY)]
+        return []
+
+    fr.db.sql = sql_huy
+    fr.db.exists = lambda dt, *a, **k: dt == "Item"   # lô này CHƯA có phiếu kiểm
+    r = api.list_thu_hoi()
+    q, pr = next((q, pr) for q, pr in reversed(SQL) if "ORDER BY FIELD" in q)
+    check("'Đang mở' bỏ cả 'Xong' lẫn 'Đã hủy'", "NOT IN (%(xong)s, %(huy)s)" in q and pr.get("huy") == "Đã hủy")
+    thu_tu = [pr[f"c{i}"] for i in range(10) if f"c{i}" in pr]
+    check("xếp danh sách: lô 'Đã hủy' nằm CUỐI (có trong FIELD, sau 'Xong')",
+          thu_tu[-2:] == ["Xong", "Đã hủy"] and f"%(c{len(thu_tu) - 1})s" in q, str(thu_tu))
+    check("lô hủy không tính tuổi (không thành 'lô treo lâu')",
+          r["rows"][0]["tuoi"] is None and r["rows"][1]["tuoi"] == 0, str([x["tuoi"] for x in r["rows"]]))
+    api.list_thu_hoi(chang="Đã hủy")
+    q, pr = next((q, pr) for q, pr in reversed(SQL) if "ORDER BY FIELD" in q)
+    check("lọc riêng pill 'Đã hủy' được", "= %(chang)s" in q and pr.get("chang") == "Đã hủy")
+    e = raises(lambda: api.bat_dau_kiem("TH-H"))
+    check("Bắt đầu kiểm lô đã hủy -> chặn, nói rõ HỦY + lý do (không bảo 'bấm Đã nhận hàng')",
+          e is not None and "HỦY" in e and "Siêu thị rút yêu cầu" in e and "bấm 'Đã nhận hàng'" not in e, e)
+    lq = [q for q, _p in SQL if "FROM `tabLo Thu Hoi` l WHERE l.name" in q]
+    check("Bắt đầu kiểm đọc lô bằng KHÓA (FOR UPDATE) — không chạy đua với nút Hủy bên vận chuyển",
+          lq and lq[-1].rstrip().endswith("FOR UPDATE"))
+    api._lo("TH-H")
+    lq = [q for q, _p in SQL if "FROM `tabLo Thu Hoi` l WHERE l.name" in q]
+    check("đọc lô để XEM thì không khóa (màn lô, danh sách không giữ khóa hàng của vanchuyen)",
+          not lq[-1].rstrip().endswith("FOR UPDATE"))
+    TT = {"v": "Đã hủy"}
+    fr.db.sql = lambda q, p=None, **k: [["%s" % TT["v"]]] if "SELECT trang_thai FROM `tabLo Thu Hoi`" in q else []
+    e = raises(phieu(lo_thu_hoi="TH-H").before_insert)
+    check("controller phiếu kiểm: lô đã HỦY -> không mở phiếu, kể cả tạo tay trên Desk",
+          e is not None and "HỦY" in e, e)
+    TT["v"] = "Đã nhận hàng"
+    check("controller phiếu kiểm: lô đã nhận hàng -> mở bình thường", raises(phieu(lo_thu_hoi="TH-M").before_insert) is None)
+    check("chữ 'Đã hủy' khai MỘT chỗ (thu_hoi_phan_bo), api + controller cùng dùng",
+          api.DA_HUY is pb.DA_HUY and ctl.DA_HUY is pb.DA_HUY)
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # 6, 8–10. TĨNH
@@ -517,10 +570,14 @@ def kiem_tinh():
     # Gõ sai tên cột thì `_lo_col` trả NULL → màn hình TRỐNG, không báo lỗi. So với JSON thật
     # của vanchuyen khi repo đó nằm cạnh (máy dev / CI chung); không có thì bỏ qua mục này.
     vc = os.path.join(REPO, "..", "vanchuyen", "vanchuyen", "van_chuyen", "doctype", "lo_thu_hoi", "lo_thu_hoi.json")
+    check("đọc dấu hủy của lô (lý do, ai, lúc nào, chặng trước khi hủy)",
+          {"ly_do_huy", "huy_boi", "huy_luc", "huy_tu"} <= set(m._LO_COLS))
     if os.path.exists(vc):
-        co = {f["fieldname"] for f in json.load(open(vc, encoding="utf-8"))["fields"]}
-        thieu = [c for c in m._LO_COLS if c not in co]
+        vf = {f["fieldname"]: f for f in json.load(open(vc, encoding="utf-8"))["fields"]}
+        thieu = [c for c in m._LO_COLS if c not in vf]
         check("mọi cột ketoan đọc đều CÓ trong Lo Thu Hoi của vanchuyen (repo cạnh bên)", not thieu, str(thieu))
+        check("chữ 'Đã hủy' ketoan so KHỚP đúng option trạng thái của vanchuyen",
+              m.DA_HUY in vf["trang_thai"]["options"].split("\n"), vf["trang_thai"]["options"])
     else:
         print("  ⚠ bỏ qua so cột với vanchuyen — không thấy repo ../vanchuyen")
 

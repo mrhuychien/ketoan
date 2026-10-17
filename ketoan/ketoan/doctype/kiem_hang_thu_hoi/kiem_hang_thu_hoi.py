@@ -40,7 +40,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, cstr, flt, now_datetime
 
-from ketoan.api.thu_hoi_phan_bo import EPS, XONG, suy_trang_thai
+from ketoan.api.thu_hoi_phan_bo import DA_HUY, EPS, XONG, suy_trang_thai
 
 SI_FIELD = "custom_kiem_hang_thu_hoi"
 
@@ -95,6 +95,17 @@ def tinh_trang_thai(doc, exclude_si=None):
 
 
 class KiemHangThuHoi(Document):
+    def before_insert(self):
+        # Lô bên vận chuyển đã HỦY yêu cầu thì không mở phiếu kiểm — kể cả tạo tay trên Desk
+        # (cửa portal `bat_dau_kiem` chặn trước, và đọc lô bằng khóa). Đọc MỀM: site chưa có
+        # vanchuyen thì thôi. SQL thô: bảng của app khác, không có meta khi app đó vắng mặt.
+        if not self.lo_thu_hoi or not frappe.db.table_exists("Lo Thu Hoi"):
+            return
+        tt = frappe.db.sql("SELECT trang_thai FROM `tabLo Thu Hoi` WHERE name = %(n)s", {"n": self.lo_thu_hoi})
+        if tt and tt[0][0] == DA_HUY:
+            frappe.throw(_("Lô {0} đã bị bên vận chuyển HỦY yêu cầu — không mở phiếu kiểm. Hủy nhầm thì "
+                           "nhờ điều phối bấm 'Khôi phục' bên app vận chuyển.").format(self.lo_thu_hoi))
+
     def validate(self):
         self._chuan_hoa_dong()
         self._khoa_khi_da_chot()

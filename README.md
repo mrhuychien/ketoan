@@ -47,6 +47,10 @@ chạy 3 chặng vận chuyển *Tạo yêu cầu → Đã lấy hàng → Đã 
 - **Trạng thái tự đi**: hook `Sales Invoice` (insert/update/submit/cancel/trash) tính lại
   chặng của phiếu kiểm — đủ số và mọi hóa đơn đã ghi sổ thì **Xong**. Không lập hóa đơn
   (hàng hủy, đổi hàng…) thì chỉ Kế toán trưởng kết luận được, có ghi lý do.
+- **Lô bên vận chuyển đã HỦY yêu cầu** ("Đã hủy" + lý do): không tính vào "Đang mở", có pill
+  riêng; màn lô hiện ai hủy · lúc nào · lý do, không mở phiếu kiểm được ("Bắt đầu kiểm" đọc
+  lô bằng khóa để không chạy đua với nút Hủy bên kia). Muốn hủy lô kế toán đã mở phiếu kiểm:
+  xóa phiếu kiểm trước, hoặc KTT kết luận không lập hóa đơn.
 - Quyền: kế toán bán hàng (NPP / MT / Du lịch) + KTT; lập hóa đơn dùng **quyền tạo Sales
   Invoice của chính người bấm**. Ketoan chỉ **đọc** bảng của vanchuyen (đọc mềm — chưa cài
   vanchuyen thì tab rỗng, không lỗi), không bao giờ ghi.

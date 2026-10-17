@@ -566,6 +566,9 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
   padding: 12px 14px; box-shadow: var(--kt-shadow); color: var(--kt-text) !important; }
 .kt-th-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .kt-th-card-meta { font-size: 12px; color: var(--kt-text-2); margin-top: 6px; }
+/* Lô bên vận chuyển đã HỦY yêu cầu: dòng lý do trên bảng / thẻ, khung trên màn lô. */
+.kt-th-huy { font-size: 12px; font-weight: 600; color: var(--kt-danger); margin-top: 6px; }
+.kt-th-huy-box { margin-bottom: 14px; }
 
 /* Một lô */
 /* Ứng viên hóa đơn gốc: đầu bảng nói rõ khách + điểm giao đang lọc, ô tìm + nút mở mọi điểm. */

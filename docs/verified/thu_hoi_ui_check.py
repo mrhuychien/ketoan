@@ -29,6 +29,8 @@ NHỮNG ĐIỀU MÀN HÌNH HỨA
 7. **Hồ sơ lô theo đúng lô mới**: đơn vị thu hồi · mã vận đơn · ngày thu (không còn xe /
    lái xe), mail dán giữ nguyên tab, file Excel TẢI VỀ còn PDF mở tab; lô mới không có cột
    "Siêu thị khai", lô cũ còn bảng hàng khai thì vẫn so khai / kiểm như trước.
+8. **Lô bên vận chuyển đã HỦY**: không tính vào "Đang mở", có pill "Đã hủy" riêng, thẻ ghi
+   lý do; màn lô có khung "đã HỦY" + lý do, không có nút "Bắt đầu kiểm hàng".
 
 Thử phá (đã làm khi viết): bỏ `pointer-events: none` của `.kt-toast` → bước sửa dòng
 kẹt vì toast chặn nút LƯU; trả `.kt-th-cards { display: flex }` ra ngoài media query →
@@ -163,9 +165,24 @@ def lo_cu():
     }
 
 
+HUY = dict(trang_thai="Đã hủy", ly_do_huy="Siêu thị rút yêu cầu trả hàng", huy_boi="Điều hành",
+           huy_luc="2026-10-15 09:00:00", huy_tu="Đã lấy hàng")
+
+
+def lo_huy():
+    """Lô bên vận chuyển đã HỦY yêu cầu: chỉ xem, không có phiếu kiểm."""
+    lo = dict(LO, name="TH-2026-0004", ten_diem="Co.opMart Thắng Lợi", chi_tiet_hang=None, **HUY)
+    return {"lo": lo, "khai": [], "co_khai": False, "tong_khai": 0, "files": [], "phieu": None, "hoa_don": [],
+            "so_sanh": [], "chang": "Đã hủy", "chang_list": CHANG, "lech": {}, "con_can": {},
+            "flags": {k: False for k in ("bat_dau", "sua", "chot", "mo_lai", "lap_hd", "cap_nhat", "xoa", "ket_luan")},
+            "is_chief": False}
+
+
 def get_th(a=None):
     if (a or {}).get("name") == "TH-2026-0005":
         return lo_cu()
+    if (a or {}).get("name") == "TH-2026-0004":
+        return lo_huy()
     p = S["phieu"]
     kiem, lap = tong(), da_lap()
     chot = bool(p and p["da_chot"])
@@ -203,9 +220,10 @@ def list_thu_hoi(a):
                  kiem_so_ma=len(S["phieu"]["items"]) if S["phieu"] else 0,
                  so_hd=len(S["hd"]), so_hd_ghi_so=0, tien_hd=0),
             dict(LO, name="TH-2026-0003", trang_thai="Tạo yêu cầu", chang="Tạo yêu cầu",
-                 ten_diem="GO! Thăng Long", customer_name="Central Retail", tuoi=3, so_hd=0)]
+                 ten_diem="GO! Thăng Long", customer_name="Central Retail", tuoi=3, so_hd=0),
+            dict(LO, name="TH-2026-0004", chang="Đã hủy", ten_diem="Co.opMart Thắng Lợi", tuoi=None, so_hd=0, **HUY)]
     f = [r for r in rows if a.get("chang") == "tat_ca"
-         or (r["chang"] != "Xong" if a.get("chang") == "dang_mo" else r["chang"] == a.get("chang"))]
+         or (r["chang"] not in ("Xong", "Đã hủy") if a.get("chang") == "dang_mo" else r["chang"] == a.get("chang"))]
     counts = {}
     for r in rows:
         counts[r["chang"]] = counts.get(r["chang"], 0) + 1
@@ -429,7 +447,26 @@ def run(pw, exe, root, ok, bad, shots=None):
 
     # 1. Danh sách
     expect("nav có tab Thu hồi", "Thu hồi" in p.text_content(".kt-nav"))
-    expect("list: pill 7 chặng + Đang mở + Tất cả", len(p.query_selector_all(".kt-th-pill")) == 9)
+    expect("list: pill Đang mở + 7 chặng + Đã hủy + Tất cả", len(p.query_selector_all(".kt-th-pill")) == 10)
+    pills = p.text_content("#th-pills")
+    expect("list: 'Đang mở' KHÔNG đếm lô hủy; 'Đã hủy' 1; 'Tất cả' đếm đủ",
+           "Đang mở 2" in pills and "Đã hủy 1" in pills and "Tất cả 3" in pills, pills)
+    expect("list 'Đang mở' không hiện lô hủy", "TH-2026-0004" not in p.text_content(".kt-th-cards"))
+    p.click('.kt-th-pill[data-f="Đã hủy"]')
+    p.wait_for_timeout(300)
+    the = p.text_content(".kt-th-cards")
+    expect("pill 'Đã hủy': thẻ lô ghi 🚫 + lý do + huy hiệu đỏ",
+           "Siêu thị rút yêu cầu trả hàng" in the and p.query_selector(".kt-th-card .kt-badge--red") is not None, the[:120])
+    p.click(".kt-th-card")
+    p.wait_for_timeout(600)
+    m = p.text_content("main")
+    expect("lô hủy: khung 'đã HỦY' + ai + lý do, không nút 'Bắt đầu kiểm hàng'",
+           "Bên vận chuyển đã HỦY yêu cầu này" in m and "Điều hành" in m and "Siêu thị rút yêu cầu trả hàng" in m
+           and p.query_selector("#th-batdau") is None and "không kiểm hàng" in m)
+    if shots:
+        p.screenshot(path=os.path.join(shots, "kt_lo_huy.png"), full_page=True)
+    p.evaluate("location.hash = '#/thu-hoi'")
+    p.wait_for_timeout(600)
     expect("list mobile: hiện thẻ, ẩn bảng", p.is_visible(".kt-th-cards") and not p.is_visible(".kt-th-desk"))
     expect("list mobile: thẻ lô ghi đơn vị thu hồi + mã vận đơn",
            "🚚 Viettel Post · VĐ VTP123" in p.text_content(".kt-th-cards"))

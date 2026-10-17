@@ -28,7 +28,8 @@ Một **LÔ THU HỒI** = một lần siêu thị gọi trả, đi qua 6 chặng
 | 6 | Xong | ketoan | MÁY SUY: mọi hóa đơn trả về đã ghi sổ |
 
 Giữa 3 và 4 có chặng phụ **Đang kiểm** (đã mở phiếu kiểm, chưa chốt) — để thấy việc
-đang làm dở, không phải để bấm.
+đang làm dở, không phải để bấm. Ngoài tiến trình có **Đã hủy** (xem §5b): lô dừng hẳn,
+giữ lại làm dấu vết.
 
 ## 2. Hai bảng, hai chủ — không ai ghi bảng của người kia
 
@@ -120,11 +121,34 @@ Kế toán ghi sổ / hủy / xóa hóa đơn trả về THẲNG TRÊN DESK là 
 `db_set` (không `save()` để khỏi chạy lại validate vào giữa giao dịch của hóa đơn).
 Màn chi tiết vẫn suy lại lúc đọc.
 
+## 5b. Hủy yêu cầu — GIỮ dấu vết, không xóa
+
+Siêu thị rút yêu cầu, lập trùng lô, đơn vị vận chuyển không lấy được hàng… → điều hành
+bấm **Hủy yêu cầu** (`vanchuyen.api.thu_hoi.huy_lo`), lý do BẮT BUỘC. Lô sang **Đã hủy**
+kèm `ly_do_huy` · `huy_boi` · `huy_luc` · `huy_tu` (chặng lúc hủy). "Xóa lô" vẫn chỉ cho lô
+lập nhầm còn "Tạo yêu cầu"; hủy thì lô còn đó để trả lời "lô này đi đâu rồi".
+
+- **Đã hủy không phải một nấc của 7 chặng**: không tính vào "Đang mở", có pill riêng, xếp
+  CUỐI danh sách ở cả hai app (`FIELD()` trả 0 cho giá trị lạ = lên đầu — phải liệt kê).
+- **Chỉ hủy khi kế toán CHƯA mở phiếu kiểm.** Đã mở thì phiếu kiểm / hóa đơn trả về đang
+  dựng trên lô: kế toán **xóa phiếu kiểm** trước (phiếu chưa chốt, chưa có hóa đơn trả
+  về), hoặc KTT kết luận **không lập hóa đơn trả về** (lô thành Xong). Controller `Lo Thu
+  Hoi` chặn thêm một lần — kể cả sửa trên Desk.
+- **Không chạy đua**: `huy_lo` khóa hàng lô + đọc KHÓA phiếu kiểm (`FOR UPDATE`);
+  `bat_dau_kiem` bên ketoan đọc lô bằng KHÓA. Hai nút bấm cùng lúc thì một bên chờ bên
+  kia xong rồi thấy kết quả — không có lô vừa hủy vừa đang kiểm.
+- **Lô hủy chỉ xem**: không sửa, không chuyển chặng, không xóa; đính kèm VẪN thêm được
+  (mail hủy của siêu thị hay đến sau). Kế toán thấy khung "đã HỦY" + lý do, không có nút
+  "Bắt đầu kiểm hàng"; controller `Kiem Hang Thu Hoi` cũng không cho mở phiếu cho lô hủy
+  (kể cả tạo tay trên Desk).
+- **Khôi phục** (`khoi_phuc_lo`) khi hủy nhầm: về ĐÚNG chặng `huy_tu`, dấu hủy trên bản
+  ghi được xóa; dấu cũ còn trong lịch sử thay đổi (Version — DocType bật `track_changes`).
+
 ## 6. Quyền
 
 | | vanchuyen | ketoan |
 |---|---|---|
-| Lập/sửa/xóa lô, đính kèm, điều phối thu hồi, chuyển chặng | điều hành (quyền ghi Sales Invoice), tổ trưởng, admin | — |
+| Lập/sửa/xóa lô, đính kèm, điều phối thu hồi, chuyển chặng, hủy / khôi phục | điều hành (quyền ghi Sales Invoice), tổ trưởng, admin | — |
 | Theo dõi, kiểm hàng, chốt, mở lại, lập HĐ trả về | — | kế toán kênh bán hàng (NPP/MT/Du lịch) + KTT |
 | Kết luận "Không lập hóa đơn trả" | — | KTT |
 
@@ -144,8 +168,9 @@ phục vụ file trên chính tên miền của site, inline một .html là scr
   chọn điểm (lọc theo Dynamic Link của khách, kèm mã điểm `MT Store` nếu có; chọn xong
   danh sách thu lại, "Đổi điểm" để mở lại), ngày yêu cầu, số phiếu siêu thị, liên hệ, lý
   do, ô dán chi tiết hàng từ mail, điều phối thu hồi (đơn vị / mã vận đơn / ngày thu /
-  số kiện), đính kèm nhiều file, nút chuyển chặng + lùi chặng.
-- ketoan tab **Thu hồi** `#/thu-hoi`: theo dõi MỌI lô (pill 7 chặng), `#/thu-hoi/:id`:
+  số kiện), đính kèm nhiều file, nút chuyển chặng + lùi chặng, **Hủy yêu cầu** (lý do
+  bắt buộc, có gợi ý một chạm) / **Khôi phục**.
+- ketoan tab **Thu hồi** `#/thu-hoi`: theo dõi MỌI lô (pill 7 chặng + Đã hủy), `#/thu-hoi/:id`:
   hồ sơ lô (đơn vị thu hồi, chi tiết hàng dán từ mail, đính kèm) + phiếu kiểm + so
   sánh đã kiểm / đã lập hóa đơn (cột "khai" chỉ với lô cũ có bảng hàng khai) + hóa đơn
   trả về.
