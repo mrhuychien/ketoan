@@ -318,6 +318,27 @@ export const api = {
   mtSaveCreditDays: (customer, credit_days) =>
     callMethod(NS + "mt_debt.save_credit_days", withCompany({ customer, credit_days })),
 
+  // THU HỒI HÀNG — lô siêu thị xuất trả bên vận chuyển → kiểm hàng → hóa đơn trả về.
+  // Không gửi `company`: phiếu kiểm mang công ty của chính nó (chép lúc mở), và
+  // mọi kiểm tra công ty nằm ở backend (`mt._company`).
+  thList: (a) => callMethod(NS + "thu_hoi.list_thu_hoi", a || {}),
+  thGet: (name) => callMethod(NS + "thu_hoi.get_thu_hoi", { name }),
+  thBatDau: (name) => callMethod(NS + "thu_hoi.bat_dau_kiem", { name }),
+  thBoot: (name) => callMethod(NS + "thu_hoi.boot_kiem", { name }),
+  thThem: (a) => callMethod(NS + "thu_hoi.them_dong", a),
+  thSua: (a) => callMethod(NS + "thu_hoi.sua_dong", a),
+  thXoaDong: (name, row) => callMethod(NS + "thu_hoi.xoa_dong", { name, row }),
+  thGhiChu: (name, ghi_chu) => callMethod(NS + "thu_hoi.luu_ghi_chu", { name, ghi_chu }),
+  thChot: (name) => callMethod(NS + "thu_hoi.chot", { name }),
+  thMoLai: (name) => callMethod(NS + "thu_hoi.mo_lai", { name }),
+  thKetLuan: (name, ly_do) => callMethod(NS + "thu_hoi.ket_luan_khong_lap", { name, ly_do }),
+  thXoaPhieu: (name) => callMethod(NS + "thu_hoi.xoa_phieu", { name }),
+  thUngVien: (name) => callMethod(NS + "thu_hoi.ung_vien_hoa_don", { name }),
+  thTaoHd: (name, sales_invoice, posting_date) =>
+    callMethod(NS + "thu_hoi.tao_hoa_don_tra", { name, sales_invoice, posting_date }),
+  thCapNhatHd: (name) => callMethod(NS + "thu_hoi.cap_nhat_hoa_don", { name }),
+  thXoaHd: (name, sales_invoice) => callMethod(NS + "thu_hoi.xoa_hoa_don_nhap", { name, sales_invoice }),
+
   // Alerts
   alerts: (a) => callMethod(NS + "alerts.get_alerts", withCompany(a)),
 

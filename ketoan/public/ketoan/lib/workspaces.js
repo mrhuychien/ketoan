@@ -129,6 +129,36 @@ export const WORKSPACES = [
     ],
   },
   {
+    // THU HỒI HÀNG — tab riêng, không nằm trong bàn làm việc MT: lô thu hồi về theo
+    // CHUYẾN XE chứ không theo chuỗi, và hàng khách NPP trả cũng đi đúng đường này.
+    key: "thuhoi",
+    label: "Theo dõi thu hồi",
+    navLabel: "Thu hồi",
+    icon: "fa-rotate-left",
+    home: "/thu-hoi",
+    desc: "Hàng siêu thị xuất trả: xe lấy về → kiểm hàng → hóa đơn trả về",
+    guide: [
+      "Bên vận chuyển tạo lô khi siêu thị gọi trả hàng (kèm phiếu xuất trả), giao xe đi lấy, bấm 'Đã nhận hàng' khi hàng xuống kho.",
+      "Kế toán tiếp nối từ 'Đã nhận hàng': mở lô → 'Kiểm hàng' trên điện thoại → quét mã vạch / tìm mã → nhập số (thùng + hộp) → lưu từng lần.",
+      "Đếm MÙ, không nhìn số siêu thị khai; xong thì 'Chốt phiếu' rồi mới so khai / kiểm — lệch là thứ phải hỏi lại siêu thị hoặc nhà xe.",
+      "Sau khi chốt: chọn hóa đơn gốc → 'Lập hóa đơn trả về' (NHÁP). Hàng từ nhiều hóa đơn gốc thì lập lại tới khi phủ đủ. Mở Desk soát rồi ghi sổ.",
+      "Trạng thái tự đi: Đã kiểm hàng → Đã nhập chứng từ (đủ hóa đơn nháp) → Xong (mọi hóa đơn trả về đã ghi sổ).",
+    ],
+    sections: [
+      { title: "Thực hiện", icon: "fa-bolt", items: [
+        { label: "Theo dõi thu hồi (mọi lô)", icon: "fa-rotate-left", type: "route", route: "/thu-hoi" },
+        { label: "Lô chờ kiểm hàng", icon: "fa-barcode", type: "route", route: "/thu-hoi?chang=Đã nhận hàng" },
+        { label: "Hóa đơn trả về (Desk)", icon: "fa-file-invoice", type: "desk", href: "/desk/sales-invoice?is_return=1" },
+      ]},
+      { title: "Báo cáo", icon: "fa-chart-line", items: [
+        { label: "Lô đã kiểm, chưa đủ hóa đơn trả về", icon: "fa-hourglass-half", type: "route", route: "/thu-hoi?chang=Đã kiểm hàng" },
+      ]},
+      { title: "Công cụ", icon: "fa-screwdriver-wrench", items: [
+        { label: "Phiếu kiểm hàng thu hồi (Desk)", icon: "fa-list-check", type: "desk", href: "/desk/kiem-hang-thu-hoi" },
+      ]},
+    ],
+  },
+  {
     key: "purchase",
     label: "Kế toán mua hàng",
     navLabel: "Mua hàng",

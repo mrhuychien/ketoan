@@ -1,0 +1,433 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""thu_hoi_check — THU HỒI HÀNG bên kế toán: hóa đơn trả về đúng ĐVT, trạng thái không nói dối.
+
+════════════════════════════════════════════════════════════════════════════
+NHỮNG CÁI LỖ BỘ KIỂM NÀY CANH
+════════════════════════════════════════════════════════════════════════════
+
+1. **Dòng trả sai đơn vị / làm tròn.** ERPNext v16 so `qty` THEO ĐVT CỦA DÒNG khi
+   hóa đơn trả về `update_stock = 0`. Dòng gốc "10 Thùng" mà dòng trả nối vào ghi
+   "70 Hộp" là so 70 với 10. Và làm tròn 70/30 = 2,333 thùng là lệch tiền với số
+   siêu thị trừ. `phan_bo` phải: chẵn thùng → dòng nối; lẻ đúng y → dòng nối số lẻ;
+   còn lại → dòng KHÔNG nối ĐVT kho. Tổng luôn ĐÚNG y số cần trả.
+2. **Trần trả bỏ sót.** Phải trừ mọi lần trả trước của hóa đơn gốc — cả dòng không
+   nối, cả bản NHÁP (ERPNext chỉ đếm bản đã ghi sổ).
+3. **Trạng thái nói dối.** "Xong" khi phiếu trả THỪA so với số kiểm là ghi giảm công
+   nợ nhiều hơn hàng thật về; chưa chốt mà có phiếu trả cũng không phải "đã kiểm".
+4. **Sửa số sau khi chốt** (cả Desk) — phiếu trả dựng trên số đã chốt.
+5. **Tin hệ số quy đổi client gửi** — "2 thùng" với hệ số 999 không được thành 1998 hộp.
+6. **Ghi vào bảng của vanchuyen** — ketoan chỉ đọc `Lo Thu Hoi`.
+7. **Hook chặn ghi sổ** — `dong_bo_trang_thai` phải nuốt lỗi và không `save()`.
+8. **Lập hóa đơn trả về bỏ qua quyền người bấm** — `si.insert()` không ignore_permissions.
+9. **Màn kiểm hàng hiện số khai** — đếm MÙ, so sau khi chốt.
+10. **Mọi whitelisted method có guard ở dòng đầu**, import map đủ module dùng chung.
+
+Chạy KHÔNG cần bench — stub frappe của `docs/mt/verified/regression_check`:
+    python3 docs/verified/thu_hoi_check.py   # exit 0 = đạt
+"""
+
+import ast
+import importlib
+import json
+import os
+import re
+import sys
+import types
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(REPO, "docs", "mt", "verified"))
+import regression_check as rc  # noqa: E402
+
+API = os.path.join(REPO, "ketoan", "api")
+PUB = os.path.join(REPO, "ketoan", "public", "ketoan")
+
+ok_all = True
+
+
+def check(label, cond, detail=""):
+    global ok_all
+    print(("  ✅ " if cond else "  ❌ ") + label + (f"  ({detail})" if detail else ""))
+    if not cond:
+        ok_all = False
+    return cond
+
+
+def raises(fn):
+    try:
+        fn()
+        return None
+    except Exception as e:  # noqa: BLE001
+        return str(e) or type(e).__name__
+
+
+def read(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 1–3. HÀM THUẦN
+# ════════════════════════════════════════════════════════════════════════════
+def kiem_ham_thuan(pb):
+    print("-" * 78)
+    print("── 1. phan_bo: giữ ĐVT dòng gốc, không bao giờ làm tròn ─────────────────")
+
+    THUNG = {"name": "R1", "item_code": "BDX", "qty": 10, "conversion_factor": 24, "uom": "Thùng"}
+    HOP = {"name": "R2", "item_code": "BDX", "qty": 30, "conversion_factor": 1, "uom": "Hộp"}
+
+    def tong(plan):
+        return sum(x["stock_qty"] for x in plan)
+
+    plan, thieu = pb.phan_bo({"BDX": 70}, [THUNG], {}, {}, 3, ())
+    noi = [x for x in plan if x["noi"]]
+    roi = [x for x in plan if not x["noi"]]
+    check("70 hộp vào dòng '10 Thùng' (24/thùng): 2 thùng NỐI + 22 hộp KHÔNG NỐI",
+          len(noi) == 1 and noi[0]["qty"] == 2 and len(roi) == 1 and roi[0]["stock_qty"] == 22, json.dumps(plan))
+    check("tổng ĐÚNG y 70, không thiếu, không làm tròn", tong(plan) == 70 and not thieu)
+    check("dòng nối mang qty theo ĐVT dòng gốc (2 thùng), stock_qty = qty × hệ số",
+          all(x["stock_qty"] == x["qty"] * 24 for x in noi))
+
+    plan, _ = pb.phan_bo({"BDX": 6}, [THUNG], {}, {}, 3, ())
+    check("6 hộp = 0,25 thùng ghi ĐÚNG y -> một dòng NỐI số lẻ",
+          len(plan) == 1 and plan[0]["noi"] and plan[0]["qty"] == 0.25, json.dumps(plan))
+    plan, _ = pb.phan_bo({"BDX": 6}, [THUNG], {}, {}, 3, ("Thùng",))
+    check("ĐVT Thùng bắt buộc số nguyên -> 6 hộp đi dòng KHÔNG NỐI",
+          len(plan) == 1 and not plan[0]["noi"] and plan[0]["stock_qty"] == 6, json.dumps(plan))
+    plan, _ = pb.phan_bo({"BDX": 7}, [dict(THUNG, conversion_factor=30, qty=10)], {}, {}, 3, ())
+    check("7/30 thùng = 0,2333… KHÔNG làm tròn -> dòng không nối 7 hộp",
+          len(plan) == 1 and not plan[0]["noi"] and plan[0]["stock_qty"] == 7, json.dumps(plan))
+
+    plan, _ = pb.phan_bo({"BDX": 70}, [dict(HOP, qty=100)], {}, {}, 3, ())
+    check("dòng gốc theo ĐVT kho (hộp) -> 70 hộp NỐI trọn",
+          len(plan) == 1 and plan[0]["noi"] and plan[0]["qty"] == 70)
+    plan, _ = pb.phan_bo({"BDX": 60}, [dict(THUNG, qty=2), HOP], {}, {}, 3, ())
+    check("hai dòng gốc thùng + hộp: 2 thùng (48) + 12 hộp, đều NỐI",
+          all(x["noi"] for x in plan) and tong(plan) == 60 and {x["src"] for x in plan} == {"R1", "R2"},
+          json.dumps(plan))
+
+    print("-" * 78)
+    print("── 2. Trần trả: trừ mọi lần trả trước — dòng không nối, bản nháp ───────")
+    plan, thieu = pb.phan_bo({"BDX": 30}, [THUNG], {}, {"BDX": 230}, 3, ())
+    check("đã trả 230/240 hộp (mọi phiếu, kể cả không nối) -> chỉ nhận 10, thiếu 20",
+          tong(plan) == 10 and abs(thieu.get("BDX", 0) - 20) < 1e-9, f"{tong(plan)} / {thieu}")
+    plan, thieu = pb.phan_bo({"BDX": 48}, [THUNG], {"R1": 9}, {"BDX": 216}, 3, ())
+    check("dòng gốc đã trả 9/10 thùng -> chỉ 1 thùng NỐI được",
+          sum(x.get("qty", 0) for x in plan if x["noi"]) == 1 and tong(plan) == 24 and thieu.get("BDX") == 24,
+          json.dumps(plan))
+    # Ca trần DÒNG là chốt chặn thật (trần mặt hàng còn dư): dòng thùng đã trả 9/10 thùng,
+    # dòng hộp chưa trả gì. Bỏ trần dòng thì máy dồn 2 thùng vào dòng chỉ còn 1 — ERPNext
+    # ném "Cannot return more than 1" đúng lúc ghi sổ.
+    plan, thieu = pb.phan_bo({"BDX": 48}, [THUNG, HOP], {"R1": 9}, {"BDX": 216}, 3, ())
+    theo = {x["src"]: x for x in plan}
+    check("dòng thùng còn 1 thùng -> 1 thùng NỐI + 24 hộp sang dòng hộp, không vượt trần dòng",
+          theo.get("R1", {}).get("qty") == 1 and theo.get("R2", {}).get("qty") == 24 and not thieu,
+          json.dumps(plan))
+    plan, thieu = pb.phan_bo({"KHAC": 5}, [THUNG], {}, {}, 3, ())
+    check("mã không có trên hóa đơn gốc -> không dòng nào, thiếu trọn", not plan and thieu == {"KHAC": 5})
+
+    src = read(os.path.join(API, "thu_hoi.py"))
+    body = rc.code_only(os.path.join(API, "thu_hoi.py")) if hasattr(rc, "code_only") else src
+    m = re.search(r"def _ke_hoach_nhieu\(.*?\n(?=def )", src, re.S)
+    kh = m.group(0) if m else ""
+    check("_ke_hoach_nhieu đếm phiếu trả docstatus < 2 (CẢ bản nháp)", "r.docstatus < 2" in kh)
+    check("_ke_hoach_nhieu đếm cả dòng KHÔNG NỐI vào trần mặt hàng",
+          "da_ma[t.item_code]" in kh and "if t.sales_invoice_item:" in kh)
+    del body
+
+    print("-" * 78)
+    print("── 3. suy_trang_thai: không báo Xong khi phiếu trả lệch số kiểm ────────")
+    can = {"A": 10, "B": 5}
+    hd_nhap = [{"name": "R-1", "docstatus": 0, "items": {"A": 10, "B": 5}}]
+    hd_so = [{"name": "R-1", "docstatus": 1, "items": {"A": 10, "B": 5}}]
+    S = pb.suy_trang_thai
+    check("chưa chốt -> Đang kiểm (kể cả đã có phiếu trả)", S(0, 0, can, hd_so)[0] == pb.DANG_KIEM)
+    check("chốt, chưa phiếu trả -> Đã kiểm hàng", S(1, 0, can, [])[0] == pb.DA_KIEM)
+    check("chốt, phiếu trả nháp phủ đúng -> Đã nhập chứng từ", S(1, 0, can, hd_nhap)[0] == pb.DA_NHAP)
+    check("chốt, phủ đúng, đã ghi sổ hết -> Xong", S(1, 0, can, hd_so)[0] == pb.XONG)
+    tt, lech = S(1, 0, can, [{"name": "R", "docstatus": 1, "items": {"A": 10, "B": 3}}])
+    check("phiếu trả THIẾU -> Đã kiểm hàng + lệch âm", tt == pb.DA_KIEM and lech == {"B": -2}, str(lech))
+    tt, lech = S(1, 0, can, [{"name": "R", "docstatus": 1, "items": {"A": 12, "B": 5}}])
+    check("phiếu trả THỪA (ghi giảm nhiều hơn hàng về) -> KHÔNG Xong", tt == pb.DA_KIEM and lech == {"A": 2}, str(lech))
+    tt, lech = S(1, 0, can, [{"name": "R", "docstatus": 1, "items": {"A": 10, "B": 5, "C": 1}}])
+    check("phiếu trả có mã KHÔNG kiểm -> KHÔNG Xong", tt == pb.DA_KIEM and "C" in lech)
+    check("KTT kết luận không lập -> Xong", S(1, 1, can, [])[0] == pb.XONG)
+    check("con_can: phần đã kiểm chưa có phiếu trả",
+          pb.con_can(can, [{"items": {"A": 4}}]) == {"A": 6, "B": 5})
+    check("gộp chi tiết khi quét thêm cùng mã: 2 thùng + 1 thùng 3 hộp = 3 thùng 3 hộp",
+          pb.mo_ta_chi_tiet(pb.gop_chi_tiet([{"uom": "Thùng", "sl": 2, "he_so": 24}],
+                                            [{"uom": "Thùng", "sl": 1, "he_so": 24}, {"uom": "Hộp", "sl": 3, "he_so": 1}]))
+          == "3 Thùng + 3 Hộp")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 4–5, 7. CONTROLLER + API trên bộ giả frappe
+# ════════════════════════════════════════════════════════════════════════════
+class FakeRow(dict):
+    __getattr__ = dict.get
+
+    def __setattr__(self, k, v):
+        self[k] = v
+
+    def as_dict(self):
+        return dict(self)
+
+
+def kiem_tren_bo_gia():
+    fr = rc._stub_frappe()
+    u = sys.modules["frappe.utils"]
+    u.date_diff = lambda a, b: 0
+    u.get_fullname = lambda user=None: "Người kiểm"
+    fr.DuplicateEntryError = type("DuplicateEntryError", (Exception,), {})
+    # Guard THẬT chạy trên phiên giả: kế toán MT (không phải KTT) — đúng người dùng màn này.
+    fr.get_roles = lambda *a, **k: ["Ke Toan MT"]
+
+    ITEMS = {"BDX": {"item_name": "Bánh đậu xanh 170g", "stock_uom": "Hộp"}}
+    UOMS = [{"parent": "BDX", "uom": "Thùng", "conversion_factor": 24}, {"parent": "BDX", "uom": "Hộp", "conversion_factor": 1}]
+    WROTE = []
+
+    class Doc:
+        doctype = "Kiem Hang Thu Hoi"
+
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+        def get(self, k, default=None):
+            return self.__dict__.get(k, default)
+
+        def get_doc_before_save(self):
+            return self.__dict__.get("_before")
+
+        def append(self, f, d):
+            r = FakeRow(d)
+            r.setdefault("name", "row-%d" % (len(self.items) + 1))
+            self.items.append(r)
+            return r
+
+        def set(self, f, v):
+            setattr(self, f, v)
+
+        def save(self):
+            self.validate()
+
+        class meta:  # noqa: N801
+            @staticmethod
+            def get_label(f):
+                return f
+
+    sys.modules["frappe.model.document"].Document = Doc
+
+    class DB(type(fr.db)):
+        def get_value(self, dt, name=None, fields=None, **k):
+            if dt == "Item":
+                it = ITEMS.get(name)
+                return fr._dict(it) if it else None
+            return None
+
+        def has_column(self, *a, **k):
+            return True
+
+        def sql(self, *a, **k):
+            return []
+
+        def set_value(self, *a, **k):
+            WROTE.append((a, k))
+
+        def exists(self, dt, *a, **k):
+            return dt in ("Item", "Kiem Hang Thu Hoi")
+
+    fr.db = DB()
+
+    def get_all(dt, filters=None, fields=None, **k):
+        if dt == "Item":
+            return [fr._dict(name=n, item_name=v["item_name"], stock_uom=v["stock_uom"]) for n, v in ITEMS.items()]
+        if dt == "UOM Conversion Detail":
+            return [fr._dict(r) for r in UOMS]
+        return []
+
+    fr.get_all = get_all
+    sys.path.insert(0, REPO)
+    ctl = importlib.import_module("ketoan.ketoan.doctype.kiem_hang_thu_hoi.kiem_hang_thu_hoi")
+    api = importlib.import_module("ketoan.api.thu_hoi")
+    pb = importlib.import_module("ketoan.api.thu_hoi_phan_bo")
+
+    print("-" * 78)
+    print("── 4. Chốt rồi thì khóa số; một mã một dòng ─────────────────────────────")
+
+    def phieu(**kw):
+        base = dict(name="TH-1", lo_thu_hoi="TH-1", company="C", customer="COOP", shipping_address_name="A",
+                    da_chot=0, khong_lap_hd=0, items=[FakeRow(name="r1", item_code="BDX", qty=10, idx=1)],
+                    xong_luc=None, modified="2026-10-17 10:00:00")
+        base.update(kw)
+        return ctl.KiemHangThuHoi(**base)
+
+    before = phieu(da_chot=1)
+    d = phieu(da_chot=1, _before=before, items=[FakeRow(name="r1", item_code="BDX", qty=12, idx=1)])
+    check("đã chốt mà đổi số -> chặn", raises(d.validate) is not None)
+    d = phieu(da_chot=1, _before=before)
+    check("đã chốt, không đổi số (ghi chú) -> qua", raises(d.validate) is None)
+    d = phieu(da_chot=0, _before=before, items=[FakeRow(name="r1", item_code="BDX", qty=12, idx=1)])
+    check("mở lại (da_chot 1 -> 0) rồi sửa -> qua", raises(d.validate) is None)
+    d = phieu(_before=phieu(), customer="BIGC")
+    check("đổi khách sau khi mở phiếu -> chặn", raises(d.validate) is not None)
+    d = phieu(items=[FakeRow(name="r1", item_code="BDX", qty=1, idx=1), FakeRow(name="r2", item_code="BDX", qty=2, idx=2)])
+    check("hai dòng cùng mã -> chặn", raises(d.validate) is not None)
+    d = phieu(da_chot=1, items=[])
+    check("chốt phiếu rỗng (không phải KTT kết luận) -> chặn", raises(d.validate) is not None)
+    d = phieu(da_chot=1, items=[], khong_lap_hd=1)
+    check("KTT kết luận không lập, phiếu rỗng -> qua, trạng thái Xong",
+          raises(d.validate) is None and d.trang_thai == pb.XONG)
+
+    print("-" * 78)
+    print("── 5. them_dong: CỘNG vào dòng cũ, hệ số do SERVER tra ────────────────")
+    P = {"doc": phieu(items=[])}
+    fr.get_doc = lambda dt, name=None, for_update=False, **k: P["doc"]
+    r = api.them_dong("TH-1", "BDX", 0, json.dumps([{"uom": "Thùng", "sl": 2, "he_so": 999}]), "8936")
+    check("2 thùng với he_so client 999 -> lưu 48 hộp (server tra 24)",
+          P["doc"].items[0].qty == 48 and json.loads(P["doc"].items[0].chi_tiet)[0]["he_so"] == 24,
+          str(P["doc"].items[0].qty))
+    api.them_dong("TH-1", "BDX", 0, json.dumps([{"uom": "Hộp", "sl": 3}]), None)
+    check("quét thêm cùng mã 3 hộp -> CỘNG vào dòng cũ: 51, '2 Thùng + 3 Hộp'",
+          len(P["doc"].items) == 1 and P["doc"].items[0].qty == 51 and P["doc"].items[0].mo_ta_dvt == "2 Thùng + 3 Hộp",
+          f"{P['doc'].items[0].qty} · {P['doc'].items[0].mo_ta_dvt}")
+    check("phiếu trả về tổng mới cho màn hình", r and r["tong_sl"] == 48)
+    check("ĐVT chưa khai quy đổi -> chặn",
+          raises(lambda: api.them_dong("TH-1", "BDX", 0, json.dumps([{"uom": "Lốc", "sl": 1}]))) is not None)
+    P["doc"].da_chot = 1
+    check("phiếu đã chốt -> them_dong chặn", raises(lambda: api.them_dong("TH-1", "BDX", 5)) is not None)
+    P["doc"].da_chot = 0
+    check("sua_dong về 0 -> chặn (xóa là bấm ✕)",
+          raises(lambda: api.sua_dong("TH-1", P["doc"].items[0].name, 0)) is not None)
+
+    print("-" * 78)
+    print("── 6. Dòng phiếu trả dựng từ make_return_doc ───────────────────────────")
+    mapped = {"R1": FakeRow(item_code="BDX", qty=-10, uom="Thùng", stock_uom="Hộp", conversion_factor=24,
+                            rate=240000, price_list_rate=250000, base_rate=240000, sales_invoice_item="R1",
+                            batch_no="LO-1", income_account="511 - DT", name="x", idx=1)}
+    plan = [{"src": "R1", "item_code": "BDX", "noi": True, "qty": 2, "stock_qty": 48},
+            {"src": "R1", "item_code": "BDX", "noi": False, "stock_qty": 22}]
+    rows = api._dong_tra(mapped, plan, "5213 - Hàng bán bị trả lại")
+    a, b = rows
+    check("dòng nối: giữ ĐVT Thùng, qty -2, nối dòng gốc",
+          a["uom"] == "Thùng" and a["qty"] == -2 and a["sales_invoice_item"] == "R1")
+    check("dòng không nối: ĐVT kho, hệ số 1, -22, đơn giá ÷ 24, BỎ nối",
+          b["uom"] == "Hộp" and b["conversion_factor"] == 1 and b["qty"] == -22 and b["rate"] == 10000
+          and b["sales_invoice_item"] is None, json.dumps(b, ensure_ascii=False, default=str)[:200])
+    check("tiền đúng y: 2×240.000 + 22×10.000 = 700.000",
+          -a["qty"] * a["rate"] + -b["qty"] * b["rate"] == 700000)
+    check("TK 5213 + bỏ tham chiếu lô (update_stock = 0)",
+          a["income_account"].startswith("5213") and a["batch_no"] is None and b["batch_no"] is None)
+    check("không chép name/idx của dòng map sang dòng mới", "name" not in a and "idx" not in a)
+
+    print("-" * 78)
+    print("── 7. Hook Sales Invoice không bao giờ chặn ghi sổ ──────────────────────")
+    WROTE.clear()
+
+    def no(*a, **k):
+        raise RuntimeError("DB hỏng")
+
+    fr.get_doc = no
+    si = FakeRow(custom_kiem_hang_thu_hoi="TH-1", is_return=1, name="RET-1")
+    check("lỗi bên trong hook bị nuốt (không ném ra giao dịch ghi sổ)",
+          raises(lambda: api.dong_bo_trang_thai(si, "on_submit")) is None)
+    fr.get_doc = lambda *a, **k: phieu(da_chot=1)
+    api.dong_bo_trang_thai(si, "on_submit")
+    check("hook ghi bằng db.set_value(update_modified=False)",
+          WROTE and WROTE[-1][1].get("update_modified") is False)
+    WROTE.clear()
+    api.dong_bo_trang_thai(FakeRow(custom_kiem_hang_thu_hoi=None, is_return=1, name="X"), "on_update")
+    check("hóa đơn không gắn phiếu kiểm -> hook không làm gì", not WROTE)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 6, 8–10. TĨNH
+# ════════════════════════════════════════════════════════════════════════════
+def _fn(tree, name):
+    return next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name), None)
+
+
+def kiem_tinh():
+    src = read(os.path.join(API, "thu_hoi.py"))
+    tree = ast.parse(src)
+
+    print("-" * 78)
+    print("── 8. Guard ở dòng đầu mọi whitelisted method ──────────────────────────")
+    for n in tree.body:
+        if not isinstance(n, ast.FunctionDef):
+            continue
+        wl = any("whitelist" in ast.unparse(d) for d in n.decorator_list)
+        if not wl:
+            continue
+        stmts = [s for s in n.body if not (isinstance(s, ast.Expr) and isinstance(getattr(s, "value", None), ast.Constant))]
+        first = ast.unparse(stmts[0]) if stmts else ""
+        check(f"{n.name}: dòng đầu là guard", first.startswith(("guard_sales_any()", "guard_manager()")), first[:60])
+
+    print("-" * 78)
+    print("── 9. Không ghi bảng vanchuyen · tôn trọng quyền tạo hóa đơn ─────────────")
+    bad = re.findall(r"""(set_value|delete_doc|get_doc)\(\s*(LO|LO_HANG|["']Lo Thu Hoi)""", src)
+    check("không set_value / delete_doc / get_doc vào Lo Thu Hoi", not bad, str(bad))
+    check("không UPDATE / INSERT / DELETE SQL trên bảng lô",
+          not re.search(r"(UPDATE|INSERT INTO|DELETE FROM)\s+`tab\{?(LO|Lo Thu Hoi)", src))
+    tao = _fn(tree, "tao_hoa_don_tra")
+    ins = [c for c in ast.walk(tao) if isinstance(c, ast.Call) and ast.unparse(c.func) == "si.insert"]
+    check("tao_hoa_don_tra: si.insert() KHÔNG ignore_permissions",
+          ins and not any(k.arg == "ignore_permissions" for c in ins for k in c.keywords))
+    t = ast.unparse(tao)
+    check("tao_hoa_don_tra: update_stock = 0 + gắn custom_kiem_hang_thu_hoi + return_against từ make_return_doc",
+          "si.update_stock = 0" in t and "si.set(SI_FIELD" in t and "make_return_doc('Sales Invoice', sales_invoice)" in t)
+    hook = ast.unparse(_fn(tree, "dong_bo_trang_thai"))
+    check("dong_bo_trang_thai: try/except Exception, không .save()",
+          "except Exception" in hook and ".save(" not in hook)
+    hooks = read(os.path.join(REPO, "ketoan", "hooks.py"))
+    for ev in ("after_insert", "on_update", "on_submit", "on_cancel", "on_trash"):
+        check(f"hooks.py: Sales Invoice {ev} -> thu_hoi.dong_bo_trang_thai",
+              re.search(rf'"{ev}":\s*"ketoan\.api\.thu_hoi\.dong_bo_trang_thai"', hooks) is not None)
+    inst = read(os.path.join(REPO, "ketoan", "install.py"))
+    check("install: custom field Link no_copy + gọi trong after_install",
+          '"custom_kiem_hang_thu_hoi"' in inst and '"no_copy": 1' in inst and "    setup_thu_hoi_fields()" in inst)
+    check("patches.txt có v0_0_20.thu_hoi_setup",
+          "ketoan.patches.v0_0_20.thu_hoi_setup" in read(os.path.join(REPO, "ketoan", "patches.txt")))
+
+    print("-" * 78)
+    print("── 10. Màn kiểm hàng đếm MÙ · import map đủ module ─────────────────────")
+    kh = read(os.path.join(PUB, "views", "kiemhang.js"))
+    check("kiemhang.js không đọc số siêu thị khai (B.khai / tong_sl_khai)", "B.khai" not in kh and "tong_sl_khai" not in kh)
+    boot = _fn(tree, "boot_kiem")
+    ret = [n.value for n in ast.walk(boot) if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict)]
+    keys = {k.value for d in ret for k in d.keys if isinstance(k, ast.Constant)}
+    check("boot_kiem: payload màn kiểm KHÔNG mang số khai (không key 'khai')", ret and "khai" not in keys, str(sorted(keys)))
+    check("boot_kiem: lô gửi xuống đã bỏ tong_sl_khai / gia_tri_khai",
+          "if k not in _SO_KHAI" in ast.unparse(boot) and '_SO_KHAI = ("tong_sl_khai", "gia_tri_khai")' in src)
+    th = read(os.path.join(PUB, "views", "thuhoi.js"))
+    check("màn lô chỉ hiện số khai khi đã chốt", "ph.da_chot ? html`<div><div class=\"kt-sub\">Siêu thị khai" in th)
+    page = read(os.path.join(REPO, "ketoan", "www", "ketoan.html"))
+    for sub in ("lib", "components"):
+        for fn in sorted(os.listdir(os.path.join(PUB, sub))):
+            if fn.endswith(".js"):
+                check(f"import map có {sub}/{fn}", f'"{{{{ base }}}}/{sub}/{fn}": "{{{{ base }}}}/{sub}/{fn}?v={{{{ v }}}}"' in page)
+    shell = read(os.path.join(PUB, "shell.js"))
+    for pat, view in (("/thu-hoi", "thuhoi.js"), ("/thu-hoi/:id", "thuhoi.js"), ("/kiem-hang/:id", "kiemhang.js")):
+        check(f"route {pat} -> views/{view} (cap thuhoi)",
+              f'pattern: "{pat}", view: "views/{view}", cap: "thuhoi"' in shell and os.path.exists(os.path.join(PUB, "views", view)))
+    guard = read(os.path.join(API, "_guard.py"))
+    check("capability thuhoi = salesany", 'caps["thuhoi"] = caps["salesany"]' in guard)
+    check("www/ketoan.py đưa thuhoi vào thứ tự workspace", '"thuhoi"' in read(os.path.join(REPO, "ketoan", "www", "ketoan.py")))
+
+
+def main():
+    print("=" * 78)
+    print("thu_hoi_check — hóa đơn trả về đúng ĐVT, trạng thái không nói dối")
+    print("=" * 78)
+    sys.path.insert(0, REPO)
+    pb = importlib.import_module("ketoan.api.thu_hoi_phan_bo")
+    kiem_ham_thuan(pb)
+    kiem_tren_bo_gia()
+    kiem_tinh()
+    print("=" * 78)
+    print("ĐẠT" if ok_all else "CÓ MỤC ĐỎ")
+    return 0 if ok_all else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

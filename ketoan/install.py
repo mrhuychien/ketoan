@@ -815,6 +815,46 @@ def setup_misa_integration():
                 frappe.log_error(frappe.get_traceback(), f"ketoan misa perms: {role} @ {doctype}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Thu hồi hàng — sợi dây từ hóa đơn trả về tới phiếu kiểm hàng.
+#
+# `Link` chứ không `Data` (khác `custom_mt_source_name`): đích là DocType CỦA APP
+# NÀY, nên khóa xóa phiếu kiểm khi còn hóa đơn trả về trỏ tới chính là điều muốn
+# (Frappe bỏ qua hóa đơn đã hủy khi kiểm link lúc xóa). `no_copy`: nhân bản một hóa
+# đơn trả về trên Desk không được kéo theo sợi dây — bản sao không phải hàng đã kiểm.
+# Bản SỬA ĐỔI (amend) vẫn giữ: copy_doc bỏ qua no_copy khi amend, và bản sửa đổi của
+# một phiếu trả của lô vẫn là phiếu trả của lô đó. `search_index`: hook mọi lần lưu
+# hóa đơn tra theo ô này.
+# ═══════════════════════════════════════════════════════════════════════════
+
+THU_HOI_CUSTOM_FIELDS = {
+    "Sales Invoice": [
+        {
+            "fieldname": "custom_kiem_hang_thu_hoi",
+            "label": "Phiếu kiểm hàng thu hồi",
+            "fieldtype": "Link",
+            "options": "Kiem Hang Thu Hoi",
+            "read_only": 1,
+            "no_copy": 1,
+            "search_index": 1,
+            "depends_on": "eval:doc.is_return",
+            "description": "Do portal kế toán (Thu hồi) gắn khi lập hóa đơn trả về từ hàng đã kiểm.",
+            "insert_after": "return_against",
+        },
+    ]
+}
+
+
+def setup_thu_hoi_fields():
+    """Tạo custom field thu hồi trên Sales Invoice. Idempotent, lỗi không chết install."""
+    from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+
+    try:
+        create_custom_fields(THU_HOI_CUSTOM_FIELDS, ignore_validate=True)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "ketoan: setup_thu_hoi_fields")
+
+
 def after_install():
     create_portal_roles()
     grant_settings_permissions()
@@ -823,6 +863,7 @@ def after_install():
     # Site cài mới cũng phải có sẵn field MT: patch chỉ chạy cho site đã tồn tại.
     setup_mt_fields()
     setup_mt_je_fields()
+    setup_thu_hoi_fields()
 
 
 def create_portal_roles():

@@ -1,0 +1,274 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:lo_thu_hoi",
+ "creation": "2026-10-17 09:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "lo_thu_hoi",
+  "trang_thai",
+  "company",
+  "col_break_head",
+  "customer",
+  "customer_name",
+  "shipping_address_name",
+  "ten_diem",
+  "sec_kiem",
+  "items",
+  "tong_sl",
+  "so_ma",
+  "col_break_kiem",
+  "da_chot",
+  "chot_luc",
+  "chot_boi",
+  "xong_luc",
+  "ghi_chu",
+  "sec_ket_luan",
+  "khong_lap_hd",
+  "ly_do_khong_lap",
+  "ket_luan_boi"
+ ],
+ "fields": [
+  {
+   "description": "Tên lô bên app vận chuyển, cũng là tên phiếu này — một lô một phiếu kiểm. Data chứ không Link: ketoan phải cài được trên site chưa có vanchuyen.",
+   "fieldname": "lo_thu_hoi",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Lô thu hồi (vanchuyen)",
+   "reqd": 1,
+   "set_only_once": 1,
+   "unique": 1
+  },
+  {
+   "default": "Đang kiểm",
+   "description": "MÁY SUY từ phiếu kiểm + hóa đơn trả về gắn với nó; hook Sales Invoice giữ cho đúng khi hóa đơn được ghi sổ / hủy / xóa thẳng trên Desk.",
+   "fieldname": "trang_thai",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Trạng thái",
+   "options": "Đang kiểm\nĐã kiểm hàng\nĐã nhập chứng từ\nXong",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Công ty",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "col_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Chép từ lô lúc mở phiếu. Bên vận chuyển khóa ô này từ lúc đó.",
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Khách hàng",
+   "options": "Customer",
+   "read_only": 1
+  },
+  {
+   "fieldname": "customer_name",
+   "fieldtype": "Data",
+   "label": "Tên khách",
+   "read_only": 1
+  },
+  {
+   "fieldname": "shipping_address_name",
+   "fieldtype": "Link",
+   "label": "Điểm lấy hàng",
+   "options": "Address",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ten_diem",
+   "fieldtype": "Data",
+   "label": "Tên điểm",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sec_kiem",
+   "fieldtype": "Section Break",
+   "label": "Hàng đã kiểm"
+  },
+  {
+   "description": "Số ĐẾM THẬT lúc hàng về, ĐVT kho — đếm mù, không điền sẵn từ số siêu thị khai.",
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Mã hàng đã kiểm",
+   "options": "Kiem Hang Thu Hoi Dong"
+  },
+  {
+   "fieldname": "tong_sl",
+   "fieldtype": "Float",
+   "label": "Tổng SL đã kiểm (ĐVT kho)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "so_ma",
+   "fieldtype": "Int",
+   "label": "Số mã hàng",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_kiem",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "da_chot",
+   "fieldtype": "Check",
+   "label": "Đã chốt phiếu",
+   "read_only": 1
+  },
+  {
+   "fieldname": "chot_luc",
+   "fieldtype": "Datetime",
+   "label": "Lúc chốt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "chot_boi",
+   "fieldtype": "Data",
+   "label": "Người chốt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "xong_luc",
+   "fieldtype": "Datetime",
+   "label": "Lúc xong",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ghi_chu",
+   "fieldtype": "Small Text",
+   "label": "Ghi chú kiểm hàng"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "sec_ket_luan",
+   "fieldtype": "Section Break",
+   "label": "Kết luận không lập hóa đơn trả về"
+  },
+  {
+   "default": "0",
+   "description": "CHỈ kế toán trưởng kết luận, kèm lý do (đổi hàng ngang giá, hàng không thuộc hóa đơn nào...). Có dấu vết ai/lúc nào — không phải cờ bỏ qua.",
+   "fieldname": "khong_lap_hd",
+   "fieldtype": "Check",
+   "label": "Không lập hóa đơn trả về",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ly_do_khong_lap",
+   "fieldtype": "Small Text",
+   "label": "Lý do",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ket_luan_boi",
+   "fieldtype": "Data",
+   "label": "Người kết luận",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 0,
+ "links": [],
+ "modified": "2026-10-17 09:00:00",
+ "modified_by": "Administrator",
+ "module": "Ketoan",
+ "name": "Kiem Hang Thu Hoi",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan Truong",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan MT",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan NPP",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Ke Toan Du Lich",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "ten_diem",
+ "track_changes": 1
+}

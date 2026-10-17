@@ -52,6 +52,9 @@ def capabilities() -> dict:
     }
     # Có ít nhất 1 kênh bán hàng → dùng chung 360° khách / tiện ích tìm khách.
     caps["salesany"] = caps["npp"] or caps["mt"] or caps["travel"] or caps["chief"]
+    # Theo dõi thu hồi: hàng khách trả về thuộc kênh nào thì kế toán kênh đó lập hóa
+    # đơn trả về, nên mọi kế toán bán hàng đều vào được (guard ở api/thu_hoi.py).
+    caps["thuhoi"] = caps["salesany"]
     return caps
 
 

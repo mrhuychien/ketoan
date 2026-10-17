@@ -1,0 +1,103 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-10-17 09:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "item_code",
+  "item_name",
+  "qty",
+  "stock_uom",
+  "col_break_dong",
+  "mo_ta_dvt",
+  "chi_tiet",
+  "ma_quet",
+  "nguoi_ghi",
+  "ghi_chu"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Mã hàng",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "columns": 3,
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Tên hàng",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "SL đã kiểm (ĐVT kho)",
+   "reqd": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "stock_uom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "ĐVT kho",
+   "options": "UOM",
+   "read_only": 1
+  },
+  {
+   "fieldname": "col_break_dong",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Vd \"2 Thùng + 3 Hộp\" — đúng cách người kiểm đếm ngoài kho.",
+   "fieldname": "mo_ta_dvt",
+   "fieldtype": "Data",
+   "label": "Đếm theo ĐVT",
+   "read_only": 1
+  },
+  {
+   "fieldname": "chi_tiet",
+   "fieldtype": "Small Text",
+   "hidden": 1,
+   "label": "Chi tiết ĐVT (JSON)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ma_quet",
+   "fieldtype": "Data",
+   "label": "Mã đã quét",
+   "read_only": 1
+  },
+  {
+   "fieldname": "nguoi_ghi",
+   "fieldtype": "Data",
+   "label": "Người ghi",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ghi_chu",
+   "fieldtype": "Data",
+   "label": "Ghi chú"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-17 09:00:00",
+ "modified_by": "Administrator",
+ "module": "Ketoan",
+ "name": "Kiem Hang Thu Hoi Dong",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

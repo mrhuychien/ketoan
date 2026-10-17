@@ -39,6 +39,15 @@ jinja = {
 doc_events = {
     "Sales Invoice": {
         "before_submit": "ketoan.api.misa_sync.ensure_ref_id",
+        # Thu hồi hàng — giữ trạng thái phiếu kiểm khi hóa đơn trả về gắn với nó được
+        # tạo / sửa / ghi sổ / hủy / xóa THẲNG TRÊN DESK (không qua portal). Hàm dừng ở
+        # dòng đầu với mọi hóa đơn không gắn phiếu kiểm, và bọc try/except toàn bộ:
+        # hỏng ở đây KHÔNG được chặn ghi sổ. Xem ketoan/api/thu_hoi.py.
+        "after_insert": "ketoan.api.thu_hoi.dong_bo_trang_thai",
+        "on_update": "ketoan.api.thu_hoi.dong_bo_trang_thai",
+        "on_submit": "ketoan.api.thu_hoi.dong_bo_trang_thai",
+        "on_cancel": "ketoan.api.thu_hoi.dong_bo_trang_thai",
+        "on_trash": "ketoan.api.thu_hoi.dong_bo_trang_thai",
     },
     # ═══════════════════════════════════════════════════════════════════════
     # Kênh MT — đồng bộ trạng thái bút toán về bảng kê nguồn.

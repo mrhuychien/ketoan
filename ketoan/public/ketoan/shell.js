@@ -33,6 +33,9 @@ const ROUTES = [
   { pattern: "/so-cai", view: "views/ledger.js", cap: "gl", ws: "gl", title: "Sổ cái tài khoản" },
   { pattern: "/nhap-sao-ke", view: "views/bankimport.js", cap: "gl", ws: "gl", title: "Nhập sao kê" },
   { pattern: "/luong", view: "views/payroll.js", cap: "payroll", ws: "payroll", title: "Tính lương" },
+  { pattern: "/thu-hoi", view: "views/thuhoi.js", cap: "thuhoi", ws: "thuhoi", title: "Theo dõi thu hồi" },
+  { pattern: "/thu-hoi/:id", view: "views/thuhoi.js", cap: "thuhoi", ws: "thuhoi", title: "Lô thu hồi" },
+  { pattern: "/kiem-hang/:id", view: "views/kiemhang.js", cap: "thuhoi", ws: "thuhoi", title: "Kiểm hàng thu hồi" },
 ];
 
 const NAV_WS = myWorkspaces();

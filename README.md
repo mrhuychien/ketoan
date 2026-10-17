@@ -20,6 +20,32 @@ phát hiện · phân tích · gợi ý; người quyết định và ấn nút.
 UI là **SPA portal no-build** (vanilla JS, hash router, ES module code-split) phục vụ tại
 `/ketoan`. Backend là **whitelisted method Python có guard** (không Server Script rải rác).
 
+## Theo dõi thu hồi — hàng siêu thị xuất trả về công ty
+
+Nối tiếp app **vanchuyen**: bên đó tạo yêu cầu xuất trả (`Lo Thu Hoi`) và chạy 3 chặng
+vận chuyển *Tạo yêu cầu → Đã lấy hàng → Đã nhận hàng*; kế toán nhận tiếp từ chặng
+**Đã nhận hàng** với DocType riêng `Kiem Hang Thu Hoi` (tên = mã lô):
+*Đang kiểm → Đã kiểm hàng → Đã nhập chứng từ → Xong*. Blueprint:
+[`docs/thu-hoi/blueprint-thu-hoi.md`](docs/thu-hoi/blueprint-thu-hoi.md).
+
+- **Tab "Thu hồi"** (`#/thu-hoi`): mọi lô bên vận chuyển + chặng gộp, lọc theo chặng,
+  tìm lô / khách / điểm / số phiếu siêu thị; bảng trên máy tính, thẻ trên điện thoại.
+- **Kiểm hàng trên điện thoại** (`#/kiem-hang/<lô>`, dựng theo màn Ghi hộp app sx): quét
+  mã vạch (camera / súng quét / gõ tay) hoặc chọn mã → bàn số phím to có tab Thùng/Hộp →
+  lưu ngay từng lần; quét lại mã đã có là cộng thêm; chạm số để sửa, ✕ để xóa.
+  **Đếm mù**: số siêu thị khai chỉ hiện sau khi chốt.
+- **Hóa đơn trả về**: sau khi chốt, chọn hóa đơn gốc (gợi ý cùng khách, ưu tiên cùng điểm
+  giao) → lập **Sales Invoice trả về (nháp)** bằng `make_return_doc`, `update_stock = 0`,
+  không vượt số còn được trả của từng dòng gốc; "Cập nhật" dựng lại các bản nháp theo
+  số kiểm mới, xóa được bản nháp. Ghi sổ (submit) làm trên Desk.
+- **Trạng thái tự đi**: hook `Sales Invoice` (insert/update/submit/cancel/trash) tính lại
+  chặng của phiếu kiểm — đủ số và mọi hóa đơn đã ghi sổ thì **Xong**. Không lập hóa đơn
+  (hàng hủy, đổi hàng…) thì chỉ Kế toán trưởng kết luận được, có ghi lý do.
+- Quyền: kế toán bán hàng (NPP / MT / Du lịch) + KTT; lập hóa đơn dùng **quyền tạo Sales
+  Invoice của chính người bấm**. Ketoan chỉ **đọc** bảng của vanchuyen (đọc mềm — chưa cài
+  vanchuyen thì tab rỗng, không lỗi), không bao giờ ghi.
+- Kiểm không cần bench: `python3 docs/verified/thu_hoi_check.py`.
+
 ## Cài đặt
 
 ```bash
