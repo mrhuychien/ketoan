@@ -24,6 +24,10 @@ NHỮNG CÁI LỖ BỘ KIỂM NÀY CANH
 10. **Mọi whitelisted method có guard ở dòng đầu**, import map đủ module dùng chung.
 11. **Lô bên vận chuyển đã HỦY vẫn bị đếm "đang mở" / vẫn mở được phiếu kiểm** — và nút
     "Bắt đầu kiểm" chạy đua với nút "Hủy yêu cầu" (phải đọc lô bằng KHÓA).
+12. **Lô HỦY TẠI CHỖ lạc chặng / bị bắt đếm mù**: chưa có phiếu phải đứng ở "Đã kiểm hàng"
+    (nhận đủ theo phiếu), phiếu `theo_phieu` đang chép không lùi về "Đang kiểm" (cờ bật cả
+    khi phiếu tạo tay trên Desk), và màn nhập phải THẤY mail / biên bản để chép (lô thường
+    thì vẫn đếm mù).
 
 Chạy KHÔNG cần bench — stub frappe của `docs/mt/verified/regression_check`:
     python3 docs/verified/thu_hoi_check.py   # exit 0 = đạt
@@ -525,6 +529,81 @@ def kiem_tren_bo_gia():
           any(dt == "Item" and "item_group" not in fl and "name" not in fl for dt, fl in GA)
           and b["thieu_nhom"] == list(api.NHOM_KIEM) and len(b["danh_muc"]) >= 1)
 
+    print("-" * 78)
+    print("── 7f. HỦY TẠI CHỖ: đi tắt tới 'Đã kiểm hàng' (nhận đủ theo phiếu) ───────")
+    tt = pb.suy_trang_thai
+    check("phiếu theo phiếu đang chép (chưa chốt) = 'Đã kiểm hàng', KHÔNG lùi về 'Đang kiểm'",
+          tt(0, 0, {"BDX": 3}, [], theo_phieu=True)[0] == "Đã kiểm hàng" and tt(0, 0, {"BDX": 3}, [])[0] == "Đang kiểm")
+    check("phiếu theo phiếu chốt + hóa đơn nháp phủ đủ -> 'Đã nhập chứng từ' như lô thường",
+          tt(1, 0, {"BDX": 3}, [{"name": "R", "docstatus": 0, "items": {"BDX": 3}}], theo_phieu=True)[0] == "Đã nhập chứng từ")
+    check("controller truyền cờ theo_phieu vào phép suy",
+          "theo_phieu=cint(doc.get(\"theo_phieu\"))" in read(os.path.join(REPO, "ketoan", "ketoan", "doctype",
+                                                                      "kiem_hang_thu_hoi", "kiem_hang_thu_hoi.py")))
+    check("chặng tổng: lô hủy tại chỗ CHƯA có phiếu = 'Đã kiểm hàng' (SQL + màn chi tiết cùng luật)",
+          "l.trang_thai = %(htc)s THEN %(da_kiem)s" in api._expr()
+          and api._chang_lo({"trang_thai": "Hủy tại chỗ"}) == "Đã kiểm hàng"
+          and api._chang_lo({"trang_thai": "Hủy tại chỗ"}, "Xong") == "Xong"
+          and api._chang_lo({"trang_thai": "Đã nhận hàng"}) == "Đã nhận hàng")
+    SQL.clear()
+    fr.db.sql = sql_huy  # bộ giả của 7d: trang danh sách + COUNT
+    api.list_thu_hoi()
+    _q, pr = next((q, pp) for q, pp in reversed(SQL) if "ORDER BY FIELD" in q)
+    check("danh sách truyền đủ tham số cho luật hủy tại chỗ", pr.get("htc") == "Hủy tại chỗ" and pr.get("da_kiem") == "Đã kiểm hàng")
+    MOI = []
+
+    class PhieuMoi(dict):
+        __getattr__ = dict.get
+
+        def __setattr__(self, k, v):
+            self[k] = v
+
+        def insert(self):
+            MOI.append(dict(self))
+
+    goc_th, goc_nd, goc_cty = api.get_thu_hoi, fr.new_doc, api._company
+    api.get_thu_hoi = lambda n: {"lo": n}
+    api._company = lambda *a, **k: "HGC"
+    fr.new_doc = lambda dt: PhieuMoi()
+    fr.db.exists = lambda dt, *a, **k: dt == "Item"
+    LO_TT = {"v": "Hủy tại chỗ"}
+    fr.db.sql = lambda q, p=None, **k: ([fr._dict(LO_HUY, trang_thai=LO_TT["v"], chi_tiet_hang="BDX 3 hộp")]
+                                         if "FROM `tabLo Thu Hoi` l WHERE l.name" in q else [])
+    e = raises(lambda: api.bat_dau_kiem("TH-H"))
+    check("Bắt đầu cho lô hủy tại chỗ: mở phiếu THEO PHIẾU (theo_phieu = 1), không đòi 'Đã nhận hàng'",
+          e is None and MOI and MOI[-1].get("theo_phieu") == 1, e or str(MOI))
+    LO_TT["v"] = "Đã nhận hàng"
+    api.bat_dau_kiem("TH-H")
+    check("lô thu về kho: phiếu kiểm thường (theo_phieu = 0)", MOI[-1].get("theo_phieu") == 0)
+    LO_TT["v"] = "Tạo yêu cầu"
+    check("lô thu về kho chưa nhận hàng: vẫn chặn như cũ", raises(lambda: api.bat_dau_kiem("TH-H")) is not None)
+    sql_lo = fr.db.sql
+    fr.db.sql = lambda q, p=None, **k: ([[LO_TT["v"]]] if "SELECT trang_thai FROM `tabLo Thu Hoi`" in q
+                                         else sql_lo(q, p, **k))
+    LO_TT["v"] = "Hủy tại chỗ"
+    d_htc = phieu(lo_thu_hoi="TH-H")
+    d_htc.before_insert()
+    LO_TT["v"] = "Đã nhận hàng"
+    d_thuong = phieu(lo_thu_hoi="TH-M")
+    d_thuong.before_insert()
+    check("phiếu tạo tay trên Desk cho lô hủy tại chỗ: TỰ bật theo_phieu (không rơi về đếm mù / 'Đang kiểm'); lô thường để nguyên",
+          d_htc.get("theo_phieu") == 1 and not d_thuong.get("theo_phieu"), str((d_htc.get("theo_phieu"), d_thuong.get("theo_phieu"))))
+    fr.db.sql = sql_lo
+    api.get_thu_hoi, fr.new_doc, api._company = goc_th, goc_nd, goc_cty
+    LO_TT["v"] = "Hủy tại chỗ"
+    g = api.get_thu_hoi("TH-H")
+    check("màn lô: lô hủy tại chỗ chưa phiếu -> chặng 'Đã kiểm hàng' + mở được nút nhập theo phiếu",
+          g["chang"] == "Đã kiểm hàng" and g["flags"]["bat_dau"] is True, str((g["chang"], g["flags"].get("bat_dau"))))
+    fr.get_all = lambda dt, *a, **k: ([fr._dict(name="F1", file_name="bien-ban-huy.pdf", creation="2026-10-18")]
+                                       if dt == "File" else [])
+    for co_tp, nhan in ((1, "phiếu theo phiếu"), (0, "phiếu kiểm thường")):
+        fr.get_doc = lambda *a, **k: phieu(lo_thu_hoi="TH-H", theo_phieu=co_tp, items=[])
+        b = api.boot_kiem("TH-H")
+        if co_tp:
+            check("màn nhập THEO PHIẾU: thấy mail dán + biên bản đính kèm để chép (không đếm mù)",
+                  b["lo"].get("chi_tiet_hang") == "BDX 3 hộp" and [f["file_name"] for f in b["files"]] == ["bien-ban-huy.pdf"])
+        else:
+            check("màn kiểm thường vẫn ĐẾM MÙ: không mail dán, không file", "chi_tiet_hang" not in b["lo"] and b["files"] == [])
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # 6, 8–10. TĨNH
@@ -578,14 +657,17 @@ def kiem_tinh():
     print("-" * 78)
     print("── 10. Màn kiểm hàng đếm MÙ · import map đủ module ─────────────────────")
     kh = read(os.path.join(PUB, "views", "kiemhang.js"))
-    check("kiemhang.js không đọc số siêu thị khai (B.khai / tong_sl_khai / chi_tiet_hang)",
-          "B.khai" not in kh and "tong_sl_khai" not in kh and "chi_tiet_hang" not in kh)
+    a = kh.index("function phieuSieuThi(")
+    ngoai = kh[:a] + kh[kh.index("\n  }\n", a):]
+    check("kiemhang.js chỉ đọc mail dán (có số khai) trong phieuSieuThi(), chỉ vẽ cho phiếu theo phiếu (hủy tại chỗ)",
+          "B.khai" not in kh and "tong_sl_khai" not in kh and "chi_tiet_hang" not in ngoai
+          and '${tp ? phieuSieuThi() : ""}' in kh and "const tp = !!(B.phieu && B.phieu.theo_phieu);" in kh)
     boot = _fn(tree, "boot_kiem")
     ret = [n.value for n in ast.walk(boot) if isinstance(n, ast.Return) and isinstance(n.value, ast.Dict)]
     keys = {k.value for d in ret for k in d.keys if isinstance(k, ast.Constant)}
     check("boot_kiem: payload màn kiểm KHÔNG mang số khai (không key 'khai')", ret and "khai" not in keys, str(sorted(keys)))
-    check("boot_kiem: lô gửi xuống đã bỏ giá trị khai + mail siêu thị dán nguyên văn",
-          "if k not in _SO_KHAI" in ast.unparse(boot) and '_SO_KHAI = ("gia_tri_khai", "chi_tiet_hang")' in src)
+    check("boot_kiem: lô gửi xuống bỏ giá trị khai + mail dán — TRỪ phiếu theo phiếu (mục 7f chạy thật)",
+          "theo_phieu or k not in _SO_KHAI" in ast.unparse(boot) and '_SO_KHAI = ("gia_tri_khai", "chi_tiet_hang")' in src)
     th = read(os.path.join(PUB, "views", "thuhoi.js"))
     check("màn lô chỉ hiện tổng khai khi đã chốt (và lô có bảng khai cũ)",
           "ph.da_chot && D.co_khai ? html`<div><div class=\"kt-sub\">Siêu thị khai" in th)
@@ -625,6 +707,8 @@ def kiem_tinh():
         check("mọi cột ketoan đọc đều CÓ trong Lo Thu Hoi của vanchuyen (repo cạnh bên)", not thieu, str(thieu))
         check("chữ 'Đã hủy' ketoan so KHỚP đúng option trạng thái của vanchuyen",
               m.DA_HUY in vf["trang_thai"]["options"].split("\n"), vf["trang_thai"]["options"])
+        check("chữ 'Hủy tại chỗ' ketoan so KHỚP đúng option trạng thái của vanchuyen",
+              m.HUY_TAI_CHO in vf["trang_thai"]["options"].split("\n"), vf["trang_thai"]["options"])
     else:
         print("  ⚠ bỏ qua so cột với vanchuyen — không thấy repo ../vanchuyen")
 

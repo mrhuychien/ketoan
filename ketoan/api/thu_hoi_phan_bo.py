@@ -52,6 +52,9 @@ CHANG_KE_TOAN = (DANG_KIEM, DA_KIEM, DA_NHAP, XONG)
 # Lô bên vanchuyen bị HỦY yêu cầu (`lo_thu_hoi.DA_HUY`) — trạng thái của LÔ, không phải một
 # nấc của phiếu kiểm. Một chỗ khai cho api/thu_hoi.py và controller phiếu kiểm.
 DA_HUY = "Đã hủy"
+# Lô bên vanchuyen siêu thị HỦY TẠI CHỖ (`lo_thu_hoi.HUY_TAI_CHO`): không thu về, đi tắt sang
+# kế toán ở "Đã kiểm hàng" (nhận đủ theo phiếu) — phiếu kiểm của nó là phiếu `theo_phieu`.
+HUY_TAI_CHO = "Hủy tại chỗ"
 
 
 def _f(v):
@@ -170,8 +173,12 @@ def con_can(can, hoa_don):
     return out
 
 
-def suy_trang_thai(da_chot, khong_lap_hd, can, hoa_don):
+def suy_trang_thai(da_chot, khong_lap_hd, can, hoa_don, theo_phieu=False):
     """Trạng thái phiếu kiểm — SUY TỪ CHỨNG TỪ CÓ THẬT, không ai gõ.
+
+    theo_phieu  phiếu của lô HỦY TẠI CHỖ: không đếm hàng — chép số theo phiếu siêu thị, nên
+                lúc đang chép (chưa chốt) vẫn là "Đã kiểm hàng" (nhận đủ theo phiếu), không
+                lùi về "Đang kiểm".
 
     can      {item: SL đã kiểm, ĐVT kho}
     hoa_don  [{"name", "docstatus", "items": {item: SL ĐVT kho, dương}}] — phiếu trả gắn
@@ -184,7 +191,7 @@ def suy_trang_thai(da_chot, khong_lap_hd, can, hoa_don):
     giảm công nợ nhiều hơn số hàng thật về kho.
     """
     if not da_chot:
-        return DANG_KIEM, {}
+        return (DA_KIEM if theo_phieu else DANG_KIEM), {}
     if khong_lap_hd:
         return XONG, {}
     da = tong_theo_ma(hoa_don)

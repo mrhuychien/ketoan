@@ -10,6 +10,8 @@
 //     khai + khách này mua gần đây) nổi lên ĐẦU kết quả. Ô tìm trống thì không hiện gì.
 //   · Đếm MÙ: số siêu thị khai chỉ hiện SAU khi chốt (màn lô), không hiện ở đây —
 //     hiện số khai trước là mời người kiểm gõ lại số khai cho nhanh.
+//   · NGOẠI LỆ — lô HỦY TẠI CHỖ (phiếu `theo_phieu`): không có hàng để đếm, kế toán CHÉP mã
+//     + số theo phiếu / biên bản hủy của siêu thị — nên màn này hiện mail dán + file đính kèm.
 // Chốt rồi thì chỉ xem; muốn sửa: "Mở lại" ở màn lô.
 import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
@@ -40,6 +42,23 @@ export async function render({ container, params }) {
   B.danh_muc.forEach((d) => { byItem[d.item] = d; d._k = khongDau(`${d.ten} ${d.item}`); });
 
   const daChot = () => !!(B.phieu && B.phieu.da_chot);
+  const tp = !!(B.phieu && B.phieu.theo_phieu);
+  const XEM_TRONG_TAB = new Set(["jpg", "jpeg", "png", "webp", "gif", "pdf"]);
+
+  // Phiếu của siêu thị để chép (chỉ lô hủy tại chỗ): mail dán nguyên văn + biên bản / phiếu đính kèm.
+  function phieuSieuThi() {
+    const lo = B.lo || {};
+    const files = B.files || [];
+    if (!lo.chi_tiet_hang && !files.length) {
+      return html`<div class="kt-alert kt-alert--warning">Lô chưa có mail / biên bản hủy nào — nhờ điều phối đính kèm phiếu của siêu thị bên app vận chuyển.</div>`;
+    }
+    return html`<div class="kt-th-kh-phieu">
+      <div class="kt-th-kh-label">Phiếu siêu thị (chép theo đây)</div>
+      ${lo.chi_tiet_hang ? html`<pre class="kt-th-paste" id="kh-mail">${lo.chi_tiet_hang}</pre>` : ""}
+      ${files.length ? html`<div class="kt-th-kh-files">${files.map((f) => html`<a class="kt-btn kt-btn--outline kt-btn--sm" href="${f.url}" ${
+        XEM_TRONG_TAB.has(f.ext) ? html`target="_blank" rel="noopener"` : html`download="${f.file_name}"`}><i class="fas fa-paperclip"></i> ${f.file_name}</a>`)}</div>` : ""}
+    </div>`;
+  }
   const dongCua = (item) => (B.phieu.items || []).find((r) => r.item_code === item);
 
   function paint() {
@@ -49,12 +68,13 @@ export async function render({ container, params }) {
       <div class="kt-th-kh">
         <div class="kt-th-kh-top">
           <div>
-            <div class="kt-th-kh-kicker">Kiểm hàng · ${lo.name}</div>
+            <div class="kt-th-kh-kicker">${tp ? "Nhập theo phiếu hủy" : "Kiểm hàng"} · ${lo.name}</div>
             <div class="kt-th-kh-title">${lo.ten_diem || lo.customer_name}</div>
             <div class="kt-th-kh-sub">${lo.customer_name}${lo.so_phieu_sieu_thi ? " · phiếu " + lo.so_phieu_sieu_thi : ""}</div>
           </div>
-          <div class="kt-th-kh-tong"><div class="kt-th-kh-so">${fmtSl(ph.tong_sl)}</div><div class="kt-th-kh-sub">${(ph.items || []).length} mã đã kiểm</div></div>
+          <div class="kt-th-kh-tong"><div class="kt-th-kh-so">${fmtSl(ph.tong_sl)}</div><div class="kt-th-kh-sub">${(ph.items || []).length} mã ${tp ? "theo phiếu" : "đã kiểm"}</div></div>
         </div>
+        ${tp ? phieuSieuThi() : ""}
         ${daChot() ? html`<div class="kt-alert kt-alert--info">Phiếu đã chốt — chỉ xem. Muốn sửa: bấm <b>Mở lại để sửa</b> ở <a href="#/thu-hoi/${encodeURIComponent(name)}">màn lô</a>.</div>` : html`
           <div class="kt-th-kh-tim">
             <input class="kt-input" id="kh-tim" type="search" autocomplete="off" autocorrect="off" spellcheck="false"
@@ -65,12 +85,12 @@ export async function render({ container, params }) {
             ${B.thieu_nhom.map((g) => `“${g}”`).join(", ")} trong Item Group — ${(B.nhom_kiem || []).length
               ? `danh sách tìm chỉ có ${B.nhom_kiem.join(", ")}.` : "đang tìm trong mọi mã hàng bán."} Báo quản trị đặt đúng tên nhóm.</div>` : ""}
           <div id="kh-chon"></div>`}
-        <div class="kt-th-kh-label">Đã kiểm</div>
+        <div class="kt-th-kh-label">${tp ? "Đã chép theo phiếu" : "Đã kiểm"}</div>
         <div class="kt-th-kh-list" id="kh-dong"></div>
         ${daChot() ? "" : html`<div class="kt-th-kh-foot">
           <a class="kt-btn kt-btn--outline" href="#/thu-hoi/${encodeURIComponent(name)}"><i class="fas fa-arrow-left"></i> Lô</a>
           <button type="button" class="kt-btn kt-btn--success" id="kh-chot" ${(ph.items || []).length ? "" : "disabled"}>
-            <i class="fas fa-lock"></i> Chốt phiếu · ${(ph.items || []).length} mã</button>
+            <i class="fas fa-lock"></i> ${tp ? "Chốt theo phiếu" : "Chốt phiếu"} · ${(ph.items || []).length} mã</button>
         </div>`}
       </div>`);
     veChon();
@@ -112,7 +132,9 @@ export async function render({ container, params }) {
     const box = container.querySelector("#kh-dong");
     const rows = (B.phieu.items || []).slice().reverse(); // mới nhất lên đầu — vừa quét là thấy ngay
     if (!rows.length) {
-      setHTML(box, html`<div class="kt-sub kt-th-kh-trong">Chưa kiểm mã nào. Bấm <b>⌗ QUÉT</b> rồi đưa mã vạch trên thùng / hộp vào khung, hoặc gõ tên mã.</div>`);
+      setHTML(box, tp
+        ? html`<div class="kt-sub kt-th-kh-trong">Chưa chép mã nào. Gõ tên / mã hàng theo phiếu hủy của siêu thị ở ô tìm, nhập số lượng ghi trên phiếu.</div>`
+        : html`<div class="kt-sub kt-th-kh-trong">Chưa kiểm mã nào. Bấm <b>⌗ QUÉT</b> rồi đưa mã vạch trên thùng / hộp vào khung, hoặc gõ tên mã.</div>`);
       return;
     }
     setHTML(box, html`${rows.map((r) => html`<div class="kt-th-kh-row">
@@ -209,7 +231,7 @@ export async function render({ container, params }) {
 
   async function chot(btn) {
     const n = (B.phieu.items || []).length;
-    if (!confirm(`Chốt phiếu kiểm ${name} với ${n} mã · tổng ${fmtSl(B.phieu.tong_sl)}?\nChốt rồi mới lập hóa đơn trả về; muốn sửa phải Mở lại.`)) return;
+    if (!confirm(`${tp ? "Chốt theo phiếu hủy" : "Chốt phiếu kiểm"} ${name} với ${n} mã · tổng ${fmtSl(B.phieu.tong_sl)}?\nChốt rồi mới lập hóa đơn trả về; muốn sửa phải Mở lại.`)) return;
     btn.disabled = true;
     try {
       await api.thChot(name);

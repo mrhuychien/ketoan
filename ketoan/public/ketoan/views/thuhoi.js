@@ -17,6 +17,11 @@ const VC = 3; // ba chặng đầu thuộc bên vận chuyển
 // Bên vận chuyển HỦY yêu cầu (thu_hoi.DA_HUY): không phải một nấc của 7 chặng — lô dừng hẳn,
 // không tính vào "Đang mở", kế toán chỉ xem.
 const DA_HUY = "Đã hủy";
+// Siêu thị HỦY TẠI CHỖ (thu_hoi.HUY_TAI_CHO): không thu về — lô đi tắt sang "Đã kiểm hàng"
+// (nhận đủ theo phiếu); kế toán CHÉP mã + số theo phiếu siêu thị rồi lập hóa đơn trả về.
+const HUY_TAI_CHO = "Hủy tại chỗ";
+const BO_QUA_HTC = new Set(["Đã lấy hàng", "Đã nhận hàng", "Đang kiểm"]);
+const htcTag = () => html`<span class="kt-badge kt-th-htc">🗑 Hủy tại chỗ</span>`;
 
 const fmtSl = (n) => new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 3 }).format(Number(n) || 0);
 
@@ -54,12 +59,13 @@ function badge(chang, list) {
   return html`<span class="kt-badge kt-badge--${changTone(chang, list)}">${chang || ""}</span>`;
 }
 
-// Thanh 7 nấc — cùng hình với bên vận chuyển để hai bên nhìn một thứ.
-function steps(chang, list = CHANG_FB) {
+// Thanh 7 nấc — cùng hình với bên vận chuyển để hai bên nhìn một thứ. Lô hủy tại chỗ (`htc`):
+// ba nấc giữa (lấy hàng, nhận hàng, đếm hàng) gạch chéo — BỎ QUA, không phải "chưa tới".
+function steps(chang, list = CHANG_FB, htc = false) {
   if (chang === DA_HUY) return ""; // lô hủy không có tiến độ — huy hiệu + lý do nói đủ
   const i = list.indexOf(chang);
-  return html`<div class="kt-th-steps" title="${chang || ""}">${list.map((c, k) => raw(
-    `<span class="kt-th-step ${k < VC ? "kt-th-step--vc" : "kt-th-step--kt"}${k <= i ? " is-on" : ""}${k === i ? " is-cur" : ""}"></span>`))}</div>`;
+  return html`<div class="kt-th-steps" title="${chang || ""}${htc ? " · hủy tại chỗ" : ""}">${list.map((c, k) => raw(
+    `<span class="kt-th-step ${k < VC ? "kt-th-step--vc" : "kt-th-step--kt"}${htc && BO_QUA_HTC.has(c) ? " is-skip" : k <= i ? " is-on" : ""}${k === i ? " is-cur" : ""}"></span>`))}</div>`;
 }
 
 export async function render({ container, params, query }) {
@@ -109,7 +115,7 @@ async function renderList(container, query) {
     const c = S.data.counts || {};
     const ds = S.data.chang_list || CHANG_FB;
     const huy = c[DA_HUY] || 0;
-    const tong = ds.reduce((a, k) => a + (c[k] || 0), 0) + huy;
+    const tong = Object.values(c).reduce((a, n) => a + (Number(n) || 0), 0); // mọi chặng server đếm
     const pill = (key, label, n, tone = "") => html`<button type="button" class="kt-th-pill${tone ? " kt-th-pill--" + tone : ""}${S.chang === key ? " is-on" : ""}" data-f="${key}">${label} <b>${n}</b></button>`;
     setHTML(container.querySelector("#th-pills"), html`
       ${pill("dang_mo", "Đang mở", tong - (c["Xong"] || 0) - huy)}
@@ -146,13 +152,13 @@ async function renderList(container, query) {
           <td>${r.don_vi_thu_hoi || html`<span class="kt-sub">chưa có đơn vị thu hồi</span>`}${r.ma_van_don ? html`<div class="kt-sub">VĐ ${r.ma_van_don}</div>` : ""}<div class="kt-sub">${r.nhan_luc ? "về kho " + fmtLuc(r.nhan_luc) : r.lay_luc ? "lấy " + fmtLuc(r.lay_luc) : r.ngay_hen_lay ? "thu " + formatDate(r.ngay_hen_lay) : ""}</div></td>
           <td class="num">${kiem(r)}</td>
           <td>${hd(r)}</td>
-          <td>${badge(r.chang, ds)}${steps(r.chang, ds)}${huyDong(r)}</td>
+          <td>${badge(r.chang, ds)}${r.trang_thai === HUY_TAI_CHO ? htcTag() : ""}${steps(r.chang, ds, r.trang_thai === HUY_TAI_CHO)}${huyDong(r)}</td>
         </tr>`)}</tbody>
       </table></div>
       <div class="kt-th-cards kt-th-mob">${rows.map((r) => html`<a class="kt-th-card" href="#/thu-hoi/${encodeURIComponent(r.name)}">
-        <div class="kt-th-card-head"><b>${r.ten_diem || r.customer_name}</b>${badge(r.chang, ds)}</div>
+        <div class="kt-th-card-head"><b>${r.ten_diem || r.customer_name}</b><span>${badge(r.chang, ds)}${r.trang_thai === HUY_TAI_CHO ? htcTag() : ""}</span></div>
         <div class="kt-sub">${r.customer_name} · ${r.name}${r.so_phieu_sieu_thi ? " · phiếu " + r.so_phieu_sieu_thi : ""}</div>
-        ${steps(r.chang, ds)}${huyDong(r)}
+        ${steps(r.chang, ds, r.trang_thai === HUY_TAI_CHO)}${huyDong(r)}
         <div class="kt-th-card-meta">📅 ${formatDate(r.ngay_yeu_cau)}${r.tuoi > 0 ? ` · ${r.tuoi} ngày` : ""}${r.kiem_so_ma ? ` · đã kiểm ${fmtSl(r.kiem_sl)}` : ""}${r.so_hd ? ` · ${r.so_hd} HĐ trả về` : ""}</div>
         ${r.don_vi_thu_hoi || r.ma_van_don ? html`<div class="kt-th-card-meta">🚚 ${[r.don_vi_thu_hoi, r.ma_van_don ? "VĐ " + r.ma_van_don : ""].filter(Boolean).join(" · ")}</div>` : ""}
       </a>`)}</div>
@@ -190,12 +196,14 @@ async function renderLo(container, name) {
     const ph = D.phieu;
     const f = D.flags || {};
     const moc = (nhan, luc, ai) => luc ? html`<div><span class="kt-sub">${nhan}</span> ${fmtLuc(luc)}${ai ? " · " + ai : ""}</div>` : "";
+    const htc = lo.trang_thai === HUY_TAI_CHO;
+    const tp = !!(ph && ph.theo_phieu); // phiếu CHÉP theo phiếu siêu thị (lô hủy tại chỗ), không đếm
     setHTML(container, html`
       <div class="kt-th-back"><a href="#/thu-hoi"><i class="fas fa-arrow-left"></i> Theo dõi thu hồi</a></div>
       <div class="kt-view-head">
-        <div class="kt-view-title"><i class="fas fa-rotate-left"></i> ${lo.name} · ${lo.ten_diem || lo.customer_name} ${badge(D.chang, ds)}</div>
+        <div class="kt-view-title"><i class="fas fa-rotate-left"></i> ${lo.name} · ${lo.ten_diem || lo.customer_name} ${badge(D.chang, ds)}${htc ? htcTag() : ""}</div>
         <div class="kt-sub">${lo.customer_name}${lo.ma_diem ? " · " + lo.ma_diem : ""}${lo.so_phieu_sieu_thi ? " · phiếu xuất trả " + lo.so_phieu_sieu_thi : ""}</div>
-        ${steps(D.chang, ds)}
+        ${steps(D.chang, ds, htc)}
       </div>
       ${lo.trang_thai === DA_HUY ? html`<div class="kt-alert kt-alert--danger kt-th-huy-box">
         <b>Bên vận chuyển đã HỦY yêu cầu này</b>${lo.huy_luc ? " · " + fmtLuc(lo.huy_luc) : ""}${lo.huy_boi ? " · " + lo.huy_boi : ""}
@@ -227,13 +235,13 @@ async function renderLo(container, name) {
         </div>
 
         <div class="kt-card">
-          <div class="kt-card-head"><b><i class="fas fa-barcode"></i> Kiểm hàng</b>${ph ? html`<span class="kt-sub">${ph.da_chot ? `đã chốt ${fmtLuc(ph.chot_luc)} · ${ph.chot_boi || ""}` : "đang kiểm"}</span>` : ""}</div>
+          <div class="kt-card-head"><b><i class="fas ${htc ? "fa-file-lines" : "fa-barcode"}"></i> ${htc ? "Nhập theo phiếu hủy" : "Kiểm hàng"}</b>${ph ? html`<span class="kt-sub">${ph.da_chot ? `đã chốt ${fmtLuc(ph.chot_luc)} · ${ph.chot_boi || ""}` : tp ? "đang chép theo phiếu" : "đang kiểm"}</span>` : ""}</div>
           <div class="kt-th-pad">${kiemBlock(lo, ph, f)}</div>
         </div>
       </div>
 
       ${ph && ph.da_chot ? html`<div class="kt-card kt-th-mt">
-        <div class="kt-card-head"><b><i class="fas fa-scale-balanced"></i> ${D.co_khai ? "Siêu thị khai · đã kiểm · đã lập hóa đơn" : "Đã kiểm · đã lập hóa đơn"}</b><span class="kt-sub">ĐVT kho</span></div>
+        <div class="kt-card-head"><b><i class="fas fa-scale-balanced"></i> ${D.co_khai ? "Siêu thị khai · đã kiểm · đã lập hóa đơn" : tp ? "Theo phiếu hủy · đã lập hóa đơn" : "Đã kiểm · đã lập hóa đơn"}</b><span class="kt-sub">ĐVT kho</span></div>
         ${soSanh()}
       </div>` : ""}
       ${ph && !ph.da_chot && D.co_khai ? html`<div class="kt-sub kt-th-mt">Số siêu thị khai hiện SAU khi chốt phiếu: đếm mù rồi mới so — thấy số khai trước là dễ gõ lại số khai cho nhanh, và lệch thật không bao giờ lộ.</div>` : ""}
@@ -248,6 +256,12 @@ async function renderLo(container, name) {
 
   function kiemBlock(lo, ph, f) {
     if (!ph) {
+      if (f.bat_dau && lo.trang_thai === HUY_TAI_CHO) {
+        return html`<div class="kt-alert kt-alert--warning kt-th-htc-box"><b>Siêu thị hủy hàng tại chỗ — không thu về.</b>
+          Nhận đủ theo phiếu: chép mã + số lượng theo phiếu / biên bản hủy của siêu thị (mail dán và file đính kèm ở hồ sơ lô),
+          chốt, rồi lập hóa đơn trả về như lô thường.</div>
+          <button type="button" class="kt-btn kt-btn--primary kt-th-big" id="th-batdau"><i class="fas fa-file-lines"></i> Nhập hàng theo phiếu hủy</button>`;
+      }
       if (f.bat_dau) {
         return html`<p>Hàng đã về kho. Mở phiếu kiểm rồi đếm trên điện thoại: quét mã vạch hoặc tìm mã, nhập số thùng / hộp.</p>
           <button type="button" class="kt-btn kt-btn--primary kt-th-big" id="th-batdau"><i class="fas fa-barcode"></i> Bắt đầu kiểm hàng</button>`;
@@ -256,12 +270,12 @@ async function renderLo(container, name) {
       return html`<div class="kt-alert kt-alert--info">Lô đang ở <b>${lo.trang_thai}</b> bên vận chuyển. Kế toán tiếp nối khi hàng đã về kho — điều phối bấm "Đã nhận hàng" trên app vận chuyển.</div>`;
     }
     return html`
-      <div class="kt-th-sum"><div><div class="kt-sub">Đã kiểm</div><div class="kt-th-sum-so">${fmtSl(ph.tong_sl)}</div><div class="kt-sub">${ph.so_ma || 0} mã · ĐVT kho</div></div>
+      <div class="kt-th-sum"><div><div class="kt-sub">${ph.theo_phieu ? "Theo phiếu hủy" : "Đã kiểm"}</div><div class="kt-th-sum-so">${fmtSl(ph.tong_sl)}</div><div class="kt-sub">${ph.so_ma || 0} mã · ĐVT kho</div></div>
         ${ph.da_chot && D.co_khai ? html`<div><div class="kt-sub">Siêu thị khai</div><div class="kt-th-sum-so kt-th-sum-so--nhat">${fmtSl(D.tong_khai)}</div></div>` : ""}</div>
       ${ph.khong_lap_hd ? html`<div class="kt-alert kt-alert--warning">KTT kết luận <b>không lập hóa đơn trả về</b>: ${ph.ly_do_khong_lap} — ${ph.ket_luan_boi || ""}</div>` : ""}
       <div class="kt-th-actions">
-        <a class="kt-btn kt-btn--primary" href="#/kiem-hang/${encodeURIComponent(ph.name)}"><i class="fas fa-mobile-screen"></i> ${ph.da_chot ? "Xem phiếu kiểm" : "Mở màn kiểm hàng"}</a>
-        ${f.chot ? html`<button type="button" class="kt-btn kt-btn--success" id="th-chot"><i class="fas fa-lock"></i> Chốt phiếu</button>` : ""}
+        <a class="kt-btn kt-btn--primary" href="#/kiem-hang/${encodeURIComponent(ph.name)}"><i class="fas fa-mobile-screen"></i> ${ph.da_chot ? (ph.theo_phieu ? "Xem phiếu đã chép" : "Xem phiếu kiểm") : ph.theo_phieu ? "Mở màn nhập theo phiếu" : "Mở màn kiểm hàng"}</a>
+        ${f.chot ? html`<button type="button" class="kt-btn kt-btn--success" id="th-chot"><i class="fas fa-lock"></i> ${ph.theo_phieu ? "Chốt theo phiếu" : "Chốt phiếu"}</button>` : ""}
         ${f.mo_lai ? html`<button type="button" class="kt-btn kt-btn--outline" id="th-molai"><i class="fas fa-lock-open"></i> Mở lại để sửa</button>` : ""}
         ${f.ket_luan ? html`<button type="button" class="kt-btn kt-btn--outline" id="th-ketluan"><i class="fas fa-user-tie"></i> Không lập hóa đơn trả về…</button>` : ""}
         ${f.xoa ? html`<button type="button" class="kt-btn kt-btn--outline" id="th-xoa"><i class="fas fa-trash"></i> Xóa phiếu kiểm</button>` : ""}

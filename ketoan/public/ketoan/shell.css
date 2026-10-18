@@ -543,6 +543,13 @@ body { padding-top: 0 !important; background: #f1f5f9 !important; }
 .kt-th-step--vc.is-on { background: var(--kt-info); border-color: var(--kt-info); }
 .kt-th-step--kt.is-on { background: var(--kt-primary-2); border-color: var(--kt-primary-2); }
 .kt-th-step.is-cur { box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--kt-text-2); }
+/* Hủy tại chỗ: nấc bỏ qua (lấy hàng, nhận hàng, đếm hàng) gạch chéo — khác "chưa tới". */
+.kt-th-step.is-skip { background: repeating-linear-gradient(135deg, #cbd5e1 0 2px, transparent 2px 5px); border-color: #e2e8f0; }
+.kt-th-htc { background: #ffedd5; color: #9a3412; margin-left: 4px; }
+.kt-th-htc-box { margin-bottom: 10px; }
+.kt-th-kh-phieu { display: flex; flex-direction: column; gap: 6px; }
+.kt-th-kh-phieu .kt-th-paste { margin: 0; max-height: 40vh; overflow: auto; }
+.kt-th-kh-files { display: flex; flex-wrap: wrap; gap: 6px; }
 .kt-view-head .kt-th-steps { flex-basis: 100%; max-width: 520px; }
 
 .kt-th-toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }

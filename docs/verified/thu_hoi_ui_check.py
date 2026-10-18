@@ -34,6 +34,9 @@ NHỮNG ĐIỀU MÀN HÌNH HỨA
    "Siêu thị khai", lô cũ còn bảng hàng khai thì vẫn so khai / kiểm như trước.
 8. **Lô bên vận chuyển đã HỦY**: không tính vào "Đang mở", có pill "Đã hủy" riêng, thẻ ghi
    lý do; màn lô có khung "đã HỦY" + lý do, không có nút "Bắt đầu kiểm hàng".
+9. **Lô HỦY TẠI CHỖ** (siêu thị hủy, không thu): nằm ở "Đã kiểm hàng" + nhãn, thanh 7 nấc vẽ
+   3 nấc giữa là bỏ qua; màn lô có nút "Nhập hàng theo phiếu hủy" → màn nhập THẤY mail dán
+   + biên bản để chép (lô thường vẫn đếm mù), nút "Chốt theo phiếu".
 
 Thử phá (đã làm khi viết): bỏ `pointer-events: none` của `.kt-toast` → bước sửa dòng
 kẹt vì toast chặn nút LƯU; trả `.kt-th-cards { display: flex }` ra ngoài media query →
@@ -172,6 +175,23 @@ HUY = dict(trang_thai="Đã hủy", ly_do_huy="Siêu thị rút yêu cầu trả
            huy_luc="2026-10-15 09:00:00", huy_tu="Đã lấy hàng")
 
 
+LO_HTC = dict(LO, name="TH-2026-0008", trang_thai="Hủy tại chỗ", ten_diem="Co.opMart Cống Quỳnh",
+              chi_tiet_hang="Biên bản hủy 18/10: BDX-170 hết date 3 hộp", huy_tai_cho_luc="2026-10-18 09:00:00",
+              huy_tai_cho_boi="Điều hành", lay_luc=None, nhan_luc=None)
+FILE_HTC = {"name": "F9", "file_name": "bien-ban-huy.pdf", "ext": "pdf", "is_image": False,
+            "url": "/api/method/ketoan.api.thu_hoi.xem_dinh_kem?file=F9"}
+
+
+def lo_htc():
+    """Lô siêu thị HỦY TẠI CHỖ: chưa / đang chép theo phiếu (S["htc"])."""
+    ph = S.get("htc")
+    return {"lo": LO_HTC, "khai": [], "co_khai": False, "tong_khai": 0, "files": [FILE_HTC],
+            "phieu": ph and dict(ph, tong_sl=0, so_ma=0), "hoa_don": [], "so_sanh": [], "chang": "Đã kiểm hàng",
+            "chang_list": CHANG, "lech": {}, "con_can": {},
+            "flags": {"bat_dau": not ph, "sua": bool(ph), "chot": False, "mo_lai": False, "lap_hd": False,
+                      "cap_nhat": False, "xoa": bool(ph), "ket_luan": False}, "is_chief": False}
+
+
 def lo_huy():
     """Lô bên vận chuyển đã HỦY yêu cầu: chỉ xem, không có phiếu kiểm."""
     lo = dict(LO, name="TH-2026-0004", ten_diem="Co.opMart Thắng Lợi", chi_tiet_hang=None, **HUY)
@@ -186,6 +206,8 @@ def get_th(a=None):
         return lo_cu()
     if (a or {}).get("name") == "TH-2026-0004":
         return lo_huy()
+    if (a or {}).get("name") == "TH-2026-0008":
+        return lo_htc()
     p = S["phieu"]
     kiem, lap = tong(), da_lap()
     chot = bool(p and p["da_chot"])
@@ -224,7 +246,8 @@ def list_thu_hoi(a):
                  so_hd=len(S["hd"]), so_hd_ghi_so=0, tien_hd=0),
             dict(LO, name="TH-2026-0003", trang_thai="Tạo yêu cầu", chang="Tạo yêu cầu",
                  ten_diem="GO! Thăng Long", customer_name="Central Retail", tuoi=3, so_hd=0),
-            dict(LO, name="TH-2026-0004", chang="Đã hủy", ten_diem="Co.opMart Thắng Lợi", tuoi=None, so_hd=0, **HUY)]
+            dict(LO, name="TH-2026-0004", chang="Đã hủy", ten_diem="Co.opMart Thắng Lợi", tuoi=None, so_hd=0, **HUY),
+            dict(LO_HTC, chang="Đã kiểm hàng", tuoi=0, so_hd=0)]
     f = [r for r in rows if a.get("chang") == "tat_ca"
          or (r["chang"] not in ("Xong", "Đã hủy") if a.get("chang") == "dang_mo" else r["chang"] == a.get("chang"))]
     counts = {}
@@ -233,12 +256,20 @@ def list_thu_hoi(a):
     return {"rows": f, "total": len(f), "counts": counts, "chang_list": CHANG, "vanchuyen": True, "has_more": False}
 
 
-def bat_dau_kiem(_a):
+def bat_dau_kiem(a):
+    if (a or {}).get("name") == "TH-2026-0008":
+        S["htc"] = S.get("htc") or {"name": "TH-2026-0008", "da_chot": 0, "items": [], "ghi_chu": "", "theo_phieu": 1}
+        return lo_htc()
     S["phieu"] = S["phieu"] or {"name": LO["name"], "da_chot": 0, "items": [], "ghi_chu": ""}
     return get_th()
 
 
-def boot_kiem(_a):
+def boot_kiem(a):
+    if (a or {}).get("name") == "TH-2026-0008":  # phiếu THEO PHIẾU: server gửi mail + biên bản để chép
+        return {"lo": LO_HTC, "phieu": dict(S["htc"], tong_sl=0, so_ma=0),
+                "danh_muc": [{"item": "BDX", "ten": TEN, "dvt": "Hộp", "uoms": UOMS}], "ma_quet": {}, "goi_y": [],
+                "files": [FILE_HTC], "nhom_kiem": ["Hàng Tết", "Hàng truyền thống"], "thieu_nhom": [],
+                "hom_nay": "2026-10-18"}
     # Server thật bỏ mail dán (chi_tiet_hang, có số khai 48) khỏi lô ở đây — thu_hoi_check
     # canh. Bản giả CỐ Ý để lại: có số trong tay thì màn kiểm hàng cũng không được vẽ ra.
     return {
@@ -456,7 +487,11 @@ def run(pw, exe, root, ok, bad, shots=None):
     expect("list: pill Đang mở + 7 chặng + Đã hủy + Tất cả", len(p.query_selector_all(".kt-th-pill")) == 10)
     pills = p.text_content("#th-pills")
     expect("list: 'Đang mở' KHÔNG đếm lô hủy; 'Đã hủy' 1; 'Tất cả' đếm đủ",
-           "Đang mở 2" in pills and "Đã hủy 1" in pills and "Tất cả 3" in pills, pills)
+           "Đang mở 3" in pills and "Đã hủy 1" in pills and "Tất cả 4" in pills, pills)
+    htc = p.query_selector('.kt-th-card[href="#/thu-hoi/TH-2026-0008"]')
+    expect("list: lô HỦY TẠI CHỖ nằm 'Đã kiểm hàng' + nhãn 'Hủy tại chỗ' + 3 nấc giữa vẽ BỎ QUA",
+           htc is not None and "Đã kiểm hàng" in htc.text_content() and "Hủy tại chỗ" in htc.text_content()
+           and len(htc.query_selector_all(".kt-th-step.is-skip")) == 3)
     expect("list 'Đang mở' không hiện lô hủy", "TH-2026-0004" not in p.text_content(".kt-th-cards"))
     p.click('.kt-th-pill[data-f="Đã hủy"]')
     p.wait_for_timeout(300)
@@ -658,6 +693,33 @@ def run(pw, exe, root, ok, bad, shots=None):
     nhat = p.query_selector(".kt-th-sum-so--nhat")
     expect("lô cũ có bảng khai: vẫn hiện cột 'Siêu thị khai' + tổng khai 48 + lệch +2",
            "Siêu thị khai" in cu and nhat is not None and nhat.text_content() == "48" and "+2" in cu)
+
+    # 6c. Lô HỦY TẠI CHỖ: không đếm — chép theo phiếu siêu thị rồi lập hóa đơn
+    p3 = ctx.new_page()
+    watch(p3)
+    p3.goto(root + "/#/thu-hoi/TH-2026-0008")
+    p3.wait_for_timeout(700)
+    m3 = p3.text_content("main")
+    nut = p3.query_selector("#th-batdau")
+    expect("lô hủy tại chỗ: nói rõ không thu về, nhận đủ theo phiếu + nút 'Nhập hàng theo phiếu hủy'",
+           "không thu về" in m3 and "Nhận đủ theo phiếu" in m3 and nut is not None
+           and "Nhập hàng theo phiếu hủy" in nut.text_content()
+           and len(p3.query_selector_all(".kt-view-head .kt-th-step.is-skip")) == 3)
+    p3.click("#th-batdau")
+    p3.wait_for_timeout(900)
+    bd = [x for x in calls("ketoan.api.thu_hoi.bat_dau_kiem") if x.get("name") == "TH-2026-0008"]
+    k3 = p3.text_content("main")
+    expect("bấm nhập theo phiếu: mở phiếu + sang màn nhập (kicker 'Nhập theo phiếu hủy')",
+           bool(bd) and p3.evaluate("location.hash").startswith("#/kiem-hang/TH-2026-0008")
+           and "Nhập theo phiếu hủy" in p3.text_content(".kt-th-kh-kicker"))
+    expect("màn nhập theo phiếu THẤY mail dán + biên bản đính kèm để chép (không đếm mù)",
+           "Biên bản hủy 18/10: BDX-170 hết date 3 hộp" in k3
+           and p3.query_selector('a[href*="file=F9"][target="_blank"]') is not None)
+    expect("nút chốt ghi 'Chốt theo phiếu', danh sách ghi 'Đã chép theo phiếu'",
+           "Chốt theo phiếu" in (p3.text_content("#kh-chot") or "") and "Đã chép theo phiếu" in k3)
+    if shots:
+        p3.screenshot(path=os.path.join(shots, "kt_htc_nhap.png"), full_page=True)
+    p3.close()
 
     # Toast hết giờ phải ẩn THẬT (trước đây trượt xuống vẫn nằm cách đáy ~25px)
     p.wait_for_timeout(4000)

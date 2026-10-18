@@ -29,7 +29,8 @@ Một **LÔ THU HỒI** = một lần siêu thị gọi trả, đi qua 6 chặng
 
 Giữa 3 và 4 có chặng phụ **Đang kiểm** (đã mở phiếu kiểm, chưa chốt) — để thấy việc
 đang làm dở, không phải để bấm. Ngoài tiến trình có **Đã hủy** (xem §5b): lô dừng hẳn,
-giữ lại làm dấu vết.
+giữ lại làm dấu vết. Lô siêu thị cho **hủy tại chỗ** (xem §5c) đi tắt từ chặng 1 sang
+chặng 4 — không lấy, không chở, không đếm, kế toán nhập theo phiếu.
 
 ## 2. Hai bảng, hai chủ — không ai ghi bảng của người kia
 
@@ -42,8 +43,9 @@ vanchuyen: Lo Thu Hoi (TH-.YYYY.-.####)         ketoan: Kiem Hang Thu Hoi (name 
   ├ ngày yêu cầu, số phiếu xuất trả siêu thị       ├ company / customer / địa chỉ (chép lúc mở)
   ├ điều phối thu hồi: đơn vị (Viettel Post /       ├ items: Kiem Hang Thu Hoi Dong (SL ĐVT kho)
   │   Nhất Tín), mã vận đơn, ngày thu, số kiện      ├ da_chot · khong_lap_hd (KTT)
-  ├ chi_tiet_hang: dán NGUYÊN VĂN mail siêu thị    └ trang_thai: Đang kiểm → … → Xong
-  ├ trang_thai: Tạo yêu cầu → Đã lấy → Đã nhận
+  ├ chi_tiet_hang: dán NGUYÊN VĂN mail siêu thị    ├ theo_phieu (lô hủy tại chỗ: chép, không đếm)
+  ├ trang_thai: Tạo yêu cầu → Đã lấy → Đã nhận    └ trang_thai: Đang kiểm → … → Xong
+  │   (hoặc Tạo yêu cầu → Hủy tại chỗ)
   └ File đính kèm: ảnh/PDF/Excel/Word/mail (private, xem qua proxy có guard)
                          Sales Invoice.custom_kiem_hang_thu_hoi  (ketoan tạo, no_copy)
 ```
@@ -52,8 +54,9 @@ vanchuyen: Lo Thu Hoi (TH-.YYYY.-.####)         ketoan: Kiem Hang Thu Hoi (name 
   một lô chỉ có một phiếu kiểm, và hai người cùng bấm "Bắt đầu kiểm" thì khóa chính
   chặn người thứ hai — không cần chốt trùng bằng code như `MT Hang Hoan` phải làm.
 - `lo_thu_hoi` là **Data**: ketoan phải cài được trên site chưa có vanchuyen.
-- **Trạng thái tổng** của một lô = `COALESCE(kiem.trang_thai, lo.trang_thai)`. Cả hai
-  màn (vanchuyen `#/thu-hoi`, ketoan `#/thu-hoi`) hiện cùng một con số.
+- **Trạng thái tổng** của một lô = `COALESCE(kiem.trang_thai, lo.trang_thai)` — riêng lô
+  "Hủy tại chỗ" chưa có phiếu kiểm đọc là "Đã kiểm hàng" (§5c). Cả hai màn (vanchuyen
+  `#/thu-hoi`, ketoan `#/thu-hoi`) hiện cùng một con số.
 - vanchuyen **khóa** khách/địa chỉ và không cho lùi/xóa lô khi ketoan đã mở phiếu
   kiểm — hóa đơn trả về dựng trên đúng khách đó.
 
@@ -110,6 +113,7 @@ lô cũ vẫn có số khai — ketoan đọc mềm, lô nào có thì bảng so
 ```
 khong_lap_hd = 1 (KTT kết luận, có lý do)          -> Xong
 chưa chốt                                          -> Đang kiểm
+chưa chốt, phiếu theo_phieu (lô hủy tại chỗ)        -> Đã kiểm hàng   (đang chép theo phiếu)
 chốt, hóa đơn trả về (docstatus<2) chưa phủ ĐÚNG    -> Đã kiểm hàng   (kèm "còn thiếu"/"thừa")
 phủ đúng từng mặt hàng, còn bản nháp                -> Đã nhập chứng từ
 phủ đúng, mọi bản đã ghi sổ                          -> Xong
@@ -144,12 +148,38 @@ lập nhầm còn "Tạo yêu cầu"; hủy thì lô còn đó để trả lời
 - **Khôi phục** (`khoi_phuc_lo`) khi hủy nhầm: về ĐÚNG chặng `huy_tu`, dấu hủy trên bản
   ghi được xóa; dấu cũ còn trong lịch sử thay đổi (Version — DocType bật `track_changes`).
 
+## 5c. Hủy tại chỗ — siêu thị hủy hàng, không thu về
+
+Lô hàng date báo về quá ít, không đáng tiền xe → siêu thị **hủy tại chỗ** (có biên bản
+hủy). Điều hành bấm **Hủy tại chỗ (không thu)** trên lô còn **Tạo yêu cầu**
+(`chuyen_chang` → "Hủy tại chỗ", hỏi lại trước). Khác hẳn **Hủy yêu cầu** (§5b): hủy yêu
+cầu là siêu thị KHÔNG trả nữa; hủy tại chỗ là hàng VẪN trả — chỉ không chở về — nên vẫn
+phải lập hóa đơn trả về.
+
+- **Đi tắt**: lô sang trạng thái `Hủy tại chỗ` (kèm `huy_tai_cho_luc` · `huy_tai_cho_boi`,
+  chỉ đọc), chặng tổng nhảy thẳng **Đã kiểm hàng** (nhận đủ theo phiếu); thanh 7 nấc vẽ
+  BỎ QUA 3 nấc Đã lấy hàng · Đã nhận hàng · Đang kiểm. Luật chặng tổng mỗi app một chỗ:
+  `chang_tong()` + `_join_kiem()` (vanchuyen), `_chang_lo()` + `_expr()` (ketoan). Site
+  chưa cài ketoan thì lô hiện đúng chữ "Hủy tại chỗ", xếp ngay sau "Đã nhận hàng".
+- **Chỉ từ "Tạo yêu cầu"**: đã có người đi lấy thì không còn là hủy tại chỗ. Bấm nhầm thì
+  lùi về "Tạo yêu cầu" (khi kế toán chưa mở phiếu); không đi tiếp chặng vận chuyển. Lô hủy
+  tại chỗ ẩn khối điều phối thu hồi.
+- **Kế toán nhập THEO PHIẾU, không đếm mù**: màn lô có nút **Nhập hàng theo phiếu hủy** →
+  phiếu kiểm mở với cờ `theo_phieu = 1` (phiếu tạo tay trên Desk cũng tự bật), màn nhập
+  hiện mail dán + biên bản đính kèm để chép mã + số lượng. Đang chép vẫn ở "Đã kiểm hàng"
+  (không lùi về "Đang kiểm"); **Chốt theo phiếu** rồi lập hóa đơn trả về như lô thường →
+  Đã nhập chứng từ → Xong. Lô thu về kho thì vẫn đếm mù như cũ.
+- **Khóa như lô thường**: kế toán đã mở phiếu thì vanchuyen không lùi, không đổi khách /
+  điểm, không hủy — controller `Lo Thu Hoi` chặn cả trên Desk (kể cả chuyển một lô đã có
+  phiếu sang "Hủy tại chỗ"). Hủy yêu cầu một lô hủy tại chỗ rồi Khôi phục → về lại "Hủy
+  tại chỗ".
+
 ## 6. Quyền
 
 | | vanchuyen | ketoan |
 |---|---|---|
-| Lập/sửa/xóa lô, đính kèm, điều phối thu hồi, chuyển chặng, hủy / khôi phục | điều hành (quyền ghi Sales Invoice), tổ trưởng, admin | — |
-| Theo dõi, kiểm hàng, chốt, mở lại, lập HĐ trả về | — | kế toán kênh bán hàng (NPP/MT/Du lịch) + KTT |
+| Lập/sửa/xóa lô, đính kèm, điều phối thu hồi, chuyển chặng, hủy tại chỗ, hủy / khôi phục | điều hành (quyền ghi Sales Invoice), tổ trưởng, admin | — |
+| Theo dõi, kiểm hàng / nhập theo phiếu hủy, chốt, mở lại, lập HĐ trả về | — | kế toán kênh bán hàng (NPP/MT/Du lịch) + KTT |
 | Kết luận "Không lập hóa đơn trả" | — | KTT |
 
 DocType chỉ cấp DocPerm System Manager (vanchuyen, như `Su Co Van Chuyen`) / vai trò kế
@@ -168,19 +198,22 @@ phục vụ file trên chính tên miền của site, inline một .html là scr
   chọn điểm (lọc theo Dynamic Link của khách, kèm mã điểm `MT Store` nếu có; chọn xong
   danh sách thu lại, "Đổi điểm" để mở lại), ngày yêu cầu, số phiếu siêu thị, liên hệ, lý
   do, ô dán chi tiết hàng từ mail, điều phối thu hồi (đơn vị / mã vận đơn / ngày thu /
-  số kiện), đính kèm nhiều file, nút chuyển chặng + lùi chặng, **Hủy yêu cầu** (lý do
-  bắt buộc, có gợi ý một chạm) / **Khôi phục**.
+  số kiện), đính kèm nhiều file, nút chuyển chặng + lùi chặng, **Hủy tại chỗ (không
+  thu)** ở lô còn "Tạo yêu cầu" (§5c), **Hủy yêu cầu** (lý do bắt buộc, có gợi ý một
+  chạm) / **Khôi phục**.
 - ketoan tab **Thu hồi** `#/thu-hoi`: theo dõi MỌI lô (pill 7 chặng + Đã hủy), `#/thu-hoi/:id`:
   hồ sơ lô (đơn vị thu hồi, chi tiết hàng dán từ mail, đính kèm) + phiếu kiểm + so
   sánh đã kiểm / đã lập hóa đơn (cột "khai" chỉ với lô cũ có bảng hàng khai) + hóa đơn
-  trả về.
+  trả về. Lô hủy tại chỗ: nhãn 🗑, khung "không thu về", nút **Nhập hàng theo phiếu hủy**.
 - ketoan `#/kiem-hang/:id` (mobile, dựng theo màn Ghi hộp của sx): quét mã vạch
   (BarcodeDetector / zxing1d / máy quét cầm tay / gõ tay) hoặc gõ tìm mã → bàn số phím
   to có tab Thùng/Hộp → lưu ngay; chạm số để sửa, ✕ để xóa; **Chốt phiếu** thì khóa,
   **Mở lại** thì sửa tiếp. Danh sách tìm / quét chỉ gồm Item Group **Hàng truyền thống**
   + **Hàng Tết** (kể cả nhóm con; mã đã kiểm trên phiếu vẫn giữ); mã hay trả (siêu thị
   khai + khách mua 6 tháng) nổi lên ĐẦU kết quả, ô tìm trống không hiện gì. Site không có
-  nhóm đó thì báo đúng nhóm thiếu, tạm tìm trong mọi mã hàng bán.
+  nhóm đó thì báo đúng nhóm thiếu, tạm tìm trong mọi mã hàng bán. Phiếu **theo phiếu**
+  (lô hủy tại chỗ) thì màn này hiện thêm mail dán + biên bản đính kèm để chép, nút là
+  **Chốt theo phiếu**.
 
 ## 8. Ngoài phạm vi
 

@@ -38,8 +38,9 @@ chạy 3 chặng vận chuyển *Tạo yêu cầu → Đã lấy hàng → Đã 
   lưu ngay từng lần; quét lại mã đã có là cộng thêm; chạm số để sửa, ✕ để xóa. Danh sách
   tìm chỉ có **Hàng truyền thống + Hàng Tết** (Item Group, kể cả nhóm con —
   `thu_hoi.NHOM_KIEM`); mã hay trả (siêu thị khai + khách mua 6 tháng) nổi lên đầu kết quả.
-  **Đếm mù**: màn kiểm hàng không nhận số siêu thị khai (cả mail dán nguyên văn); bảng so
-  khai / kiểm (lô cũ có bảng hàng khai) chỉ hiện sau khi chốt.
+  **Đếm mù**: màn kiểm hàng không nhận số siêu thị khai (cả mail dán nguyên văn — trừ phiếu
+  *theo phiếu* của lô hủy tại chỗ, xem dưới); bảng so khai / kiểm (lô cũ có bảng hàng khai)
+  chỉ hiện sau khi chốt.
 - **Hóa đơn trả về**: sau khi chốt, chọn hóa đơn gốc trong danh sách MỌI hóa đơn đã ghi sổ
   của đúng khách + đúng điểm giao của lô (đủ HĐĐT, PO, địa chỉ, số tiền, còn nợ, đã trả về;
   tìm theo số HĐ / PO / HĐĐT; tờ không còn gì để trả vẫn hiện nhưng khóa nút; "Xem mọi điểm
@@ -53,6 +54,12 @@ chạy 3 chặng vận chuyển *Tạo yêu cầu → Đã lấy hàng → Đã 
   riêng; màn lô hiện ai hủy · lúc nào · lý do, không mở phiếu kiểm được ("Bắt đầu kiểm" đọc
   lô bằng khóa để không chạy đua với nút Hủy bên kia). Muốn hủy lô kế toán đã mở phiếu kiểm:
   xóa phiếu kiểm trước, hoặc KTT kết luận không lập hóa đơn.
+- **Lô HỦY TẠI CHỖ** (siêu thị hủy hàng, không thu về — bên vận chuyển bấm khi lô còn *Tạo
+  yêu cầu*): lô đứng thẳng ở **Đã kiểm hàng** (nhận đủ theo phiếu), 3 nấc lấy / nhận / đếm
+  vẽ bỏ qua. Nút **Nhập hàng theo phiếu hủy** mở phiếu kiểm *theo phiếu* (cờ `theo_phieu`,
+  phiếu tạo tay trên Desk cũng tự bật): màn nhập hiện mail dán + biên bản đính kèm để chép
+  mã + số lượng, đang chép không lùi về Đang kiểm; **Chốt theo phiếu** rồi lập hóa đơn trả
+  về như lô thường. Cập nhật bản này cần `bench --site <site> migrate` (field mới).
 - Quyền: kế toán bán hàng (NPP / MT / Du lịch) + KTT; lập hóa đơn dùng **quyền tạo Sales
   Invoice của chính người bấm**. Ketoan chỉ **đọc** bảng của vanchuyen (đọc mềm — chưa cài
   vanchuyen thì tab rỗng, không lỗi), không bao giờ ghi.

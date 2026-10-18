@@ -15,6 +15,9 @@ controller bên kia chính là chỗ khóa khách / điểm khi kế toán đã 
 Kế toán chỉ tiếp nối khi lô đã "Đã nhận hàng": đếm hàng chưa về kho là đếm trên giấy.
 Lô bên vận chuyển HỦY yêu cầu ("Đã hủy", kèm lý do) thì chỉ xem — không mở phiếu kiểm;
 `bat_dau_kiem` đọc lô bằng KHÓA để không chạy đua với nút "Hủy yêu cầu" bên kia.
+Lô HỦY TẠI CHỖ (siêu thị hủy, không thu) đi tắt tới "Đã kiểm hàng" (nhận đủ theo phiếu):
+phiếu kiểm của nó là phiếu `theo_phieu` — kế toán CHÉP mã + số theo phiếu siêu thị (không
+đếm, nên màn nhập được thấy mail / biên bản), chốt rồi lập hóa đơn trả về như lô thường.
 
 ════════════════════════════════════════════════════════════════════════════
 KIỂM HÀNG — dựng theo màn Ghi hộp của app sx
@@ -59,6 +62,8 @@ from ketoan.api.mt import SI_NO_FIELD, _company, po_column
 from ketoan.api.thu_hoi_phan_bo import (
     CHANG_KE_TOAN,
     DA_HUY,
+    DA_KIEM,
+    HUY_TAI_CHO,
     DANG_KIEM,
     EPS,
     XONG,
@@ -177,9 +182,18 @@ def _duoi(ten):
 
 
 def _expr():
-    """Biểu thức CHẶNG TỔNG — một chỗ, cho WHERE / GROUP BY / ORDER BY."""
-    return ("(CASE WHEN k.name IS NULL THEN l.trang_thai "
+    """Biểu thức CHẶNG TỔNG — một chỗ, cho WHERE / GROUP BY / ORDER BY. Lô hủy tại chỗ chưa có
+    phiếu đứng ở "Đã kiểm hàng" (nhận đủ theo phiếu) — cùng luật `lo_thu_hoi.chang_tong`."""
+    return ("(CASE WHEN k.name IS NULL THEN "
+            "(CASE WHEN l.trang_thai = %(htc)s THEN %(da_kiem)s ELSE l.trang_thai END) "
             "WHEN IFNULL(k.trang_thai, '') = '' THEN %(dang_kiem)s ELSE k.trang_thai END)")
+
+
+def _chang_lo(lo, tt=None):
+    """Chặng tổng của MỘT lô (màn chi tiết) — cùng luật `_expr()`."""
+    if tt:
+        return tt
+    return DA_KIEM if lo.get("trang_thai") == HUY_TAI_CHO else lo.get("trang_thai")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -202,7 +216,7 @@ def list_thu_hoi(chang=None, tim=None, tu_ngay=None, den_ngay=None, page=1, page
     page = max(1, cint(page))
     page_size = min(cint(page_size) or 30, 100)
     expr = _expr()
-    p = {"dang_kiem": DANG_KIEM, "xong": XONG, "huy": DA_HUY}
+    p = {"dang_kiem": DANG_KIEM, "xong": XONG, "huy": DA_HUY, "htc": HUY_TAI_CHO, "da_kiem": DA_KIEM}
     conds = ["1 = 1"]
     if cstr(tim).strip():
         p["q"] = "%" + cstr(tim).strip() + "%"
@@ -281,7 +295,7 @@ def _phieu_dict(doc):
     d = {f: doc.get(f) for f in ("name", "lo_thu_hoi", "trang_thai", "company", "customer",
                                   "customer_name", "shipping_address_name", "ten_diem", "tong_sl",
                                   "so_ma", "da_chot", "chot_luc", "chot_boi", "xong_luc", "ghi_chu",
-                                  "khong_lap_hd", "ly_do_khong_lap", "ket_luan_boi")}
+                                  "khong_lap_hd", "ly_do_khong_lap", "ket_luan_boi", "theo_phieu")}
     d["da_chot"] = cint(d["da_chot"])
     d["khong_lap_hd"] = cint(d["khong_lap_hd"])
     d["items"] = []
@@ -374,12 +388,12 @@ def get_thu_hoi(name):
         "phieu": _phieu_dict(doc),
         "hoa_don": hd,
         "so_sanh": sorted(so.values(), key=lambda x: cstr(x["item_name"])),
-        "chang": tt or lo["trang_thai"],
+        "chang": _chang_lo(lo, tt),
         "chang_list": list(CHANG),
         "lech": lech,
         "con_can": con,
         "flags": {
-            "bat_dau": not doc and lo["trang_thai"] == DA_NHAN,
+            "bat_dau": not doc and lo["trang_thai"] in (DA_NHAN, HUY_TAI_CHO),
             "sua": bool(doc) and not chot,
             "chot": bool(doc) and not chot and bool(doc.items),
             "mo_lai": chot and not co_ghi_so and (is_chief() or not cint(doc.khong_lap_hd)),
@@ -398,7 +412,8 @@ def get_thu_hoi(name):
 
 @frappe.whitelist()
 def bat_dau_kiem(name):
-    """Mở phiếu kiểm cho một lô ĐÃ NHẬN HÀNG. Gọi lại khi đã có phiếu → trả phiếu cũ.
+    """Mở phiếu kiểm cho một lô ĐÃ NHẬN HÀNG — hoặc lô HỦY TẠI CHỖ (phiếu `theo_phieu`: chép số
+    theo phiếu siêu thị, không đếm). Gọi lại khi đã có phiếu → trả phiếu cũ.
 
     Đọc lô bằng KHÓA (`_lo(khoa=True)`): bên vận chuyển bấm "Hủy yêu cầu" cùng lúc thì hai
     bên lần lượt, bên sau thấy kết quả bên trước — không có lô vừa hủy vừa đang kiểm.
@@ -411,7 +426,7 @@ def bat_dau_kiem(name):
                 "Lô {0} đã bị bên vận chuyển HỦY yêu cầu ({1}) — không kiểm hàng. Hủy nhầm thì nhờ "
                 "điều phối bấm 'Khôi phục' bên app vận chuyển."
             ).format(name, lo.get("ly_do_huy") or _("không ghi lý do")))
-        if lo["trang_thai"] != DA_NHAN:
+        if lo["trang_thai"] not in (DA_NHAN, HUY_TAI_CHO):
             frappe.throw(_(
                 "Lô {0} đang ở '{1}' bên vận chuyển. Kiểm hàng khi hàng đã về kho — nhờ điều phối "
                 "bấm 'Đã nhận hàng' trước."
@@ -423,6 +438,7 @@ def bat_dau_kiem(name):
         doc.customer_name = lo["customer_name"]
         doc.shipping_address_name = lo["shipping_address_name"]
         doc.ten_diem = lo["ten_diem"]
+        doc.theo_phieu = 1 if lo["trang_thai"] == HUY_TAI_CHO else 0
         try:
             doc.insert()  # tôn trọng DocPerm của phiếu kiểm (vai trò kế toán kênh bán hàng)
         except frappe.DuplicateEntryError:
@@ -503,7 +519,10 @@ def boot_kiem(name):
     doc = frappe.get_doc(DT, name)
     # Đếm MÙ tới tận payload: màn này không nhận số siêu thị khai, cả tổng lẫn từng mã.
     # Gợi ý chỉ mang MÃ, không mang số; so khai/kiểm là việc của màn lô sau khi chốt.
-    lo = {k: v for k, v in _lo(name).items() if k not in _SO_KHAI}
+    # NGOẠI LỆ: phiếu theo phiếu (lô hủy tại chỗ) — không đếm, mà CHÉP từ phiếu siêu thị, nên
+    # phải thấy mail dán + biên bản / phiếu đính kèm.
+    theo_phieu = bool(cint(doc.get("theo_phieu")))
+    lo = {k: v for k, v in _lo(name).items() if theo_phieu or k not in _SO_KHAI}
     nhom, goc = _nhom_kiem()
     danh_muc = _danh_muc(nhom=nhom) if nhom else _danh_muc()
     co = {d["item"] for d in danh_muc}
@@ -537,6 +556,7 @@ def boot_kiem(name):
         "danh_muc": danh_muc,
         "ma_quet": ma_quet,
         "goi_y": [g for g in goi_y if g in co][:40],
+        "files": _files(name) if theo_phieu else [],
         "nhom_kiem": goc,
         "thieu_nhom": [g for g in NHOM_KIEM if g.lower() not in {x.lower() for x in goc}],
         "hom_nay": nowdate(),

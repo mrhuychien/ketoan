@@ -16,10 +16,15 @@ TRẠNG THÁI LÀ MÁY SUY
 ════════════════════════════════════════════════════════════════════════════
 
     chưa chốt                                        -> Đang kiểm
+      ... phiếu `theo_phieu` (lô HỦY TẠI CHỖ)          -> Đã kiểm hàng (nhận đủ theo phiếu)
     chốt, phiếu trả chưa phủ ĐÚNG số đã kiểm          -> Đã kiểm hàng
     phủ đúng từng mã, còn phiếu trả nháp              -> Đã nhập chứng từ
     phủ đúng, mọi phiếu trả đã ghi sổ                  -> Xong
     KTT kết luận "không lập hóa đơn trả về"           -> Xong
+
+Lô HỦY TẠI CHỖ (siêu thị hủy hàng, không thu về) không có gì để đếm: kế toán chép
+theo phiếu / biên bản siêu thị, nên phiếu mang cờ `theo_phieu` và đang chép vẫn ở
+"Đã kiểm hàng" — chặng không lùi khi kế toán mở phiếu.
 
 Hàm suy ở `ketoan.api.thu_hoi_phan_bo.suy_trang_thai` (thuần, kiểm được không cần
 bench). Phiếu trả gắn phiếu kiểm qua `Sales Invoice.custom_kiem_hang_thu_hoi`; kế
@@ -40,7 +45,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, cstr, flt, now_datetime
 
-from ketoan.api.thu_hoi_phan_bo import DA_HUY, EPS, XONG, suy_trang_thai
+from ketoan.api.thu_hoi_phan_bo import DA_HUY, EPS, HUY_TAI_CHO, XONG, suy_trang_thai
 
 SI_FIELD = "custom_kiem_hang_thu_hoi"
 
@@ -91,7 +96,7 @@ def so_can(doc):
 def tinh_trang_thai(doc, exclude_si=None):
     """(trạng thái, lệch) suy từ phiếu kiểm + phiếu trả đang gắn."""
     return suy_trang_thai(cint(doc.da_chot), cint(doc.khong_lap_hd), so_can(doc),
-                          hoa_don_tra(doc.name, exclude_si))
+                          hoa_don_tra(doc.name, exclude_si), theo_phieu=cint(doc.get("theo_phieu")))
 
 
 class KiemHangThuHoi(Document):
@@ -105,6 +110,10 @@ class KiemHangThuHoi(Document):
         if tt and tt[0][0] == DA_HUY:
             frappe.throw(_("Lô {0} đã bị bên vận chuyển HỦY yêu cầu — không mở phiếu kiểm. Hủy nhầm thì "
                            "nhờ điều phối bấm 'Khôi phục' bên app vận chuyển.").format(self.lo_thu_hoi))
+        # Lô HỦY TẠI CHỖ: hàng không về, phiếu này CHÉP THEO PHIẾU siêu thị — kể cả tạo tay trên
+        # Desk. Chỉ BẬT cờ: cửa portal đã đặt cờ từ bản đọc lô có khóa thì không tắt lại ở đây.
+        if tt and tt[0][0] == HUY_TAI_CHO:
+            self.theo_phieu = 1
 
     def validate(self):
         self._chuan_hoa_dong()

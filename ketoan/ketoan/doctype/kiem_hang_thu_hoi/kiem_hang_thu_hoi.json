@@ -9,6 +9,7 @@
  "field_order": [
   "lo_thu_hoi",
   "trang_thai",
+  "theo_phieu",
   "company",
   "col_break_head",
   "customer",
@@ -50,6 +51,14 @@
    "in_standard_filter": 1,
    "label": "Trạng thái",
    "options": "Đang kiểm\nĐã kiểm hàng\nĐã nhập chứng từ\nXong",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Lô siêu thị hủy tại chỗ (không thu về): mã + số chép theo phiếu siêu thị, không đếm — chưa chốt vẫn là 'Đã kiểm hàng' (nhận đủ theo phiếu)",
+   "fieldname": "theo_phieu",
+   "fieldtype": "Check",
+   "label": "Nhập theo phiếu (hủy tại chỗ)",
    "read_only": 1
   },
   {
@@ -181,7 +190,7 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 0,
  "links": [],
- "modified": "2026-10-17 09:00:00",
+ "modified": "2026-10-18 10:00:00",
  "modified_by": "Administrator",
  "module": "Ketoan",
  "name": "Kiem Hang Thu Hoi",
