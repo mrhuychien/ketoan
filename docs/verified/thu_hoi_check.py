@@ -478,6 +478,53 @@ def kiem_tren_bo_gia():
     check("chữ 'Đã hủy' khai MỘT chỗ (thu_hoi_phan_bo), api + controller cùng dùng",
           api.DA_HUY is pb.DA_HUY and ctl.DA_HUY is pb.DA_HUY)
 
+    print("-" * 78)
+    print("── 7e. Danh mục kiểm hàng: CHỈ Hàng truyền thống + Hàng Tết (cả nhóm con) ─")
+    SQL.clear()
+    GA = []
+    IG = {"rows": []}
+
+    def sql_kiem(q, p=None, as_dict=False, **k):
+        SQL.append((q, dict(p or {})))
+        if "FROM `tabItem Group` g" in q:
+            return [fr._dict(r) for r in IG["rows"]]
+        if "FROM `tabLo Thu Hoi` l WHERE l.name" in q:
+            return [fr._dict(LO_HUY, trang_thai="Đã nhận hàng")]
+        return []
+
+    def get_all_kiem(dt, filters=None, fields=None, **k):
+        GA.append((dt, dict(filters or {})))
+        if dt == "Item":
+            if "name" in (filters or {}):            # _danh_muc(codes): đúng các mã xin
+                return [fr._dict(name=n, item_name="Hàng lẻ " + n, stock_uom="Hộp") for n in filters["name"][1]]
+            return [fr._dict(name="BDX", item_name="Bánh đậu xanh 170g", stock_uom="Hộp")]
+        return []
+
+    fr.db.sql = sql_kiem
+    fr.get_all = get_all_kiem
+    fr.get_doc = lambda *a, **k: phieu(lo_thu_hoi="TH-M", items=[FakeRow(name="r1", item_code="LE-1", qty=3, idx=1)])
+    IG["rows"] = [dict(goc="Hàng truyền thống", name="Hàng truyền thống"),
+                  dict(goc="Hàng truyền thống", name="Bánh trung thu"), dict(goc="Hàng Tết", name="Hàng Tết")]
+    b = api.boot_kiem("TH-M")
+    loc = next((fl for dt, fl in GA if dt == "Item" and "item_group" in fl), {})
+    check("danh mục chỉ lấy Item thuộc 2 nhóm + MỌI nhóm con",
+          loc.get("item_group") == ["in", ["Bánh trung thu", "Hàng Tết", "Hàng truyền thống"]], str(loc))
+    qg, pg = next(((q, pp) for q, pp in SQL if "FROM `tabItem Group` g" in q), ("", {}))
+    check("bung nhánh con theo cây lft/rgt; cây hỏng (rgt <= lft) chỉ lấy đúng nhóm gốc",
+          "c.lft > g.lft AND c.rgt < g.rgt" in qg and "g.rgt > g.lft" in qg and pg.get("g") == api.NHOM_KIEM)
+    check("mã đã kiểm trên phiếu mà NGOÀI nhóm vẫn ở danh mục (sửa / cộng thêm được)",
+          {d["item"] for d in b["danh_muc"]} == {"BDX", "LE-1"}, str([d["item"] for d in b["danh_muc"]]))
+    check("trả nhóm tìm thấy, không báo thiếu", b["nhom_kiem"] == ["Hàng Tết", "Hàng truyền thống"] and b["thieu_nhom"] == [])
+    IG["rows"] = [dict(goc="Hàng truyền thống", name="Hàng truyền thống")]
+    b = api.boot_kiem("TH-M")
+    check("site thiếu nhóm 'Hàng Tết' -> báo ĐÚNG tên nhóm thiếu", b["thieu_nhom"] == ["Hàng Tết"], str(b["thieu_nhom"]))
+    IG["rows"] = []
+    GA.clear()
+    b = api.boot_kiem("TH-M")
+    check("không thấy nhóm nào -> màn KHÔNG trống: tìm trong mọi mã hàng bán + báo thiếu cả hai",
+          any(dt == "Item" and "item_group" not in fl and "name" not in fl for dt, fl in GA)
+          and b["thieu_nhom"] == list(api.NHOM_KIEM) and len(b["danh_muc"]) >= 1)
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # 6, 8–10. TĨNH

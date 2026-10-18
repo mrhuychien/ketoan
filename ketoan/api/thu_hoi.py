@@ -431,13 +431,40 @@ def bat_dau_kiem(name):
     return get_thu_hoi(name)
 
 
-def _danh_muc(codes=None):
-    """Mã hàng bán được + mọi ĐVT đã khai quy đổi: [{item, ten, dvt, uoms:[{uom, he_so}]}]."""
+# Danh mục màn kiểm hàng: CHỈ hai nhóm hàng này, kể cả mọi nhóm con trong cây Item Group —
+# hàng siêu thị trả về là hàng truyền thống / hàng Tết; tìm trong cả trăm mã hàng bán là
+# chậm tay và dễ chọn nhầm. Tên khớp Item Group trên site (MariaDB so không phân biệt hoa
+# thường). Không thấy nhóm nào thì màn kiểm vẫn dùng được: tìm trong mọi mã hàng bán + báo.
+NHOM_KIEM = ("Hàng truyền thống", "Hàng Tết")
+
+
+def _nhom_kiem():
+    """(mọi Item Group thuộc NHOM_KIEM kể cả nhánh con, các nhóm gốc tìm thấy trên site).
+
+    Nhánh con lấy theo cây nested set (lft/rgt); cây hỏng (rgt <= lft) thì chỉ lấy đúng
+    nhóm gốc, không bung bừa ra cả cây. SQL thô: bung mọi nhóm gốc trong một truy vấn.
+    """
+    rows = frappe.db.sql(
+        """SELECT g.name AS goc, c.name
+        FROM `tabItem Group` g
+        INNER JOIN `tabItem Group` c
+            ON c.name = g.name OR (g.rgt > g.lft AND c.lft > g.lft AND c.rgt < g.rgt)
+        WHERE g.name IN %(g)s""", {"g": NHOM_KIEM}, as_dict=True)
+    return sorted({r.name for r in rows}), sorted({r.goc for r in rows})
+
+
+def _danh_muc(codes=None, nhom=None):
+    """Mã hàng bán được + mọi ĐVT đã khai quy đổi: [{item, ten, dvt, uoms:[{uom, he_so}]}].
+
+    `codes`: đúng các mã này (bất kể nhóm). `nhom`: chỉ Item thuộc các Item Group này.
+    """
     filters = {"disabled": 0, "is_sales_item": 1, "has_variants": 0}
     if codes is not None:
         if not codes:
             return []
         filters = {"name": ["in", list(codes)]}
+    elif nhom:
+        filters["item_group"] = ["in", list(nhom)]
     items = frappe.get_all("Item", filters=filters, fields=["name", "item_name", "stock_uom"],
                            order_by="item_name asc", limit_page_length=5000)
     uoms = {}
@@ -467,17 +494,23 @@ _SO_KHAI = ("gia_tri_khai", "chi_tiet_hang")
 def boot_kiem(name):
     """Mọi thứ màn kiểm hàng cần, MỘT lượt: danh mục + bảng tra mã quét + gợi ý + phiếu.
 
-    Tra mã quét ở MÁY (như sx `_ma_quet`): quét phải phản hồi tức thì, đợi mạng trong
-    kho là mất cái lợi của việc quét. Mã thùng (ITF-14) khai trên `Item Barcode.uom`
-    thì bàn số mở đúng tab Thùng.
+    Danh mục = mã thuộc NHOM_KIEM (+ mã đã kiểm trên phiếu mà ngoài nhóm — vẫn sửa / cộng
+    thêm được). Tra mã quét ở MÁY (như sx `_ma_quet`): quét phải phản hồi tức thì, đợi mạng
+    trong kho là mất cái lợi của việc quét. Mã thùng (ITF-14) khai trên `Item Barcode.uom`
+    thì bàn số mở đúng tab Thùng. Gợi ý (`goi_y`) là mã HAY TRẢ — màn hình đưa lên đầu khi tìm.
     """
     guard_sales_any()
     doc = frappe.get_doc(DT, name)
     # Đếm MÙ tới tận payload: màn này không nhận số siêu thị khai, cả tổng lẫn từng mã.
     # Gợi ý chỉ mang MÃ, không mang số; so khai/kiểm là việc của màn lô sau khi chốt.
     lo = {k: v for k, v in _lo(name).items() if k not in _SO_KHAI}
-    danh_muc = _danh_muc()
+    nhom, goc = _nhom_kiem()
+    danh_muc = _danh_muc(nhom=nhom) if nhom else _danh_muc()
     co = {d["item"] for d in danh_muc}
+    ngoai = list(dict.fromkeys(r.item_code for r in doc.items or [] if r.item_code and r.item_code not in co))
+    if ngoai:
+        danh_muc += _danh_muc(ngoai)
+        co = {d["item"] for d in danh_muc}
     ma_quet = {}
     for b in frappe.get_all("Item Barcode", fields=["barcode", "parent", "uom"], limit_page_length=0):
         if b.barcode and b.parent in co:
@@ -504,6 +537,8 @@ def boot_kiem(name):
         "danh_muc": danh_muc,
         "ma_quet": ma_quet,
         "goi_y": [g for g in goi_y if g in co][:40],
+        "nhom_kiem": goc,
+        "thieu_nhom": [g for g in NHOM_KIEM if g.lower() not in {x.lower() for x in goc}],
         "hom_nay": nowdate(),
     }
 

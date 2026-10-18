@@ -175,9 +175,12 @@ phục vụ file trên chính tên miền của site, inline một .html là scr
   sánh đã kiểm / đã lập hóa đơn (cột "khai" chỉ với lô cũ có bảng hàng khai) + hóa đơn
   trả về.
 - ketoan `#/kiem-hang/:id` (mobile, dựng theo màn Ghi hộp của sx): quét mã vạch
-  (BarcodeDetector / zxing1d / máy quét cầm tay / gõ tay) hoặc tìm mã → bàn số phím to
-  có tab Thùng/Hộp → lưu ngay; chạm số để sửa, ✕ để xóa; **Chốt phiếu** thì khóa,
-  **Mở lại** thì sửa tiếp.
+  (BarcodeDetector / zxing1d / máy quét cầm tay / gõ tay) hoặc gõ tìm mã → bàn số phím
+  to có tab Thùng/Hộp → lưu ngay; chạm số để sửa, ✕ để xóa; **Chốt phiếu** thì khóa,
+  **Mở lại** thì sửa tiếp. Danh sách tìm / quét chỉ gồm Item Group **Hàng truyền thống**
+  + **Hàng Tết** (kể cả nhóm con; mã đã kiểm trên phiếu vẫn giữ); mã hay trả (siêu thị
+  khai + khách mua 6 tháng) nổi lên ĐẦU kết quả, ô tìm trống không hiện gì. Site không có
+  nhóm đó thì báo đúng nhóm thiếu, tạm tìm trong mọi mã hàng bán.
 
 ## 8. Ngoài phạm vi
 

@@ -6,6 +6,8 @@
 //     từng chồng, không phải cộng nhẩm cả lô rồi mới nhập.
 //   · Chạm vào SỐ để sửa tổng, ✕ để xóa dòng.
 //   · "+ QUÉT TIẾP" lưu rồi mở camera ngay: quét 40 thùng không phải bấm 80 lần.
+//   · Tìm tay: chỉ trong Hàng truyền thống + Hàng Tết (server lọc); mã HAY TRẢ (siêu thị
+//     khai + khách này mua gần đây) nổi lên ĐẦU kết quả. Ô tìm trống thì không hiện gì.
 //   · Đếm MÙ: số siêu thị khai chỉ hiện SAU khi chốt (màn lô), không hiện ở đây —
 //     hiện số khai trước là mời người kiểm gõ lại số khai cho nhanh.
 // Chốt rồi thì chỉ xem; muốn sửa: "Mở lại" ở màn lô.
@@ -59,6 +61,9 @@ export async function render({ container, params }) {
               enterkeyhint="search" placeholder="Tìm trong ${B.danh_muc.length} mã hàng…" value="${tim}">
             <button type="button" class="kt-btn kt-btn--primary kt-th-kh-quet" id="kh-quet">⌗ QUÉT</button>
           </div>
+          ${(B.thieu_nhom || []).length ? html`<div class="kt-alert kt-alert--warning">Chưa thấy nhóm hàng
+            ${B.thieu_nhom.map((g) => `“${g}”`).join(", ")} trong Item Group — ${(B.nhom_kiem || []).length
+              ? `danh sách tìm chỉ có ${B.nhom_kiem.join(", ")}.` : "đang tìm trong mọi mã hàng bán."} Báo quản trị đặt đúng tên nhóm.</div>` : ""}
           <div id="kh-chon"></div>`}
         <div class="kt-th-kh-label">Đã kiểm</div>
         <div class="kt-th-kh-list" id="kh-dong"></div>
@@ -73,27 +78,32 @@ export async function render({ container, params }) {
     bind();
   }
 
-  // Lựa chọn mã: gõ tìm thì ra kết quả; ô trống thì hiện "hay trả" (mã siêu thị khai +
-  // mã khách này mua gần đây) — phần lớn lô chỉ quanh quẩn vài mã đó.
+  // Lựa chọn mã: CHỈ khi gõ tìm (ô trống thì không hiện gì — đỡ một khối chiếm nửa màn).
+  // Mã HAY TRẢ (mã siêu thị khai + mã khách này mua gần đây — phần lớn lô quanh quẩn vài
+  // mã đó) nổi lên ĐẦU kết quả theo thứ tự gợi ý, rồi tới các mã khác theo tên.
+  const hay = new Map((B.goi_y || []).map((c, i) => [c, i]));
+  const hang = (d) => (hay.has(d.item) ? hay.get(d.item) : hay.size);
+
   function veChon() {
     const box = container.querySelector("#kh-chon");
     if (!box) return;
     const q = khongDau(tim.trim());
-    let ds;
-    let nhan;
-    if (q) {
-      ds = B.danh_muc.filter((d) => d._k.includes(q)).slice(0, 30);
-      nhan = ds.length ? "Kết quả" : "";
-    } else {
-      ds = (B.goi_y || []).map((c) => byItem[c]).filter(Boolean).slice(0, 12);
-      nhan = ds.length ? "Hay trả" : "";
+    if (!q) {
+      setHTML(box, "");
+      return;
     }
-    setHTML(box, html`${nhan ? html`<div class="kt-th-kh-label">${nhan}</div>` : ""}
-      ${q && !ds.length ? html`<div class="kt-sub">Không thấy mã nào khớp "${tim}".</div>` : ""}
+    // sort ổn định: cùng hạng (mã thường) thì giữ thứ tự tên của danh mục.
+    const ds = B.danh_muc.filter((d) => d._k.includes(q)).sort((a, b) => hang(a) - hang(b)).slice(0, 30);
+    if (!ds.length) {
+      setHTML(box, html`<div class="kt-sub">Không thấy mã nào khớp "${tim}".</div>`);
+      return;
+    }
+    setHTML(box, html`<div class="kt-th-kh-label">Kết quả</div>
       <div class="kt-th-kh-chips">${ds.map((d) => {
         const co = dongCua(d.item);
         return html`<button type="button" class="kt-th-kh-chip${co ? " is-co" : ""}" data-item="${d.item}">
-          <span>${d.ten}</span><i>${co ? `đã ${fmtSl(co.qty)}` : d.dvt}</i></button>`;
+          <span>${d.ten}${hay.has(d.item) ? html` <b class="kt-th-kh-hay">hay trả</b>` : ""}</span>
+          <i>${co ? `đã ${fmtSl(co.qty)} · ` : ""}${d.item} · ${d.dvt}</i></button>`;
       })}</div>`);
     box.querySelectorAll("[data-item]").forEach((b) => b.addEventListener("click", () => chonMa(b.dataset.item)));
   }
@@ -135,7 +145,10 @@ export async function render({ container, params }) {
   function chonMa(item, { uom = null, ma = null, tiep = false } = {}) {
     if (daChot()) return;
     const d = byItem[item];
-    if (!d) { toast("Mã này không nằm trong danh mục hàng bán.", "error"); return; }
+    if (!d) {
+      toast(`Mã ${ma || item} không nằm trong danh sách kiểm hàng (${(B.nhom_kiem || []).join(", ") || "hàng bán"}).`, "error");
+      return;
+    }
     const co = dongCua(item);
     openSoLuong({
       kicker: co ? `Cộng thêm · đã có ${fmtSl(co.qty)} ${d.dvt}` : "Nhập số đã đếm",

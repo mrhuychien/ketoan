@@ -12,6 +12,9 @@ NHỮNG ĐIỀU MÀN HÌNH HỨA
 
 1. **Đếm mù.** Màn kiểm hàng không được hiện số siêu thị khai — kể cả mail siêu thị dán
    nguyên văn (có số lượng) — hiện ra là mời gõ lại số khai.
+1b. **Tìm tay gọn**: ô tìm trống KHÔNG hiện khối "Hay trả"; gõ tìm thì mã hay trả nổi lên
+   ĐẦU kết quả (có nhãn), kết quả là danh sách dọc đủ tên + mã + ĐVT; thiếu nhóm hàng
+   Hàng truyền thống / Hàng Tết trên site thì báo đúng nhóm thiếu.
 2. **Bàn số nhiều ĐVT.** "2 thùng + 3 hộp" = 51 hộp hiện ngay trên nút LƯU; client gửi
    CHI TIẾT từng ĐVT (server tự nhân hệ số, không tin tổng client gửi).
 3. **Quét lại mã đã có = cộng thêm**, mã vạch thùng mở sẵn tab Thùng; máy không có
@@ -240,11 +243,14 @@ def boot_kiem(_a):
     # canh. Bản giả CỐ Ý để lại: có số trong tay thì màn kiểm hàng cũng không được vẽ ra.
     return {
         "lo": LO, "phieu": phieu_dict(),
-        "danh_muc": [{"item": "BDX", "ten": TEN, "dvt": "Hộp", "uoms": UOMS},
-                     {"item": "BDX-300", "ten": "Bánh đậu xanh 300g", "dvt": "Hộp", "uoms": [{"uom": "Hộp", "he_so": 1}]}],
+        # BDX-300 đứng TRƯỚC trong danh mục; BDX là mã hay trả -> khi tìm phải nổi lên đầu.
+        "danh_muc": [{"item": "BDX-300", "ten": "Bánh đậu xanh 300g", "dvt": "Hộp", "uoms": [{"uom": "Hộp", "he_so": 1}]},
+                     {"item": "BDX", "ten": TEN, "dvt": "Hộp", "uoms": UOMS}],
         "ma_quet": {"8936000000017": {"item": "BDX", "uom": "Thùng"},
                     "8936000000024": {"item": "BDX", "uom": None}, "BDX": {"item": "BDX", "uom": None}},
         "goi_y": ["BDX"], "hom_nay": "2026-10-17",
+        "nhom_kiem": ["Hàng truyền thống"] if S.get("thieu") else ["Hàng Tết", "Hàng truyền thống"],
+        "thieu_nhom": ["Hàng Tết"] if S.get("thieu") else [],
     }
 
 
@@ -500,7 +506,30 @@ def run(pw, exe, root, ok, bad, shots=None):
 
     # 3. Kiểm hàng: gợi ý -> bàn số tab Thùng/Hộp -> lưu
     expect("kiểm hàng: không hiện số siêu thị khai (đếm mù)", str(KHAI) not in p.text_content("main"))
-    expect("kiểm hàng: có gợi ý 'Hay trả'", len(p.query_selector_all(".kt-th-kh-chip")) >= 1)
+    expect("ô tìm trống: KHÔNG còn khối 'Hay trả' (không chip nào)",
+           not p.query_selector_all(".kt-th-kh-chip") and "hay trả" not in p.text_content("main").lower())
+    p.fill("#kh-tim", "dau xanh")
+    p.wait_for_timeout(200)
+    chips = [(c.get_attribute("data-item"), c.text_content()) for c in p.query_selector_all(".kt-th-kh-chip")]
+    expect("gõ tìm: mã HAY TRẢ nổi lên ĐẦU kết quả (có nhãn), mã thường theo sau, không nhãn",
+           [c[0] for c in chips] == ["BDX", "BDX-300"] and "hay trả" in chips[0][1] and "hay trả" not in chips[1][1],
+           str(chips))
+    expect("kết quả: dòng có đủ mã + ĐVT (tên giống nhau vẫn phân biệt được)", "BDX · Hộp" in chips[0][1], chips[0][1])
+    rong = p.evaluate("""(() => { const w = document.querySelector('#kh-chon').getBoundingClientRect().width;
+      return [...document.querySelectorAll('.kt-th-kh-chip')].every((c) => Math.abs(c.getBoundingClientRect().width - w) < 2); })()""")
+    expect("kết quả là danh sách DỌC — mỗi mã một dòng hết bề ngang", rong)
+    if shots:
+        p.screenshot(path=os.path.join(shots, "kt_kiem_tim.png"), full_page=True)
+    p2 = ctx.new_page()
+    watch(p2)
+    S["thieu"] = True
+    p2.goto(root + "/#/kiem-hang/TH-2026-0007")
+    p2.wait_for_timeout(700)
+    canh = p2.text_content("main")
+    expect("thiếu nhóm 'Hàng Tết' trên site: báo ĐÚNG nhóm thiếu + danh sách đang có gì",
+           "“Hàng Tết”" in canh and "danh sách tìm chỉ có Hàng truyền thống" in canh)
+    S["thieu"] = False
+    p2.close()
     p.click('.kt-th-kh-chip[data-item="BDX"]')
     p.wait_for_timeout(200)
     expect("bàn số: có tab Thùng / Hộp", len(p.query_selector_all(".kt-th-np-tab")) == 2)

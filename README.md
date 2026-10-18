@@ -34,8 +34,10 @@ chạy 3 chặng vận chuyển *Tạo yêu cầu → Đã lấy hàng → Đã 
   thoại. Màn lô hiện mail siêu thị dán nguyên văn (giữ cột) + file đính kèm: ảnh / PDF mở
   trong tab, Excel / Word / mail tải về.
 - **Kiểm hàng trên điện thoại** (`#/kiem-hang/<lô>`, dựng theo màn Ghi hộp app sx): quét
-  mã vạch (camera / súng quét / gõ tay) hoặc chọn mã → bàn số phím to có tab Thùng/Hộp →
-  lưu ngay từng lần; quét lại mã đã có là cộng thêm; chạm số để sửa, ✕ để xóa.
+  mã vạch (camera / súng quét / gõ tay) hoặc gõ tìm mã → bàn số phím to có tab Thùng/Hộp →
+  lưu ngay từng lần; quét lại mã đã có là cộng thêm; chạm số để sửa, ✕ để xóa. Danh sách
+  tìm chỉ có **Hàng truyền thống + Hàng Tết** (Item Group, kể cả nhóm con —
+  `thu_hoi.NHOM_KIEM`); mã hay trả (siêu thị khai + khách mua 6 tháng) nổi lên đầu kết quả.
   **Đếm mù**: màn kiểm hàng không nhận số siêu thị khai (cả mail dán nguyên văn); bảng so
   khai / kiểm (lô cũ có bảng hàng khai) chỉ hiện sau khi chốt.
 - **Hóa đơn trả về**: sau khi chốt, chọn hóa đơn gốc trong danh sách MỌI hóa đơn đã ghi sổ
