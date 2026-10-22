@@ -333,8 +333,12 @@ export const api = {
   thMoLai: (name) => callMethod(NS + "thu_hoi.mo_lai", { name }),
   thKetLuan: (name, ly_do) => callMethod(NS + "thu_hoi.ket_luan_khong_lap", { name, ly_do }),
   thXoaPhieu: (name) => callMethod(NS + "thu_hoi.xoa_phieu", { name }),
+  // Ảnh phiếu trả về chụp lúc kiểm (ghi số tay lên phiếu, ngồi máy nhập sau). content = base64.
+  thAnhThem: (a) => callMethod(NS + "thu_hoi.them_anh_phieu", a),
+  thAnhXoa: (name, file) => callMethod(NS + "thu_hoi.xoa_anh_phieu", { name, file }),
   // a = { tim, moi_diem, page } — mọi hóa đơn đã ghi sổ của đúng khách + điểm giao, 50 tờ/trang.
   thUngVien: (name, a) => callMethod(NS + "thu_hoi.ung_vien_hoa_don", { name, ...(a || {}) }),
+  // Không truyền sales_invoice = hóa đơn trả về KHÔNG theo hóa đơn gốc (mặc định).
   thTaoHd: (name, sales_invoice, posting_date) =>
     callMethod(NS + "thu_hoi.tao_hoa_don_tra", { name, sales_invoice, posting_date }),
   thCapNhatHd: (name) => callMethod(NS + "thu_hoi.cap_nhat_hoa_don", { name }),

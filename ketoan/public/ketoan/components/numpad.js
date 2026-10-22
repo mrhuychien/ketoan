@@ -5,6 +5,9 @@
 // lúc người kiểm cần nhìn tên mã đang nhập, và phím của nó nhỏ cho ngón tay đeo găng
 // trong kho. Bàn số nằm trong một tấm trượt dưới đáy, phím 60px.
 //
+// Ngồi MÁY TÍNH nhập theo ảnh phiếu thì gõ phím thật: số, ⌫, Delete (= C), Enter (= LƯU),
+// ← / → đổi tab ĐVT — bấm chuột từng chữ số là chậm gấp mấy lần.
+//
 // Đếm theo NHIỀU ĐƠN VỊ: "2 thùng 3 hộp", không phải "51 hộp". Người kiểm đếm theo cách
 // hàng xếp — thùng trước, lẻ ra bao nhiêu hộp thì đếm hộp. Bắt quy đổi trong đầu là chỗ
 // sinh lỗi. Máy nhân hệ số; server tra lại hệ số trên Item, không tin số gửi lên.
@@ -109,7 +112,24 @@ export function openSoLuong({ kicker = "", title = "", uoms = [], dvt = "", tong
   let chuaGo = true;
   const tinh = () => bac.reduce((a, u, i) => a + so[i] * heSo(u), 0);
 
-  const m = openSheet({ kicker, title });
+  // Tấm trượt là modal: nuốt phím luôn, không để chữ số rơi vào ô tìm còn giữ con trỏ phía sau.
+  const phim = (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = /^[0-9]$/.test(e.key) ? e.key : e.key === "Backspace" ? "⌫" : e.key === "Delete" ? "C" : null;
+    if (k) {
+      e.preventDefault();
+      bam(k);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      xong(onOk);
+    } else if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && bac.length > 1) {
+      e.preventDefault();
+      doiTab((tab + (e.key === "ArrowRight" ? 1 : bac.length - 1)) % bac.length);
+    }
+  };
+  const m = openSheet({ kicker, title, onClose: () => document.removeEventListener("keydown", phim) });
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  document.addEventListener("keydown", phim);
   m.body.innerHTML = `
     ${bac.length > 1 ? '<div class="kt-th-np-tabs" role="tablist"></div>' : ""}
     <div class="kt-th-np-display"></div>
@@ -124,12 +144,7 @@ export function openSoLuong({ kicker = "", title = "", uoms = [], dvt = "", tong
       $(".kt-th-np-tabs").innerHTML = bac.map((u, i) => `<button type="button" role="tab" aria-selected="${i === tab}"
         class="kt-th-np-tab${i === tab ? " is-on" : ""}" data-tab="${i}">${escapeHtml(u.uom)}${so[i] ? ` · ${fmt(so[i])}` : ""}${
         heSo(u) > 1 ? ` <i>(${fmt(heSo(u))} ${escapeHtml(goc.uom.toLowerCase())})</i>` : ""}</button>`).join("");
-      $(".kt-th-np-tabs").querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => {
-        tab = Number(b.dataset.tab);
-        value = so[tab] ? String(so[tab]) : "";
-        chuaGo = true;
-        ve();
-      }));
+      $(".kt-th-np-tabs").querySelectorAll("[data-tab]").forEach((b) => b.addEventListener("click", () => doiTab(Number(b.dataset.tab))));
     }
     const nhan = [bac.length > 1 ? `Tổng ${fmt(t)} ${goc.uom.toLowerCase()}` : "", phu].filter(Boolean).join(" · ");
     $(".kt-th-np-display").innerHTML = `<div><div class="kt-th-np-unit">Số ${escapeHtml(bac[tab].uom.toLowerCase())}</div>
@@ -140,17 +155,26 @@ export function openSoLuong({ kicker = "", title = "", uoms = [], dvt = "", tong
     });
   }
 
+  function doiTab(i) {
+    tab = i;
+    value = so[tab] ? String(so[tab]) : "";
+    chuaGo = true;
+    ve();
+  }
+
+  function bam(k) {
+    value = bamPhim(value, k, chuaGo);
+    chuaGo = false;
+    so[tab] = Math.round(parseFloat(value || "0") || 0);
+    ve();
+  }
+
   ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "⌫"].forEach((k) => {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "kt-th-np-key" + (k === "C" || k === "⌫" ? " is-phu" : "") + (k === "C" ? " is-xoa" : "");
     b.textContent = k;
-    b.addEventListener("click", () => {
-      value = bamPhim(value, k, chuaGo);
-      chuaGo = false;
-      so[tab] = Math.round(parseFloat(value || "0") || 0);
-      ve();
-    });
+    b.addEventListener("click", () => bam(k));
     $(".kt-th-np-grid").appendChild(b);
   });
 

@@ -28,6 +28,12 @@ NHỮNG CÁI LỖ BỘ KIỂM NÀY CANH
     (nhận đủ theo phiếu), phiếu `theo_phieu` đang chép không lùi về "Đang kiểm" (cờ bật cả
     khi phiếu tạo tay trên Desk), và màn nhập phải THẤY mail / biên bản để chép (lô thường
     thì vẫn đếm mù).
+13. **Ảnh phiếu trả về thành cửa sau**: chỉ nhận ẢNH THẬT (chữ ký đầu file, không tin đuôi —
+    proxy mở inline theo đuôi), gắn PHIẾU KIỂM (không gắn lô bên vanchuyen), private, chốt rồi
+    thì khóa; không xóa được file của phiếu khác / của lô. "Chờ nhập số" = phiếu chưa chốt có ảnh.
+14. **Hóa đơn trả về không theo hóa đơn gốc sai giá / sai thứ tự chia**: đơn giá = lần bán gần
+    nhất cho ĐÚNG khách (ưu tiên đúng điểm giao) theo ĐVT kho; không `return_against`; cập nhật
+    thì bản NỐI hóa đơn gốc chia trước, bản tự do nhận phần còn lại và GIỮ giá người soát sửa.
 
 Chạy KHÔNG cần bench — stub frappe của `docs/mt/verified/regression_check`:
     python3 docs/verified/thu_hoi_check.py   # exit 0 = đạt
@@ -604,6 +610,285 @@ def kiem_tren_bo_gia():
         else:
             check("màn kiểm thường vẫn ĐẾM MÙ: không mail dán, không file", "chi_tiet_hang" not in b["lo"] and b["files"] == [])
 
+    print("-" * 78)
+    print("── 7g. ẢNH PHIẾU: ghi số lên phiếu trả về, chụp lại, ngồi máy nhập sau ─────")
+    import base64
+    DTK = "Kiem Hang Thu Hoi"
+    JPG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+    HTML = b"<html><script>alert(1)</script></html>"
+    b64 = lambda b: base64.b64encode(b).decode()  # noqa: E731
+    LUU, XOA, ANH = [], [], []
+    PH = {"doc": phieu(name="TH-A", lo_thu_hoi="TH-A", items=[])}
+
+    class FakeFile(dict):
+        __getattr__ = dict.get
+
+        def save(self, ignore_permissions=False):
+            LUU.append(dict(self, _ip=ignore_permissions))
+
+    def gd(dt=None, name=None, for_update=False, **k):
+        if isinstance(dt, dict):
+            return FakeFile(dt)
+        if dt == "File":
+            return fr._dict(get_content=lambda: b"noi-dung")
+        return PH["doc"]
+
+    def ga(dt, filters=None, fields=None, **k):
+        if dt == "File":
+            return [fr._dict(r) for r in ANH if r["attached_to_doctype"] == filters["attached_to_doctype"]
+                    and r["attached_to_name"] == filters["attached_to_name"]]
+        return []
+
+    DEM = {"n": 0}
+    fr.get_doc = gd
+    fr.get_all = ga
+    fr.generate_hash = lambda *a, **k: "abc123"
+    fr.db.count = lambda dt, filters=None, **k: DEM["n"]
+    fr.delete_doc = lambda dt, name, **k: XOA.append((dt, name, k))
+    api.them_anh_phieu("TH-A", "data:image/jpeg;base64," + b64(JPG), "IMG_0042.HEIC")
+    f = LUU[-1] if LUU else {}
+    check("ảnh gắn vào PHIẾU KIỂM (không gắn lô bên vanchuyen), PRIVATE, đúng nội dung đã gửi",
+          f.get("attached_to_doctype") == DTK and f.get("attached_to_name") == "TH-A" and f.get("is_private") == 1
+          and f.get("content") == JPG, str({k: v for k, v in f.items() if k != "content"}))
+    check("tên file do server đặt, đuôi theo CHỮ KÝ đầu file (.jpg dù máy gửi tên .HEIC)",
+          f.get("file_name") == "anh-phieu-TH-A-abc123.jpg", f.get("file_name"))
+    check("lưu File sau guard + đúng phiếu chưa chốt (ignore_permissions chỉ ở đó)", f.get("_ip") is True)
+    n = len(LUU)
+    e = raises(lambda: api.them_anh_phieu("TH-A", b64(HTML), "anh.jpg"))
+    check("file .html đổi tên .jpg -> TỪ CHỐI (proxy mở inline theo đuôi = script trên tên miền site)",
+          e is not None and "không phải ảnh" in e and len(LUU) == n, e)
+    check("nội dung không phải base64 -> báo ảnh hỏng, không lưu",
+          "hỏng" in (raises(lambda: api.them_anh_phieu("TH-A", "@@@!!", "x.jpg")) or "") and len(LUU) == n)
+    goc_max = api.ANH_TOI_DA
+    api.ANH_TOI_DA = 10
+    check("ảnh quá trần dung lượng -> từ chối", "quá lớn" in (raises(lambda: api.them_anh_phieu("TH-A", b64(JPG))) or ""))
+    api.ANH_TOI_DA = goc_max
+    DEM["n"] = api.ANH_TOI_DA_SO
+    check("phiếu đã đủ trần số ảnh -> từ chối, bảo xóa ảnh nhầm", "xóa bớt" in (raises(lambda: api.them_anh_phieu("TH-A", b64(JPG))) or ""))
+    DEM["n"] = 0
+    FILES["F-A"] = {"attached_to_doctype": DTK, "attached_to_name": "TH-A", "file_name": "anh-phieu-TH-A-abc123.jpg"}
+    FILES["F-B"] = {"attached_to_doctype": DTK, "attached_to_name": "TH-B", "file_name": "anh-phieu-TH-B.jpg"}
+    FILES["F-L"] = {"attached_to_doctype": "Lo Thu Hoi", "attached_to_name": "TH-A", "file_name": "phieu.pdf"}
+    api.xoa_anh_phieu("TH-A", "F-A")
+    check("xóa ảnh chụp nhầm của đúng phiếu", XOA and XOA[-1][:2] == ("File", "F-A") and XOA[-1][2].get("ignore_permissions") is True)
+    n = len(XOA)
+    check("KHÔNG xóa được ảnh của phiếu khác / file của lô bên vận chuyển qua cửa này",
+          raises(lambda: api.xoa_anh_phieu("TH-A", "F-B")) is not None
+          and raises(lambda: api.xoa_anh_phieu("TH-A", "F-L")) is not None and len(XOA) == n)
+    PH["doc"].da_chot = 1
+    check("phiếu đã CHỐT: không thêm / xóa ảnh (chốt là khóa; cần thì Mở lại)",
+          raises(lambda: api.them_anh_phieu("TH-A", b64(JPG))) is not None
+          and raises(lambda: api.xoa_anh_phieu("TH-A", "F-A")) is not None and len(XOA) == n)
+    PH["doc"].da_chot = 0
+    fr.local.response = fr._dict()
+    api.xem_dinh_kem("F-A")
+    check("proxy mở ảnh phiếu của phiếu kiểm (inline); file gắn DocType khác vẫn bị từ chối (7b)",
+          fr.local.response.get("display_content_as") == "inline")
+
+    ANH[:] = [dict(name="F-A", file_name="anh-phieu-TH-A-abc123.jpg", creation="2026-10-22 09:00:00", owner="kho@x",
+                   attached_to_doctype=DTK, attached_to_name="TH-A"),
+              dict(name="F-L", file_name="phieu.pdf", creation="2026-10-20 08:00:00", owner="dh@x",
+                   attached_to_doctype="Lo Thu Hoi", attached_to_name="TH-A")]
+    fr.db.sql = lambda q, p=None, **k: ([fr._dict(LO_HUY, name="TH-A", trang_thai="Đã nhận hàng")]
+                                         if "FROM `tabLo Thu Hoi` l WHERE l.name" in q else [])
+    fr.db.exists = lambda dt, *a, **k: dt in ("Item", DTK)
+    g = api.get_thu_hoi("TH-A")
+    check("màn lô: ảnh phiếu (của PHIẾU KIỂM) tách khỏi file của lô; phiếu chưa chốt có ảnh = 'chờ nhập số'",
+          [x["name"] for x in g.get("anh_phieu", [])] == ["F-A"] and [x["name"] for x in g["files"]] == ["F-L"]
+          and g["flags"].get("cho_nhap") is True and "xem_dinh_kem?file=F-A" in g["anh_phieu"][0]["url"]
+          and g["anh_phieu"][0].get("boi") == "Người kiểm", str(g.get("anh_phieu")))
+    b = api.boot_kiem("TH-A")
+    check("màn kiểm hàng nhận ảnh phiếu — ngồi máy nhập theo ảnh", [x["name"] for x in b.get("anh_phieu", [])] == ["F-A"])
+    PH["doc"].da_chot = 1
+    g = api.get_thu_hoi("TH-A")
+    check("chốt rồi: ảnh còn lại làm chứng từ, hết 'chờ nhập số'", g["flags"].get("cho_nhap") is False and len(g["anh_phieu"]) == 1)
+    PH["doc"].da_chot = 0
+
+    SQL.clear()
+
+    def sql_ds(q, p=None, as_dict=False, **k):
+        SQL.append((q, dict(p or {})))
+        if "ORDER BY FIELD" in q:
+            chung = dict(chang="Đang kiểm", trang_thai="Đã nhận hàng", ngay_yeu_cau="2026-10-20")
+            return [fr._dict(chung, name="TH-A", phieu="TH-A", da_chot=0), fr._dict(chung, name="TH-B", phieu="TH-B", da_chot=0),
+                    fr._dict(chung, name="TH-C", phieu=None, da_chot=None, chang="Đã nhận hàng"),
+                    fr._dict(chung, name="TH-D", phieu="TH-D", da_chot=1, chang="Đã kiểm hàng")]
+        if "FROM `tabFile`" in q and "GROUP BY attached_to_name" in q:
+            return [fr._dict(n="TH-A", c=2), fr._dict(n="TH-D", c=1)]
+        if "COUNT(*)" in q and "GROUP BY" not in q:
+            return [[1]]
+        return []
+
+    fr.db.sql = sql_ds
+    r = api.list_thu_hoi()
+    a, b, c, d = r["rows"]
+    check("danh sách: phiếu CHƯA chốt có ảnh -> 'chờ nhập số' + số ảnh; không ảnh / chưa có phiếu / đã chốt -> không",
+          a.get("cho_nhap") is True and a.get("so_anh") == 2 and b.get("cho_nhap") is False
+          and c.get("cho_nhap") is False and d.get("cho_nhap") is False and d.get("so_anh") == 1,
+          str([(x["name"], x.get("cho_nhap"), x.get("so_anh")) for x in r["rows"]]))
+    qa = next((q for q, _p in SQL if "FROM `tabFile`" in q and "GROUP BY attached_to_name" in q), "")
+    check("số ảnh cả trang: MỘT truy vấn, chỉ file gắn PHIẾU KIỂM",
+          len([1 for q, _p in SQL if "GROUP BY attached_to_name" in q]) == 1
+          and next(pp for q, pp in SQL if q == qa).get("dt") == DTK)
+    q_dem = next((q for q, _p in SQL if "COUNT(*)" in q and "EXISTS (SELECT 1 FROM `tabFile` f" in q), "")
+    check("pill 'Chờ nhập số' đếm trên CÙNG bộ tìm: phiếu chưa chốt + có file gắn phiếu kiểm",
+          "IFNULL(k.da_chot, 0) = 0" in q_dem and "f.attached_to_name = k.name" in q_dem and r.get("cho_nhap") == 1)
+    api.list_thu_hoi(chang="cho_nhap")
+    q, pr = next((q, pr) for q, pr in reversed(SQL) if "ORDER BY FIELD" in q)
+    check("lọc pill 'Chờ nhập số'", "EXISTS (SELECT 1 FROM `tabFile` f" in q and pr.get("dt") == DTK)
+
+    print("-" * 78)
+    print("── 7h. Hóa đơn trả về KHÔNG cần hóa đơn gốc: một tờ, giá bán gần nhất ─────")
+    SQL.clear()
+    GIA = [fr._dict(item_code="BDX", rate=240000, conversion_factor=24, si="HD-9", posting_date="2026-09-01",
+                    taxes_and_charges="VAT 8 - HGC"),
+           fr._dict(item_code="KEO", rate=50000, conversion_factor=1, si="HD-7", posting_date="2026-08-01",
+                    taxes_and_charges="VAT 10 - HGC")]
+    HDT = []  # hoa_don_tra: (name, docstatus, item_code, sl)
+
+    def sql_gia(q, p=None, as_dict=False, **k):
+        SQL.append((q, dict(p or {})))
+        if "ROW_NUMBER() OVER" in q:
+            return [r for r in GIA if r.item_code in p["items"]]
+        if "`custom_kiem_hang_thu_hoi` = %(k)s" in q:
+            return [fr._dict(name=n, docstatus=ds, creation=n, item_code=it, sl=sl) for n, ds, it, sl in HDT]
+        return []
+
+    fr.db.sql = sql_gia
+    goc_gv = fr.db.get_value
+
+    def gv(dt, name=None, fields=None, **k):
+        if dt == "Account":
+            return "5213 - Hàng bán bị trả lại - HGC"
+        if dt == "Sales Taxes and Charges Template":
+            return "VAT mặc định - HGC"
+        return goc_gv(dt, name, fields, **k)
+
+    fr.db.get_value = gv
+    g = api._gia_ban_gan_nhat("HGC", "COOP", "ADDR-HD", ["BDX", "KEO", "MOI"])
+    q, pr = SQL[-1]
+    check("giá bán gần nhất: MỖI mã một dòng mới nhất, ưu tiên ĐÚNG điểm giao, chỉ hóa đơn bán ĐÃ GHI SỔ của đúng khách + công ty",
+          "PARTITION BY it.item_code" in q and "(IFNULL(si.shipping_address_name, '') = %(addr)s) DESC" in q
+          and "si.posting_date DESC" in q and "si.docstatus = 1" in q and "si.is_return = 0" in q
+          and "si.customer = %(cu)s" in q and "si.company = %(c)s" in q and "is_free_item" in q
+          and pr.get("addr") == "ADDR-HD" and pr.get("cu") == "COOP" and pr.get("c") == "HGC")
+    check("đơn giá theo ĐVT KHO = đơn giá dòng ÷ hệ số (240.000/thùng 24 hộp -> 10.000/hộp); mã chưa từng bán -> không có",
+          g.get("BDX", {}).get("rate") == 10000 and g.get("KEO", {}).get("rate") == 50000 and "MOI" not in g, str(g))
+    check("mẫu thuế: theo hóa đơn MỚI NHẤT vừa cho giá; không có giá nào -> mẫu mặc định công ty",
+          api._mau_thue("HGC", g) == "VAT 8 - HGC" and api._mau_thue("HGC", {}) == "VAT mặc định - HGC")
+    dvt = {"BDX": "Hộp", "KEO": "Gói", "MOI": "Hộp"}
+    rows = api._dong_tra_tu_do({"BDX": 50, "KEO": 3, "MOI": 2}, dvt, g, "5213 - X")
+    by = {x["item_code"]: x for x in rows}
+    check("dòng: mỗi mã một dòng, ĐVT KHO, hệ số 1, số ÂM đúng số đã kiểm (không quy ra thùng)",
+          by["BDX"]["qty"] == -50 and by["BDX"]["stock_qty"] == -50 and by["BDX"]["uom"] == "Hộp"
+          and by["BDX"]["conversion_factor"] == 1 and by["KEO"]["uom"] == "Gói", json.dumps(by["BDX"], ensure_ascii=False))
+    check("đơn giá = giá bán gần nhất (ĐVT kho); mã chưa từng bán -> để TRỐNG cho ERPNext lấy theo bảng giá",
+          by["BDX"]["rate"] == 10000 and by["BDX"]["price_list_rate"] == 10000 and "rate" not in by["MOI"])
+    check("không dòng nào nối hóa đơn / dòng gốc; TK 5213",
+          all(not x.get("sales_invoice_item") and x.get("income_account") == "5213 - X" for x in rows))
+    rows = api._dong_tra_tu_do({"BDX": 26}, dvt, g, None, giu={"BDX": 9500})
+    check("cập nhật: GIỮ đơn giá người soát đã sửa trên bản nháp (9.500), không lấy lại giá bán gần nhất",
+          rows[0]["rate"] == 9500 and rows[0]["qty"] == -26)
+
+    class FakeSI:
+        def __init__(self, **kw):
+            self.items, self.calls = [], []
+            self.name, self.return_against, self.docstatus, self.is_return = "RET-T1", None, 0, 1
+            self.__dict__.update(kw)
+
+        def get(self, k, d=None):
+            return getattr(self, k, d)
+
+        def set(self, k, v):
+            setattr(self, k, v)
+
+        def append(self, f, d):
+            r = FakeRow(d)
+            self.items.append(r)
+            return r
+
+        def set_missing_values(self):
+            self.calls.append("set_missing_values")
+
+        def insert(self, **k):
+            self.calls.append(("insert", k))
+
+        def save(self, **k):
+            self.calls.append(("save", k))
+            LUU_SI.append(self.name)
+
+    LUU_SI = []
+    SI = {}
+
+    def nd(dt):
+        SI["si"] = FakeSI()
+        return SI["si"]
+
+    goc_th, goc_nd = api.get_thu_hoi, fr.new_doc
+    api.get_thu_hoi = lambda n: {"lo": n}
+    fr.new_doc = nd
+    fr.db.exists = lambda dt, *a, **k: dt in ("Item", DTK, "Print Heading")
+    PH["doc"] = phieu(name="TH-A", lo_thu_hoi="TH-A", da_chot=1, company="HGC", customer="COOP",
+                      shipping_address_name="ADDR-HD",
+                      items=[FakeRow(name="r1", item_code="BDX", qty=50, stock_uom="Hộp", idx=1),
+                             FakeRow(name="r2", item_code="MOI", qty=2, stock_uom="Hộp", idx=2)])
+    fr.get_doc = lambda *a, **k: PH["doc"]
+    r = api.tao_hoa_don_tra("TH-A")
+    si = SI.get("si") or FakeSI()
+    check("không truyền hóa đơn gốc -> MỘT tờ trả về: is_return, KHÔNG return_against, update_stock 0, quy tắc giá không đè",
+          si.get("is_return") == 1 and not si.get("return_against") and si.get("update_stock") == 0
+          and si.get("ignore_pricing_rule") == 1 and si.get("company") == "HGC" and si.get("customer") == "COOP")
+    check("gắn phiếu kiểm (trạng thái tự đi) + điểm giao của lô + mẫu thuế theo hóa đơn vừa cho giá + tiêu đề 'Credit Note'",
+          si.get("custom_kiem_hang_thu_hoi") == "TH-A" and si.get("shipping_address_name") == "ADDR-HD"
+          and si.get("taxes_and_charges") == "VAT 8 - HGC" and si.get("select_print_heading") == "Credit Note")
+    by = {x.item_code: x for x in si.items}
+    check("đủ MỌI mã còn phải trả, số âm theo ĐVT kho, giá bán gần nhất, TK 5213",
+          set(by) == {"BDX", "MOI"} and by["BDX"].qty == -50 and by["BDX"].rate == 10000 and by["MOI"].qty == -2
+          and by["BDX"].income_account.startswith("5213"))
+    check("set_missing_values (chép dòng thuế từ mẫu) chạy TRƯỚC insert; insert KHÔNG ignore_permissions",
+          si.calls[:2] == ["set_missing_values", ("insert", {})], str(si.calls))
+    check("trả về: cờ tu_do + mã chưa có đơn giá để màn hình nhắc điền trên Desk",
+          r.get("tu_do") is True and r.get("thieu_gia") == ["MOI"] and r.get("gia_ban_gan_nhat") == 1, str(r))
+    e = raises(lambda: api.tao_hoa_don_tra("TH-A", "HD-X"))
+    check("CÓ hóa đơn gốc -> vẫn đi đường cũ (kiểm hóa đơn gốc đã ghi sổ, cùng khách)",
+          e is not None and "HD-X không phải hóa đơn bán đã ghi sổ" in e, e)
+    PH["doc"].da_chot = 0
+    check("chưa chốt phiếu -> không lập", raises(lambda: api.tao_hoa_don_tra("TH-A")) is not None)
+    PH["doc"].da_chot = 1
+    HDT[:] = [("RET-OLD", 1, "BDX", 50), ("RET-OLD", 1, "MOI", 2)]
+    check("đã đủ hóa đơn trả về -> không lập thêm", "đã có đủ" in (raises(lambda: api.tao_hoa_don_tra("TH-A")) or ""))
+
+    # Cập nhật sau khi mở lại + sửa số: bản NỐI hóa đơn gốc chia trước, bản tự do nhận phần còn lại.
+    TD = FakeSI(name="R-TD", custom_kiem_hang_thu_hoi="TH-A",
+                items=[FakeRow(item_code="BDX", rate=9500, conversion_factor=1, qty=-50)])
+    NOI = FakeSI(name="R-NOI", return_against="HD-9", custom_kiem_hang_thu_hoi="TH-A",
+                 items=[FakeRow(item_code="BDX", rate=240000, conversion_factor=24, qty=-1)])
+    DRAFT = {"R-TD": TD, "R-NOI": NOI}
+    HDT[:] = [("R-TD", 0, "BDX", 50), ("R-NOI", 0, "BDX", 24)]   # R-TD lập TRƯỚC
+    PH["doc"] = phieu(name="TH-A", lo_thu_hoi="TH-A", da_chot=1, company="HGC", customer="COOP",
+                      shipping_address_name="ADDR-HD", items=[FakeRow(name="r1", item_code="BDX", qty=50, stock_uom="Hộp", idx=1)])
+    fr.get_doc = lambda dt, name=None, **k: DRAFT[name] if dt == "Sales Invoice" else PH["doc"]
+    goc_kh = api._ke_hoach_nhieu
+    api._ke_hoach_nhieu = lambda inv, can, bo_qua=None: {inv[0]: (
+        [{"src": "L1", "item_code": "BDX", "noi": True, "qty": 1, "stock_qty": 24}] if can.get("BDX", 0) >= 24 else [], {}, [])}
+    m = types.ModuleType("erpnext.controllers.sales_and_purchase_return")
+    m.make_return_doc = lambda dt, src: FakeSI(items=[FakeRow(sales_invoice_item="L1", item_code="BDX", uom="Thùng",
+                                                               stock_uom="Hộp", conversion_factor=24, rate=240000)])
+    for mod in ("erpnext", "erpnext.controllers"):
+        sys.modules.setdefault(mod, types.ModuleType(mod))
+    sys.modules["erpnext.controllers.sales_and_purchase_return"] = m
+    XOA.clear()
+    api.cap_nhat_hoa_don("TH-A")
+    check("cập nhật: bản NỐI hóa đơn gốc chia TRƯỚC dù lập sau; bản tự do nhận phần còn lại (50 − 24 = 26)",
+          LUU_SI[-2:] == ["R-NOI", "R-TD"] and [x.qty for x in TD.items] == [-26], str((LUU_SI, [x.qty for x in TD.items])))
+    check("bản tự do giữ đơn giá người soát đã sửa (9.500)", [x.rate for x in TD.items] == [9500])
+    PH["doc"].items[0].qty = 24
+    TD.items = [FakeRow(item_code="BDX", rate=9500, conversion_factor=1, qty=-26)]
+    api.cap_nhat_hoa_don("TH-A")
+    check("số kiểm còn 24 = bản nối nhận hết -> bản tự do HẾT việc thì XÓA (bản nối giữ nguyên)",
+          ("Sales Invoice", "R-TD") in [x[:2] for x in XOA] and ("Sales Invoice", "R-NOI") not in [x[:2] for x in XOA])
+    api._ke_hoach_nhieu, api.get_thu_hoi, fr.new_doc, fr.db.get_value = goc_kh, goc_th, goc_nd, goc_gv
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # 6, 8–10. TĨNH
@@ -641,6 +926,11 @@ def kiem_tinh():
     t = ast.unparse(tao)
     check("tao_hoa_don_tra: update_stock = 0 + gắn custom_kiem_hang_thu_hoi + return_against từ make_return_doc",
           "si.update_stock = 0" in t and "si.set(SI_FIELD" in t and "make_return_doc('Sales Invoice', sales_invoice)" in t)
+    tu = ast.unparse(_fn(tree, "_dung_tra_tu_do"))
+    check("hóa đơn trả về không theo hóa đơn gốc: KHÔNG return_against, update_stock = 0, gắn phiếu kiểm, "
+          "chép thuế (set_missing_values) — insert nằm ở tao_hoa_don_tra, không ignore_permissions (trên)",
+          "return_against" not in tu and "si.update_stock = 0" in tu and "si.set(SI_FIELD" in tu
+          and "si.set_missing_values()" in tu and "si.insert" not in tu)
     hook = ast.unparse(_fn(tree, "dong_bo_trang_thai"))
     check("dong_bo_trang_thai: try/except Exception, không .save()",
           "except Exception" in hook and ".save(" not in hook)

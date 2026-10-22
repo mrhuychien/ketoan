@@ -12,9 +12,13 @@
 //     hiện số khai trước là mời người kiểm gõ lại số khai cho nhanh.
 //   · NGOẠI LỆ — lô HỦY TẠI CHỖ (phiếu `theo_phieu`): không có hàng để đếm, kế toán CHÉP mã
 //     + số theo phiếu / biên bản hủy của siêu thị — nên màn này hiện mail dán + file đính kèm.
+//   · Lô có PHIẾU TRẢ VỀ đi kèm hàng: ghi số đếm thẳng lên phiếu rồi CHỤP lại (📷) — khỏi nhập
+//     trên điện thoại. Ngồi máy tính mở lại màn này: ảnh LỚN bên trái (xoay, phóng to), ô nhập
+//     bên phải, gõ phím thật — Enter ở ô tìm chọn mã đầu, bàn số nhận số + Enter là LƯU.
 // Chốt rồi thì chỉ xem; muốn sửa: "Mở lại" ở màn lô.
 import { api } from "../lib/api.js";
 import { html, setHTML } from "../lib/dom.js";
+import { anhGui } from "../lib/anh.js";
 import { toast } from "../components/toast.js";
 import { openSoLuong } from "../components/numpad.js";
 import { moQuet } from "../components/quet.js";
@@ -44,6 +48,10 @@ export async function render({ container, params }) {
   const daChot = () => !!(B.phieu && B.phieu.da_chot);
   const tp = !!(B.phieu && B.phieu.theo_phieu);
   const XEM_TRONG_TAB = new Set(["jpg", "jpeg", "png", "webp", "gif", "pdf"]);
+  const anh = () => B.anh_phieu || [];
+  // Máy có chuột (ngồi máy nhập theo ảnh): lưu xong trả con trỏ về ô tìm để gõ mã kế tiếp.
+  // Điện thoại thì KHÔNG — tự focus là bật bàn phím ảo che nửa màn hình.
+  const mayTinh = () => !!(window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches);
 
   // Phiếu của siêu thị để chép (chỉ lô hủy tại chỗ): mail dán nguyên văn + biên bản / phiếu đính kèm.
   function phieuSieuThi() {
@@ -61,11 +69,71 @@ export async function render({ container, params }) {
   }
   const dongCua = (item) => (B.phieu.items || []).find((r) => r.item_code === item);
 
+  // Ảnh phiếu trên máy tính: cột trái LỚN, vẽ riêng — lưu số không vẽ lại cột này, nên ảnh
+  // đang xoay / phóng to / cuộn tới đâu vẫn giữ nguyên lúc gõ tiếp.
+  function veAnh() {
+    const ds = anh();
+    container.querySelector("#kh-wrap").classList.toggle("has-anh", ds.length > 0);
+    const box = container.querySelector("#kh-anh-xem");
+    setHTML(box, ds.length ? html`${ds.map((f, i) => html`<figure class="kt-th-kh-anh-fig">
+      <figcaption class="kt-th-kh-anh-cu"><span>Ảnh ${i + 1}/${ds.length}${f.boi ? " · " + f.boi : ""}</span>
+        <button type="button" class="kt-btn kt-btn--outline kt-btn--sm" data-xoay="${i}" title="Xoay 90°"><i class="fas fa-rotate-right"></i> Xoay</button>
+        <button type="button" class="kt-btn kt-btn--outline kt-btn--sm" data-phong="${i}" title="Phóng to / thu nhỏ"><i class="fas fa-magnifying-glass-plus"></i> Phóng</button>
+        <a class="kt-btn kt-btn--outline kt-btn--sm" href="${f.url}" target="_blank" rel="noopener">Mở tab</a></figcaption>
+      <div class="kt-th-kh-anh-khung"><img src="${f.url}" alt="Ảnh phiếu ${i + 1}" data-anh="${i}"></div>
+    </figure>`)}` : "");
+    box.querySelectorAll("[data-xoay]").forEach((b) => b.addEventListener("click", () => xoay(box.querySelector(`img[data-anh="${b.dataset.xoay}"]`))));
+    box.querySelectorAll("[data-phong]").forEach((b) => b.addEventListener("click", () => b.closest("figure").classList.toggle("is-to")));
+  }
+
+  // Xoay 90° bằng canvas (ảnh cùng tên miền — proxy của app): khung ảnh co giãn đúng chiều mới,
+  // không như transform CSS xoay hình mà để nguyên cái hộp.
+  function xoay(img) {
+    if (!img || !img.complete || !img.naturalWidth) return; // lượt xoay trước chưa nạp xong
+    const c = document.createElement("canvas");
+    c.width = img.naturalHeight;
+    c.height = img.naturalWidth;
+    const g = c.getContext("2d");
+    g.translate(c.width / 2, c.height / 2);
+    g.rotate(Math.PI / 2);
+    g.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    img.src = c.toDataURL("image/jpeg", 0.92);
+  }
+
+  // Thẻ ảnh phiếu trong cột nhập: nút chụp + ảnh nhỏ (máy tính có ảnh lớn bên trái thì ẩn ảnh nhỏ).
+  function theAnh() {
+    const ds = anh();
+    if (daChot() && !ds.length) return "";
+    return html`<div class="kt-th-kh-anhcard${ds.length ? " has-anh" : ""}">
+      <div class="kt-th-kh-anhcard-head"><b><i class="fas fa-camera"></i> Ảnh phiếu trả về</b>${ds.length ? html`<span class="kt-th-kh-anh-so">${ds.length} ảnh</span>` : ""}</div>
+      ${ds.length ? html`<div class="kt-th-kh-thumbs">${ds.map((f) => html`<div class="kt-th-kh-thumb">
+        <a href="${f.url}" target="_blank" rel="noopener"><img src="${f.url}" alt="Ảnh phiếu" loading="lazy"></a>
+        ${daChot() ? "" : html`<button type="button" class="kt-th-kh-thumb-xoa" data-xoaanh="${f.name}" aria-label="Xóa ảnh">✕</button>`}
+      </div>`)}</div>` : ""}
+      ${daChot() ? "" : html`<div class="kt-th-kh-anhcard-hang">
+        <div class="kt-sub">${ds.length
+          ? "Đã chụp phiếu — ngồi máy nhập số theo ảnh rồi chốt. Thiếu trang thì chụp thêm."
+          : "Lô có phiếu trả về? Ghi số đếm thẳng lên phiếu rồi chụp lại — ngồi máy nhập sau."}</div>
+        <label class="kt-btn kt-btn--outline kt-th-kh-chup" id="kh-chup"><i class="fas fa-camera"></i> ${ds.length ? "Chụp thêm" : "Chụp phiếu"}
+          <input type="file" accept="image/*" capture="environment" multiple id="kh-anh-input" hidden></label>
+        <span class="kt-th-kh-anh-tt" id="kh-anh-tt" role="status"></span>
+      </div>`}
+    </div>`;
+  }
+
+  function khung() {
+    setHTML(container, html`<div class="kt-th-kh-wrap" id="kh-wrap">
+      <aside class="kt-th-kh-anh" id="kh-anh-xem" aria-label="Ảnh phiếu trả về"></aside>
+      <div class="kt-th-kh" id="kh-cot"></div>
+    </div>`);
+    veAnh();
+    paint();
+  }
+
   function paint() {
     const ph = B.phieu;
     const lo = B.lo;
-    setHTML(container, html`
-      <div class="kt-th-kh">
+    setHTML(container.querySelector("#kh-cot"), html`
         <div class="kt-th-kh-top">
           <div>
             <div class="kt-th-kh-kicker">${tp ? "Nhập theo phiếu hủy" : "Kiểm hàng"} · ${lo.name}</div>
@@ -75,6 +143,7 @@ export async function render({ container, params }) {
           <div class="kt-th-kh-tong"><div class="kt-th-kh-so">${fmtSl(ph.tong_sl)}</div><div class="kt-th-kh-sub">${(ph.items || []).length} mã ${tp ? "theo phiếu" : "đã kiểm"}</div></div>
         </div>
         ${tp ? phieuSieuThi() : ""}
+        ${theAnh()}
         ${daChot() ? html`<div class="kt-alert kt-alert--info">Phiếu đã chốt — chỉ xem. Muốn sửa: bấm <b>Mở lại để sửa</b> ở <a href="#/thu-hoi/${encodeURIComponent(name)}">màn lô</a>.</div>` : html`
           <div class="kt-th-kh-tim">
             <input class="kt-input" id="kh-tim" type="search" autocomplete="off" autocorrect="off" spellcheck="false"
@@ -91,8 +160,7 @@ export async function render({ container, params }) {
           <a class="kt-btn kt-btn--outline" href="#/thu-hoi/${encodeURIComponent(name)}"><i class="fas fa-arrow-left"></i> Lô</a>
           <button type="button" class="kt-btn kt-btn--success" id="kh-chot" ${(ph.items || []).length ? "" : "disabled"}>
             <i class="fas fa-lock"></i> ${tp ? "Chốt theo phiếu" : "Chốt phiếu"} · ${(ph.items || []).length} mã</button>
-        </div>`}
-      </div>`);
+        </div>`}`);
     veChon();
     veDong();
     bind();
@@ -104,8 +172,11 @@ export async function render({ container, params }) {
   const hay = new Map((B.goi_y || []).map((c, i) => [c, i]));
   const hang = (d) => (hay.has(d.item) ? hay.get(d.item) : hay.size);
 
+  let dau = null; // mã đứng đầu kết quả tìm — Enter ở ô tìm chọn mã này
+
   function veChon() {
     const box = container.querySelector("#kh-chon");
+    dau = null;
     if (!box) return;
     const q = khongDau(tim.trim());
     if (!q) {
@@ -114,6 +185,7 @@ export async function render({ container, params }) {
     }
     // sort ổn định: cùng hạng (mã thường) thì giữ thứ tự tên của danh mục.
     const ds = B.danh_muc.filter((d) => d._k.includes(q)).sort((a, b) => hang(a) - hang(b)).slice(0, 30);
+    dau = ds.length ? ds[0].item : null;
     if (!ds.length) {
       setHTML(box, html`<div class="kt-sub">Không thấy mã nào khớp "${tim}".</div>`);
       return;
@@ -150,6 +222,16 @@ export async function render({ container, params }) {
   function bind() {
     const o = container.querySelector("#kh-tim");
     if (o) o.addEventListener("input", (e) => { tim = e.target.value; veChon(); });
+    if (o) o.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || !dau) return;
+      // Chặn cả lan lên: bàn số vừa mở nghe phím ở document — Enter này mà tới đó là "LƯU" số 0.
+      e.preventDefault();
+      e.stopPropagation();
+      chonMa(dau);
+    });
+    const inp = container.querySelector("#kh-anh-input");
+    if (inp) inp.addEventListener("change", () => guiAnh(inp));
+    container.querySelectorAll("#kh-cot [data-xoaanh]").forEach((b) => b.addEventListener("click", () => xoaAnh(b.dataset.xoaanh)));
     const q = container.querySelector("#kh-quet");
     if (q) q.addEventListener("click", () => quet());
     const c = container.querySelector("#kh-chot");
@@ -196,6 +278,7 @@ export async function render({ container, params }) {
       paint();
       toast(`Đã lưu ${cong ? "+" : ""}${cach && cach !== so ? `${cach} = ${so}` : so} · ${d.ten || item}`, "success");
       if (quetTiep) quet();
+      else veTim();
     } catch (e) {
       toast(e.message, "error");
     } finally {
@@ -215,9 +298,54 @@ export async function render({ container, params }) {
           B.phieu = await api.thSua({ name, row, qty: t, chi_tiet: ct ? JSON.stringify(ct) : undefined });
           paint();
           toast("Đã sửa", "success");
+          veTim();
         } catch (e) { toast(e.message, "error"); }
       },
     });
+  }
+
+  function veTim() {
+    const o = container.querySelector("#kh-tim");
+    if (o && mayTinh()) o.focus();
+  }
+
+  // Gửi từng ảnh một (nén trước): ảnh lỗi không kéo ảnh khác chết theo.
+  async function guiAnh(inp) {
+    const files = [...(inp.files || [])];
+    inp.value = "";
+    if (!files.length) return;
+    if (busy) {
+      toast("Đang lưu dở — chụp lại sau một giây", "warning");
+      return;
+    }
+    busy = true;
+    const tt = container.querySelector("#kh-anh-tt");
+    let ok = 0;
+    for (const [i, f] of files.entries()) {
+      if (tt) tt.textContent = `Đang gửi ảnh ${i + 1}/${files.length}…`;
+      try {
+        const { content, ten } = await anhGui(f);
+        const r = await api.thAnhThem({ name, content, filename: ten });
+        B.anh_phieu = r.anh_phieu || [];
+        ok += 1;
+      } catch (e) {
+        toast(e.message, "error");
+      }
+    }
+    busy = false;
+    veAnh();
+    paint();
+    if (ok) toast(`Đã lưu ${ok} ảnh phiếu — ngồi máy nhập số theo ảnh rồi chốt`, "success");
+  }
+
+  async function xoaAnh(file) {
+    if (busy || !confirm("Xóa ảnh phiếu này?")) return;
+    try {
+      const r = await api.thAnhXoa(name, file);
+      B.anh_phieu = r.anh_phieu || [];
+      veAnh();
+      paint();
+    } catch (e) { toast(e.message, "error"); }
   }
 
   async function xoaDong(row) {
@@ -243,5 +371,5 @@ export async function render({ container, params }) {
     }
   }
 
-  paint();
+  khung();
 }

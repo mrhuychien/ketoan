@@ -23,7 +23,7 @@ Một **LÔ THU HỒI** = một lần siêu thị gọi trả, đi qua 6 chặng
 | 1 | Tạo yêu cầu | vanchuyen | điều hành / tổ trưởng |
 | 2 | Đã lấy hàng | vanchuyen | điều hành / tổ trưởng (đơn vị thu hồi báo đã lấy) |
 | 3 | Đã nhận hàng | vanchuyen | điều hành / tổ trưởng (hàng về kho, đếm kiện) |
-| 4 | Đã kiểm hàng | ketoan | người kiểm bấm **Chốt phiếu** |
+| 4 | Đã kiểm hàng | ketoan | người kiểm bấm **Chốt phiếu** (đếm trên điện thoại, hoặc ghi số lên phiếu trả về + chụp, ngồi máy nhập) |
 | 5 | Đã nhập chứng từ | ketoan | MÁY SUY: hóa đơn trả về nháp phủ đủ số đã kiểm |
 | 6 | Xong | ketoan | MÁY SUY: mọi hóa đơn trả về đã ghi sổ |
 
@@ -41,6 +41,7 @@ bảng của mình, đọc chéo thì đọc sống và mềm** (`table_exists` 
 vanchuyen: Lo Thu Hoi (TH-.YYYY.-.####)         ketoan: Kiem Hang Thu Hoi (name = tên lô)
   ├ khách + shipping_address_name                  ├ lo_thu_hoi  (Data, KHÔNG Link)
   ├ ngày yêu cầu, số phiếu xuất trả siêu thị       ├ company / customer / địa chỉ (chép lúc mở)
+  │                                                ├ File đính kèm: ẢNH PHIẾU trả về ghi số tay (private)
   ├ điều phối thu hồi: đơn vị (Viettel Post /       ├ items: Kiem Hang Thu Hoi Dong (SL ĐVT kho)
   │   Nhất Tín), mã vận đơn, ngày thu, số kiện      ├ da_chot · khong_lap_hd (KTT)
   ├ chi_tiet_hang: dán NGUYÊN VĂN mail siêu thị    ├ theo_phieu (lô hủy tại chỗ: chép, không đếm)
@@ -68,12 +69,38 @@ vào `chi_tiet_hang`) và file đính kèm. Mã hàng + số lượng chính xá
 kiểm hàng trên điện thoại không hiện số khai) — lệch với số siêu thị khai là thứ đáng
 tiền nhất: siêu thị trừ tiền theo số họ khai, mình chỉ trả về theo số mình nhận.
 
+**Lô có phiếu trả về đi kèm hàng**: người kiểm được ghi số đếm thẳng lên phiếu rồi **chụp**
+(📷 ở màn kiểm hàng) thay vì nhập trên điện thoại; kế toán ngồi máy nhập theo ảnh rồi chốt.
+Ảnh gắn vào PHIẾU KIỂM (bảng của ketoan, private, xem qua proxy có guard), chỉ nhận ảnh thật
+(soát chữ ký đầu file — proxy mở inline theo đuôi), nén còn cạnh dài 2400px trước khi gửi.
+Lô đó không còn "đếm mù" (phiếu có số khai) — chấp nhận, vì người kiểm đếm với phiếu trong tay;
+màn nhập vẫn không đưa thêm số khai nào. Phiếu chưa chốt mà có ảnh = **Chờ nhập số**: một hàng
+việc (pill riêng ở tab Thu hồi), không phải một chặng.
+
 Bản đầu có bảng hàng khai có cấu trúc (`Lo Thu Hoi Hang`, mã + ĐVT + số lượng) do bên vận
 chuyển gõ. Đã bỏ khỏi màn hình và khỏi lô (không còn field cha); DocType giữ lại để các
 lô cũ vẫn có số khai — ketoan đọc mềm, lô nào có thì bảng so sánh mới hiện cột "khai".
 
 ## 4. Hóa đơn trả về — luật dựng (đọc từ mã nguồn ERPNext v16 thật)
 
+**Mặc định KHÔNG cần chọn hóa đơn gốc** (`tao_hoa_don_tra` không truyền hóa đơn gốc) — một
+nút "Lập hóa đơn trả về":
+
+- MỘT tờ cho toàn bộ số đã kiểm chưa có phiếu trả; mỗi mã một dòng theo **ĐVT kho** (đúng số
+  đã kiểm, không quy ra thùng — không có dòng gốc nào phải giữ ĐVT); không `return_against`.
+- **Đơn giá** = dòng bán GẦN NHẤT (đã ghi sổ, không phải phiếu trả, không phải hàng tặng) cho
+  ĐÚNG khách, ưu tiên ĐÚNG điểm giao của lô, theo ĐVT kho (đơn giá dòng ÷ hệ số) — ghi giảm
+  theo giá siêu thị đã trả, sát hơn bảng giá chung. Mã chưa từng bán cho khách: ERPNext lấy theo
+  bảng giá; màn hình báo mã nào chưa có giá. `ignore_pricing_rule = 1` như `make_return_doc`.
+- **Thuế** theo mẫu của hóa đơn bán mới nhất vừa cho giá, không có thì mẫu mặc định công ty;
+  `set_missing_values()` chạy TRƯỚC insert (bản `for_validate` của insert không chép dòng thuế).
+- "Cập nhật" sau khi mở lại + sửa số: bản nháp NỐI hóa đơn gốc chia trước, bản tự do nhận phần
+  còn lại và GIỮ đơn giá người soát đã sửa trên Desk; hết việc thì xóa bản nháp.
+- **Cái giá phải trả**: `mt._returns_join` và sổ Hàng hoàn chỉ nhận phiếu trả CÓ `return_against`
+  — tờ đứng rời ghi giảm công nợ khách (131) mà không trừ vào hóa đơn bán nào. Muốn trừ đúng tờ
+  thì đối trừ trên ERPNext, hoặc lập theo hóa đơn gốc (vẫn còn, là tùy chọn).
+
+**Tùy chọn — theo hóa đơn gốc** ("Hoặc trả theo hóa đơn gốc…"). Luật dưới đây, từ
 `erpnext/controllers/sales_and_purchase_return.py`:
 
 - `validate_quantity`: hóa đơn trả về **`update_stock = 0`** (quy ước của ketoan:
@@ -92,16 +119,16 @@ lô cũ vẫn có số khai — ketoan đọc mềm, lô nào có thì bảng so
 - Trần trả của một mặt hàng trên một hóa đơn gốc = đã bán − mọi lần trả (nối + không
   nối, **kể cả nháp**). ERPNext chỉ đếm bản đã ghi sổ; đếm cả nháp để hai bản nháp
   không cùng chiếm một phần hàng.
-- `return_against` BẮT BUỘC: `mt._returns_join` chỉ trừ phiếu trả có nối hóa đơn gốc;
-  phiếu trả đứng rời ghi giảm 131 mà không trừ vào hóa đơn nào.
+- `return_against` = hóa đơn gốc đã chọn: `mt._returns_join` trừ đúng vào tờ đó (khác tờ
+  không theo hóa đơn gốc ở trên).
 - Hàng về từ NHIỀU hóa đơn gốc → nhiều hóa đơn trả về, mỗi tờ một `return_against`.
   Kế toán chọn hóa đơn gốc trong danh sách ứng viên = MỌI hóa đơn bán đã ghi sổ của ĐÚNG
   khách + ĐÚNG điểm giao của lô (50 tờ một trang, mới nhất trước, tìm theo số HĐ / PO /
   số HĐĐT), mỗi dòng đủ khách · điểm giao · địa chỉ · số tiền · còn nợ · đã trả về. Không
   lọc theo mã đã kiểm: tờ không còn gì để trả vẫn hiện, chỉ khóa nút lập + nói lý do. Hàng
   giao điểm khác rồi siêu thị gom về đây trả → "Xem mọi điểm của khách" (vẫn đúng khách).
-  Làm lại tới khi phủ đủ.
-- TK doanh thu dòng trả → TK `5213` của công ty nếu có (Client Script cũng đặt
+  Làm lại tới khi phủ đủ (hoặc phần còn lại lập một tờ không theo hóa đơn gốc).
+- Cả hai đường: TK doanh thu dòng trả → TK `5213` của công ty nếu có (Client Script cũng đặt
   "5213 - Hàng bán bị trả lại"). `update_stock = 0`: hàng vào kho bằng phiếu kho riêng
   sau khi lọc, như `Su Co Van Chuyen` đã ghi.
 - Tạo **NHÁP** (`doc.insert()` tôn trọng quyền tạo Sales Invoice của người bấm), deep
@@ -186,7 +213,8 @@ DocType chỉ cấp DocPerm System Manager (vanchuyen, như `Su Co Van Chuyen`) 
 toán (ketoan); mọi thao tác portal qua whitelisted method có guard ở dòng đầu,
 `ignore_permissions` chỉ dùng SAU guard trên đúng bản ghi. File đính kèm **private**,
 xem qua method proxy có guard của từng app (kế toán không có quyền DocType bên vận
-chuyển nên không mở thẳng được file private). Proxy chỉ mở **trong tab** ảnh / PDF; loại
+chuyển nên không mở thẳng được file private). Ảnh phiếu trả về gắn PHIẾU KIỂM, cùng proxy
+của ketoan; thêm / xóa ảnh chỉ khi phiếu chưa chốt, không xóa được file của phiếu khác / của lô. Proxy chỉ mở **trong tab** ảnh / PDF; loại
 khác **tải về** — và upload không nhận loại chạy được script (html / svg / xml / js…): proxy
 phục vụ file trên chính tên miền của site, inline một .html là script chạy bằng phiên
 đăng nhập của người xem (Frappe cũng tự ép tải về các loại này ở `/private/files`).
@@ -201,10 +229,13 @@ phục vụ file trên chính tên miền của site, inline một .html là scr
   số kiện), đính kèm nhiều file, nút chuyển chặng + lùi chặng, **Hủy tại chỗ (không
   thu)** ở lô còn "Tạo yêu cầu" (§5c), **Hủy yêu cầu** (lý do bắt buộc, có gợi ý một
   chạm) / **Khôi phục**.
-- ketoan tab **Thu hồi** `#/thu-hoi`: theo dõi MỌI lô (pill 7 chặng + Đã hủy), `#/thu-hoi/:id`:
+- ketoan tab **Thu hồi** `#/thu-hoi`: theo dõi MỌI lô (pill 7 chặng + Đã hủy + 📷 **Chờ nhập
+  số** khi có lô đã chụp phiếu mà chưa chốt), `#/thu-hoi/:id`:
   hồ sơ lô (đơn vị thu hồi, chi tiết hàng dán từ mail, đính kèm) + phiếu kiểm + so
   sánh đã kiểm / đã lập hóa đơn (cột "khai" chỉ với lô cũ có bảng hàng khai) + hóa đơn
   trả về. Lô hủy tại chỗ: nhãn 🗑, khung "không thu về", nút **Nhập hàng theo phiếu hủy**.
+  Có ảnh phiếu: ảnh nhỏ + nút **Nhập số theo ảnh phiếu**. Hóa đơn trả về: nút chính **Lập hóa
+  đơn trả về** (không cần chọn hóa đơn gốc), "Hoặc trả theo hóa đơn gốc…" là tùy chọn.
 - ketoan `#/kiem-hang/:id` (mobile, dựng theo màn Ghi hộp của sx): quét mã vạch
   (BarcodeDetector / zxing1d / máy quét cầm tay / gõ tay) hoặc gõ tìm mã → bàn số phím
   to có tab Thùng/Hộp → lưu ngay; chạm số để sửa, ✕ để xóa; **Chốt phiếu** thì khóa,
@@ -213,13 +244,16 @@ phục vụ file trên chính tên miền của site, inline một .html là scr
   khai + khách mua 6 tháng) nổi lên ĐẦU kết quả, ô tìm trống không hiện gì. Site không có
   nhóm đó thì báo đúng nhóm thiếu, tạm tìm trong mọi mã hàng bán. Phiếu **theo phiếu**
   (lô hủy tại chỗ) thì màn này hiện thêm mail dán + biên bản đính kèm để chép, nút là
-  **Chốt theo phiếu**.
+  **Chốt theo phiếu**. Thẻ **📷 Ảnh phiếu trả về**: điện thoại mở camera, ảnh nén rồi gửi, xóa
+  được ảnh chụp nhầm. Máy tính (≥ 1100px) có ảnh thì chia hai cột: ảnh LỚN bên trái (xoay,
+  phóng to — giữ nguyên khi lưu số), ô nhập bên phải; gõ phím thật: Enter ở ô tìm chọn mã đầu,
+  bàn số nhận số / ⌫ / ←→ đổi Thùng-Hộp / Enter là LƯU, lưu xong con trỏ về ô tìm.
 
 ## 8. Ngoài phạm vi
 
 - Phiếu nhập kho hàng trả về (Stock Entry) — thủ kho vẫn lập riêng sau khi lọc.
-- Đọc phiếu xuất trả / mail bằng AI (như Nhập đơn) — dán nguyên văn + đính kèm là đủ
-  cho bản đầu.
+- Đọc phiếu xuất trả / mail / ẢNH PHIẾU ghi số tay bằng AI (như Nhập đơn) — dán nguyên văn,
+  đính kèm, chụp rồi nhập tay là đủ cho bản đầu.
 - Tra hành trình vận đơn tự động với Viettel Post / Nhất Tín — mới lưu mã vận đơn.
 - Tự đưa hóa đơn trả về vào sổ `MT Hang Hoan` (chứng từ thuế) — kế toán MT nhận từ
   màn Hàng hoàn như dòng lập tay.

@@ -28,28 +28,43 @@ lại mã đã có là CỘNG thêm vào dòng đó. Số lưu theo ĐVT kho; h�
 lại trên Item, không tin hệ số client gửi. Mọi lần ghi khóa hàng phiếu (`for_update`):
 hai điện thoại cùng cộng vào một mã thì lượt sau đọc được lượt trước, không đè nhau.
 
+Lô có PHIẾU TRẢ VỀ đi kèm hàng: người kiểm ghi số đếm thẳng lên phiếu rồi CHỤP lại
+(`them_anh_phieu`) — kế toán ngồi máy nhập số sau, ảnh hiện ngay cạnh ô nhập. Ảnh gắn vào
+PHIẾU KIỂM (bảng của ketoan, private, xem qua proxy có guard), chỉ nhận ảnh thật (soát chữ
+ký đầu file). Phiếu chưa chốt mà đã có ảnh = "Chờ nhập số" — hàng việc của kế toán, không
+phải một chặng.
+
 ════════════════════════════════════════════════════════════════════════════
 HÓA ĐƠN TRẢ VỀ — NHÁP, đúng ERPNext v16
 ════════════════════════════════════════════════════════════════════════════
 
-`make_return_doc` của hóa đơn gốc, rồi THAY bảng hàng bằng kế hoạch của
-`thu_hoi_phan_bo.phan_bo` (đọc docstring ở đó: vì sao dòng trả phải giữ ĐVT của dòng
-gốc khi `update_stock = 0`). Chốt thêm:
+MẶC ĐỊNH — KHÔNG theo hóa đơn gốc (`tao_hoa_don_tra` không truyền hóa đơn gốc): MỘT tờ
+cho mọi số đã kiểm mà chưa có phiếu trả, mỗi mã một dòng theo ĐVT KHO, không
+`return_against`. Đơn giá = lần bán GẦN NHẤT (đã ghi sổ) cho đúng khách, ưu tiên đúng điểm
+giao (`_gia_ban_gan_nhat`) — ghi giảm theo giá siêu thị đã trả, sát hơn bảng giá chung; mã
+chưa từng bán cho khách thì ERPNext lấy theo bảng giá. Thuế theo mẫu của hóa đơn vừa lấy
+giá, không có thì mẫu mặc định của công ty. Cái giá phải trả: `mt._returns_join` và sổ Hàng
+hoàn chỉ nhận phiếu trả CÓ nối hóa đơn gốc — tờ đứng rời ghi giảm công nợ khách (131) mà
+không trừ vào hóa đơn nào; muốn trừ đúng tờ thì đối trừ trên ERPNext, hoặc lập theo hóa đơn gốc.
 
-  · `return_against` BẮT BUỘC — `mt._returns_join` chỉ trừ phiếu trả có nối hóa đơn gốc;
+TÙY CHỌN — theo hóa đơn gốc: `make_return_doc` của hóa đơn gốc, rồi THAY bảng hàng bằng kế
+hoạch của `thu_hoi_phan_bo.phan_bo` (đọc docstring ở đó: vì sao dòng trả phải giữ ĐVT của
+dòng gốc khi `update_stock = 0`). Hàng về từ nhiều hóa đơn gốc → nhiều phiếu trả, mỗi tờ một
+`return_against`: kế toán chọn trong danh sách ứng viên (`ung_vien_hoa_don`).
+
+Cả hai đường:
   · `update_stock = 0` — quy ước Client Script; hàng vào kho bằng phiếu kho riêng;
   · TK doanh thu dòng trả → TK 5213 của công ty nếu có (Client Script cũng đặt vậy);
   · `update_outstanding_for_self` giữ MẶC ĐỊNH của ERPNext như `doitru.create_return`;
   · `doc.insert()` KHÔNG ignore_permissions — tôn trọng quyền tạo Sales Invoice của
     người bấm. Ghi sổ thì mở Desk (deep link): con người soát rồi ấn nút.
 
-Hàng về từ nhiều hóa đơn gốc → nhiều phiếu trả, mỗi tờ một `return_against`: kế toán
-chọn trong danh sách ứng viên (`ung_vien_hoa_don`), làm lại tới khi phủ đủ.
-
 Quyền: mọi method `guard_sales_any()` ở dòng đầu (kế toán NPP / MT / Du lịch + KTT);
 kết luận "không lập hóa đơn trả về" chỉ `guard_manager()`.
 """
 
+import base64
+import binascii
 import json
 from urllib.parse import quote
 
@@ -107,6 +122,9 @@ DUOI_XEM_TRONG_TAB = frozenset(("jpg", "jpeg", "png", "webp", "gif", "pdf"))
 _DATE_COLS = ("ngay_yeu_cau", "ngay_hen_lay", "lay_luc", "nhan_luc", "huy_luc", "chot_luc", "xong_luc",
               "posting_date")
 UNG_VIEN_TRANG = 50  # một trang ứng viên hóa đơn gốc; "Xem tiếp" lấy trang sau
+# Ảnh phiếu trả về chụp lúc kiểm hàng: màn hình nén còn ~0,5 MB một ảnh; trần để chặn gửi bừa.
+ANH_TOI_DA = 8 * 1024 * 1024
+ANH_TOI_DA_SO = 30
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -163,16 +181,29 @@ def _hang_khai(name):
         {"p": name, "t": LO}, as_dict=True)
 
 
-def _files(name):
+def _files(name, dt=LO):
+    """File đính kèm của LÔ bên vanchuyen — hoặc của PHIẾU KIỂM (`dt=DT`: ảnh phiếu trả về chụp
+    lúc kiểm). Cả hai xem qua proxy `xem_dinh_kem` có guard."""
     rows = frappe.get_all(
-        "File", filters={"attached_to_doctype": LO, "attached_to_name": name},
-        fields=["name", "file_name", "creation"], order_by="creation asc", limit_page_length=0)
+        "File", filters={"attached_to_doctype": dt, "attached_to_name": name},
+        fields=["name", "file_name", "creation", "owner"], order_by="creation asc", limit_page_length=0)
     for f in rows:
         f["url"] = "/api/method/ketoan.api.thu_hoi.xem_dinh_kem?file=" + quote(f.name)
         f["ext"] = _duoi(f.file_name)
         f["is_image"] = f["ext"] in ("jpg", "jpeg", "png", "webp", "gif")
         f["creation"] = str(f.creation)
+        f["boi"] = (frappe.utils.get_fullname(f.owner) or f.owner) if f.owner else ""
     return rows
+
+
+def _dem_anh(names):
+    """{phiếu kiểm: số ảnh phiếu} cho cả trang danh sách — một truy vấn (tên phiếu = tên lô)."""
+    if not names:
+        return {}
+    return {r.n: cint(r.c) for r in frappe.db.sql(
+        """SELECT attached_to_name AS n, COUNT(*) AS c FROM `tabFile`
+        WHERE attached_to_doctype = %(dt)s AND attached_to_name IN %(names)s
+        GROUP BY attached_to_name""", {"dt": DT, "names": tuple(names)}, as_dict=True)}
 
 
 def _duoi(ten):
@@ -204,7 +235,9 @@ def _chang_lo(lo, tt=None):
 def list_thu_hoi(chang=None, tim=None, tu_ngay=None, den_ngay=None, page=1, page_size=30):
     """MỌI lô tạo bên vanchuyen + chặng tổng; pill đếm đủ 7 chặng (+ "Đã hủy") trên cùng bộ tìm.
 
-    `chang` = một trong 7 chặng · "Đã hủy" · "dang_mo" (mặc định: chưa Xong, chưa hủy) · "tat_ca".
+    `chang` = một trong 7 chặng · "Đã hủy" · "dang_mo" (mặc định: chưa Xong, chưa hủy) · "tat_ca"
+    · "cho_nhap" (phiếu kiểm CHƯA chốt đã có ảnh phiếu — người kiểm ghi số lên phiếu trả về
+    rồi chụp, còn việc ngồi máy nhập; không phải một chặng, đếm riêng ở `cho_nhap`).
 
     Lọc + đếm ở SERVER. Xếp chặng sớm trước, lô cũ trước: việc treo lâu nhất nổi lên đầu.
     SQL thô: JOIN mềm sang bảng app khác, biểu thức chặng dùng chung ba mệnh đề.
@@ -235,10 +268,16 @@ def list_thu_hoi(chang=None, tim=None, tu_ngay=None, den_ngay=None, page=1, page
     counts = {cstr(r.chang): cint(r.n) for r in frappe.db.sql(
         f"SELECT {expr} AS chang, COUNT(*) AS n FROM `tab{LO}` l {join} WHERE {base} GROUP BY chang",
         p, as_dict=True)}
+    p["dt"] = DT
+    cho_nhap = ("(k.name IS NOT NULL AND IFNULL(k.da_chot, 0) = 0 AND EXISTS (SELECT 1 FROM `tabFile` f "
+                "WHERE f.attached_to_doctype = %(dt)s AND f.attached_to_name = k.name))")
+    n_cho = cint(frappe.db.sql(f"SELECT COUNT(*) FROM `tab{LO}` l {join} WHERE {base} AND {cho_nhap}", p)[0][0])
 
     where = base
     chang = cstr(chang).strip() or "dang_mo"
-    if chang == "dang_mo":
+    if chang == "cho_nhap":
+        where += f" AND {cho_nhap}"
+    elif chang == "dang_mo":
         where += f" AND {expr} NOT IN (%(xong)s, %(huy)s)"
     elif chang in _THU_TU:
         p["chang"] = chang
@@ -251,7 +290,7 @@ def list_thu_hoi(chang=None, tim=None, tu_ngay=None, den_ngay=None, page=1, page
     cols = ", ".join(f"{_lo_col(c)} AS `{c}`" for c in _LO_COLS_DS)
     rows = frappe.db.sql(
         f"""SELECT l.name, {cols}, {expr} AS chang,
-               k.tong_sl AS kiem_sl, k.so_ma AS kiem_so_ma, k.da_chot
+               k.name AS phieu, k.tong_sl AS kiem_sl, k.so_ma AS kiem_so_ma, k.da_chot
         FROM `tab{LO}` l {join}
         WHERE {where}
         ORDER BY FIELD({expr}, {order}), l.ngay_yeu_cau ASC, l.name ASC
@@ -259,15 +298,18 @@ def list_thu_hoi(chang=None, tim=None, tu_ngay=None, den_ngay=None, page=1, page
         p, as_dict=True)
 
     hd = _tom_tat_hoa_don([r.name for r in rows])
+    anh = _dem_anh([r.phieu for r in rows if r.phieu])
     today = nowdate()
     for r in rows:
         _str_dates(r)
         r["tuoi"] = date_diff(today, r.ngay_yeu_cau) if r.ngay_yeu_cau and r.chang not in (XONG, DA_HUY) else None
         r.update(hd.get(r.name) or {"so_hd": 0, "so_hd_ghi_so": 0, "tien_hd": 0.0})
+        r["so_anh"] = anh.get(r.phieu, 0) if r.phieu else 0
+        r["cho_nhap"] = bool(r.phieu) and not cint(r.da_chot) and r["so_anh"] > 0
     return {
         "rows": rows, "total": total, "page": page, "page_size": page_size,
         "has_more": (page - 1) * page_size + len(rows) < total,
-        "counts": counts, "chang_list": list(CHANG), "vanchuyen": True,
+        "counts": counts, "cho_nhap": n_cho, "chang_list": list(CHANG), "vanchuyen": True,
     }
 
 
@@ -341,6 +383,7 @@ def _hoa_don_chi_tiet(name):
         d["tien"] = flt(h.tien)
         d["misa_no"] = cstr(h.misa_no or "")
         d["items"] = by.get(h.name, [])
+        d["tu_do"] = not h.return_against  # không theo hóa đơn gốc: dòng nào cũng "không nối", là đúng
         d["route"] = f"/desk/sales-invoice/{quote(h.name)}"
         out.append(d)
     return out
@@ -348,11 +391,13 @@ def _hoa_don_chi_tiet(name):
 
 @frappe.whitelist()
 def get_thu_hoi(name):
-    """Một lô: hồ sơ bên vận chuyển (đơn vị thu hồi, mail dán, đính kèm) + phiếu kiểm + phiếu
-    trả + so sánh. Cột "khai" chỉ có với lô CŨ còn bảng hàng khai bên vanchuyen."""
+    """Một lô: hồ sơ bên vận chuyển (đơn vị thu hồi, mail dán, đính kèm) + phiếu kiểm (kèm ảnh
+    phiếu trả về chụp lúc kiểm) + phiếu trả + so sánh. Cột "khai" chỉ có với lô CŨ còn bảng
+    hàng khai bên vanchuyen."""
     guard_sales_any()
     lo = _lo(name)
     doc = frappe.get_doc(DT, name) if frappe.db.exists(DT, name) else None
+    anh = _files(name, DT) if doc else []
     khai = _hang_khai(name)
     hd = _hoa_don_chi_tiet(name) if doc else []
     tt, lech = tinh_trang_thai(doc) if doc else (None, {})
@@ -386,6 +431,7 @@ def get_thu_hoi(name):
         "tong_khai": sum(flt(r.stock_qty) for r in khai),
         "files": _files(name),
         "phieu": _phieu_dict(doc),
+        "anh_phieu": anh,
         "hoa_don": hd,
         "so_sanh": sorted(so.values(), key=lambda x: cstr(x["item_name"])),
         "chang": _chang_lo(lo, tt),
@@ -401,6 +447,7 @@ def get_thu_hoi(name):
             "cap_nhat": chot and co_nhap and bool(lech),
             "xoa": bool(doc) and not chot and not hd,
             "ket_luan": is_chief() and bool(doc) and not hd and not cint(doc.khong_lap_hd),
+            "cho_nhap": bool(doc) and not chot and bool(anh),
         },
         "is_chief": is_chief(),
     }
@@ -508,7 +555,8 @@ _SO_KHAI = ("gia_tri_khai", "chi_tiet_hang")
 
 @frappe.whitelist()
 def boot_kiem(name):
-    """Mọi thứ màn kiểm hàng cần, MỘT lượt: danh mục + bảng tra mã quét + gợi ý + phiếu.
+    """Mọi thứ màn kiểm hàng cần, MỘT lượt: danh mục + bảng tra mã quét + gợi ý + phiếu + ảnh
+    phiếu trả về đã chụp (ảnh do chính người kiểm chụp — ngồi máy nhập theo ảnh).
 
     Danh mục = mã thuộc NHOM_KIEM (+ mã đã kiểm trên phiếu mà ngoài nhóm — vẫn sửa / cộng
     thêm được). Tra mã quét ở MÁY (như sx `_ma_quet`): quét phải phản hồi tức thì, đợi mạng
@@ -557,10 +605,74 @@ def boot_kiem(name):
         "ma_quet": ma_quet,
         "goi_y": [g for g in goi_y if g in co][:40],
         "files": _files(name) if theo_phieu else [],
+        "anh_phieu": _files(name, DT),
         "nhom_kiem": goc,
         "thieu_nhom": [g for g in NHOM_KIEM if g.lower() not in {x.lower() for x in goc}],
         "hom_nay": nowdate(),
     }
+
+
+def _kieu_anh(data):
+    """Đuôi theo CHỮ KÝ đầu file — "jpg" / "png" / "webp"; không phải ảnh thì None. Không tin đuôi
+    tên client gửi: proxy mở inline theo đuôi, một file .html đổi tên .jpg là script trên tên miền site."""
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+@frappe.whitelist()
+def them_anh_phieu(name, content, filename=None):
+    """Đính kèm MỘT ảnh phiếu trả về (base64) vào phiếu kiểm. Lô có phiếu trả về đi kèm hàng thì
+    người kiểm ghi số đếm thẳng lên phiếu rồi chụp lại — kế toán ngồi máy nhập số sau. Chỉ khi
+    phiếu CHƯA chốt (chốt rồi là số đã khóa; cần thêm ảnh thì "Mở lại").
+
+    File PRIVATE gắn vào PHIẾU KIỂM (bảng của ketoan — không gắn vào lô bên vanchuyen). Tên file
+    do server đặt, đuôi theo chữ ký đầu file; `filename` của máy chỉ để báo lỗi cho dễ hiểu.
+    """
+    guard_sales_any()
+    doc = _khoa(name)
+    try:
+        data = base64.b64decode(cstr(content).split(",")[-1], validate=True)
+    except (binascii.Error, ValueError):
+        frappe.throw(_("Ảnh {0} gửi lên bị hỏng — chụp lại.").format(cstr(filename)))
+    duoi = _kieu_anh(data)
+    if not duoi:
+        frappe.throw(_("{0} không phải ảnh chụp — chỉ nhận JPG / PNG / WEBP.").format(cstr(filename) or _("File")))
+    if len(data) > ANH_TOI_DA:
+        frappe.throw(_("Ảnh quá lớn ({0} MB) — tối đa {1} MB.").format(
+            round(len(data) / 1048576.0, 1), ANH_TOI_DA // 1048576))
+    co = frappe.db.count("File", {"attached_to_doctype": DT, "attached_to_name": doc.name})
+    if co >= ANH_TOI_DA_SO:
+        frappe.throw(_("Phiếu {0} đã có {1} ảnh — xóa bớt ảnh chụp nhầm rồi chụp tiếp.").format(doc.name, co))
+    f = frappe.get_doc({
+        "doctype": "File",
+        "file_name": f"anh-phieu-{doc.name}-{frappe.generate_hash(length=6)}.{duoi}",
+        "attached_to_doctype": DT,
+        "attached_to_name": doc.name,
+        "is_private": 1,
+        "content": data,
+    })
+    # Sau guard + đúng phiếu, chưa chốt (khóa hàng ở `_khoa`): quyền DocType File không thêm gì.
+    f.save(ignore_permissions=True)
+    return {"anh_phieu": _files(doc.name, DT)}
+
+
+@frappe.whitelist()
+def xoa_anh_phieu(name, file):
+    """Xóa một ảnh phiếu chụp nhầm — chỉ khi phiếu CHƯA chốt, chỉ file gắn đúng phiếu này."""
+    guard_sales_any()
+    doc = _khoa(name)
+    f = frappe.db.get_value("File", file, ["attached_to_doctype", "attached_to_name"], as_dict=True)
+    if not f or f.attached_to_doctype != DT or f.attached_to_name != doc.name:
+        frappe.throw(_("Ảnh không thuộc phiếu kiểm {0}.").format(doc.name))
+    # Ảnh có thể do người khác chụp (vai trò kế toán kênh không xóa được File của người khác):
+    # guard + hai chốt trên thay cho quyền đó, như `xoa_phieu`.
+    frappe.delete_doc("File", file, ignore_permissions=True)
+    return {"anh_phieu": _files(doc.name, DT)}
 
 
 def _khoa(name):
@@ -917,9 +1029,111 @@ def _dong_tra(mapped, plan, tk):
     return out
 
 
+def _gia_ban_gan_nhat(company, customer, addr, items):
+    """{mã: {"rate" theo ĐVT KHO, "si", "posting_date", "taxes_and_charges"}} — dòng bán GẦN NHẤT
+    (đã ghi sổ, không phải phiếu trả, không phải hàng tặng) cho ĐÚNG khách, ưu tiên ĐÚNG điểm
+    giao của lô. Mã chưa từng bán cho khách thì không có mặt.
+
+    Hóa đơn trả về không theo hóa đơn gốc vẫn phải ghi giảm theo giá siêu thị đã trả: giá bán
+    gần nhất cho chính khách đó (chiết khấu chuỗi nằm sẵn trên dòng) sát hơn bảng giá chung.
+    Đơn giá theo ĐVT KHO = đơn giá dòng ÷ hệ số, như dòng "không nối" của đường hóa đơn gốc.
+
+    SQL thô: ROW_NUMBER() lấy một dòng mới nhất cho MỖI mã trong một lượt.
+    """
+    items = [i for i in items or [] if i]
+    if not items:
+        return {}
+    rows = frappe.db.sql(
+        """SELECT x.item_code, x.rate, x.conversion_factor, x.si, x.posting_date, x.taxes_and_charges
+        FROM (
+            SELECT it.item_code, it.rate, it.conversion_factor, si.name AS si, si.posting_date,
+                   si.taxes_and_charges,
+                   ROW_NUMBER() OVER (PARTITION BY it.item_code
+                       ORDER BY (IFNULL(si.shipping_address_name, '') = %(addr)s) DESC,
+                                si.posting_date DESC, si.creation DESC, it.idx ASC) AS rn
+            FROM `tabSales Invoice Item` it
+            INNER JOIN `tabSales Invoice` si ON si.name = it.parent
+            WHERE it.parenttype = 'Sales Invoice' AND it.item_code IN %(items)s
+              AND IFNULL(it.is_free_item, 0) = 0 AND it.qty > 0
+              AND si.docstatus = 1 AND si.is_return = 0
+              AND si.company = %(c)s AND si.customer = %(cu)s
+        ) x
+        WHERE x.rn = 1""",
+        {"items": tuple(items), "addr": cstr(addr), "c": company, "cu": customer}, as_dict=True)
+    return {r.item_code: {"rate": flt(r.rate) / (flt(r.conversion_factor) or 1.0), "si": r.si,
+                          "posting_date": cstr(r.posting_date), "taxes_and_charges": r.taxes_and_charges}
+            for r in rows}
+
+
+def _mau_thue(company, gia):
+    """Mẫu thuế của hóa đơn trả về không theo hóa đơn gốc: mẫu của hóa đơn bán MỚI NHẤT vừa cho
+    giá (cùng khách → cùng cách tính thuế), không có thì mẫu mặc định của công ty."""
+    co = [g for g in (gia or {}).values() if g.get("taxes_and_charges")]
+    if co:
+        return max(co, key=lambda g: cstr(g.get("posting_date")))["taxes_and_charges"]
+    return frappe.db.get_value("Sales Taxes and Charges Template",
+                               {"company": company, "is_default": 1, "disabled": 0}, "name")
+
+
+def _dong_tra_tu_do(can, dvt, gia, tk, giu=None):
+    """Dòng hóa đơn trả về KHÔNG theo hóa đơn gốc: mỗi mã một dòng theo ĐVT KHO — đúng số đã kiểm,
+    không quy ra thùng (không có dòng gốc nào phải giữ ĐVT). Đơn giá theo ĐVT kho, lấy lần lượt:
+
+      `giu`  đơn giá đang có trên bản nháp (người soát sửa trên Desk rồi thì GIỮ khi cập nhật);
+      `gia`  lần bán gần nhất cho khách (`_gia_ban_gan_nhat`);
+      không có cả hai thì để trống — ERPNext lấy theo bảng giá của khách lúc dựng.
+    """
+    giu = giu or {}
+    out = []
+    for it, sl in (can or {}).items():
+        d = {"item_code": it, "qty": -flt(sl), "stock_qty": -flt(sl), "conversion_factor": 1.0}
+        if dvt.get(it):
+            d["uom"] = d["stock_uom"] = dvt[it]
+        if it in giu:
+            d["rate"] = d["price_list_rate"] = flt(giu[it])
+        elif (gia.get(it) or {}).get("rate"):
+            d["rate"] = d["price_list_rate"] = flt(gia[it]["rate"])
+        if tk:
+            d["income_account"] = tk
+        out.append(d)
+    return out
+
+
+def _dung_tra_tu_do(doc, can, posting_date=None):
+    """(Sales Invoice trả về KHÔNG theo hóa đơn gốc — chưa insert, bảng giá đã dùng, TK 5213)."""
+    gia = _gia_ban_gan_nhat(doc.company, doc.customer, doc.shipping_address_name, list(can))
+    tk = _tk_5213(doc.company)
+    si = frappe.new_doc("Sales Invoice")
+    si.company = doc.company
+    si.customer = doc.customer
+    si.is_return = 1
+    si.is_debit_note = 0
+    si.ignore_pricing_rule = 1  # như make_return_doc: đơn giá đặt sẵn, quy tắc giá không được đè
+    si.update_stock = 0  # quy ước Client Script: hàng vào kho bằng phiếu kho riêng
+    si.set_posting_time = 1
+    si.posting_date = posting_date or nowdate()
+    if doc.shipping_address_name:
+        si.shipping_address_name = doc.shipping_address_name
+    si.taxes_and_charges = _mau_thue(doc.company, gia)
+    if frappe.db.exists("Print Heading", "Credit Note"):
+        si.select_print_heading = "Credit Note"
+    si.set(SI_FIELD, doc.name)
+    si.remarks = _("Trả hàng — thu hồi {0} (không theo hóa đơn gốc)").format(doc.name)
+    for d in _dong_tra_tu_do(can, {r.item_code: r.stock_uom for r in doc.items or []}, gia, tk):
+        si.append("items", d)
+    # Khách (địa chỉ, TK công nợ), dòng (tên, TK, thuế từng mặt hàng, giá bảng cho mã chưa có giá)
+    # và dòng THUẾ chép từ mẫu: chỉ bản `for_validate=False` chép dòng thuế, insert() chạy bản kia.
+    si.set_missing_values()
+    return si, gia, tk
+
+
 @frappe.whitelist()
-def tao_hoa_don_tra(name, sales_invoice, posting_date=None):
-    """Lập hóa đơn trả về NHÁP trả cho `sales_invoice`, phần đã kiểm mà chưa có phiếu trả."""
+def tao_hoa_don_tra(name, sales_invoice=None, posting_date=None):
+    """Lập hóa đơn trả về NHÁP cho phần đã kiểm mà chưa có phiếu trả.
+
+    Không truyền `sales_invoice` (mặc định): một tờ KHÔNG theo hóa đơn gốc cho TOÀN BỘ phần đó —
+    xem docstring đầu file. Có `sales_invoice`: trả theo đúng hóa đơn gốc đó, phần tờ đó nhận được.
+    """
     guard_sales_any()
     doc = frappe.get_doc(DT, name)
     if not cint(doc.da_chot):
@@ -928,15 +1142,24 @@ def tao_hoa_don_tra(name, sales_invoice, posting_date=None):
         frappe.throw(_("KTT đã kết luận lô này không lập hóa đơn trả về."))
     if not frappe.get_meta("Sales Invoice").has_field(SI_FIELD):
         frappe.throw(_("Site chưa có ô {0} trên Sales Invoice — quản trị chạy bench migrate.").format(SI_FIELD))
+    can = con_can(so_can(doc), hoa_don_tra(name))
+    if not can:
+        frappe.throw(_("Số đã kiểm đã có đủ hóa đơn trả về."))
+    if not sales_invoice:
+        si, gia, tk = _dung_tra_tu_do(doc, can, posting_date)
+        si.insert()  # KHÔNG ignore_permissions: quyền tạo Sales Invoice của chính người bấm
+        return {
+            "name": si.name, "route": f"/desk/sales-invoice/{quote(si.name)}", "so_dong": len(si.items),
+            "tu_do": True, "gia_ban_gan_nhat": sum(1 for it in can if it in gia),
+            "thieu_gia": [d.item_code for d in si.items if not flt(d.rate)],
+            "tk_5213": tk or "", "thu_hoi": get_thu_hoi(name),
+        }
     goc = frappe.db.get_value("Sales Invoice", sales_invoice,
                               ["docstatus", "is_return", "customer", "company"], as_dict=True)
     if not goc or cint(goc.docstatus) != 1 or cint(goc.is_return):
         frappe.throw(_("{0} không phải hóa đơn bán đã ghi sổ.").format(sales_invoice))
     if goc.customer != doc.customer or goc.company != doc.company:
         frappe.throw(_("Hóa đơn {0} không cùng khách / công ty với lô {1}.").format(sales_invoice, name))
-    can = con_can(so_can(doc), hoa_don_tra(name))
-    if not can:
-        frappe.throw(_("Số đã kiểm đã có đủ hóa đơn trả về."))
     plan, _thieu, _rows = _ke_hoach_nhieu([sales_invoice], can).get(sales_invoice, ([], {}, []))
     if not plan:
         frappe.throw(_("Hóa đơn {0} không còn mặt hàng nào trả được cho lô này (đã trả hết, hoặc không "
@@ -979,8 +1202,10 @@ def _hoa_don_nhap_cua(name, sales_invoice):
 def cap_nhat_hoa_don(name):
     """Chia LẠI các hóa đơn trả về NHÁP theo số đã kiểm hiện tại (sau khi mở lại + sửa).
 
-    Bản đã ghi sổ giữ nguyên và được trừ trước; các bản nháp chia phần còn lại theo thứ tự
-    lập. Bản nháp không còn gì để trả thì XÓA — nó là bản app dựng, chưa có số, chưa vào sổ.
+    Bản đã ghi sổ giữ nguyên và được trừ trước. Rồi tới bản nháp NỐI hóa đơn gốc (theo thứ tự
+    lập — bị trần từng dòng gốc chặn), cuối cùng bản nháp KHÔNG theo hóa đơn gốc nhận hết phần
+    còn lại, GIỮ đơn giá người soát đã sửa trên Desk. Làm ngược thì bản tự do nuốt hết, bản nối
+    bị xóa oan. Bản nháp không còn gì để trả thì XÓA — bản app dựng, chưa có số, chưa vào sổ.
     """
     guard_sales_any()
     doc = frappe.get_doc(DT, name)
@@ -995,8 +1220,26 @@ def cap_nhat_hoa_don(name):
     ket_qua = []
     from erpnext.controllers.sales_and_purchase_return import make_return_doc
 
-    for h in nhap:
-        si = _hoa_don_nhap_cua(name, h["name"])
+    ds = [_hoa_don_nhap_cua(name, h["name"]) for h in nhap]
+    ds.sort(key=lambda x: 0 if x.return_against else 1)  # sort ổn định: giữ thứ tự lập trong nhóm
+    dvt = {r.item_code: r.stock_uom for r in doc.items or []}
+    for si in ds:
+        if not si.return_against:
+            if not can:
+                frappe.delete_doc("Sales Invoice", si.name, ignore_permissions=True)
+                ket_qua.append({"name": si.name, "xoa": True})
+                continue
+            giu = {r.item_code: flt(r.rate) / (flt(r.conversion_factor) or 1.0) for r in si.items if r.item_code}
+            ma_moi = [it for it in can if it not in giu]
+            gia = _gia_ban_gan_nhat(doc.company, doc.customer, doc.shipping_address_name, ma_moi) if ma_moi else {}
+            si.set("items", [])
+            for d in _dong_tra_tu_do(can, dvt, gia, tk, giu):
+                si.append("items", d)
+            si.set_missing_values()  # mã mới thêm: tên, TK, thuế từng mặt hàng, giá bảng
+            si.save()
+            ket_qua.append({"name": si.name, "so_dong": len(si.items), "tu_do": True})
+            can = {}
+            continue
         plan = []
         if can:
             plan, _t, _r = _ke_hoach_nhieu([si.return_against], can, bo_qua=si.name).get(
@@ -1035,14 +1278,15 @@ def xoa_hoa_don_nhap(name, sales_invoice):
 
 @frappe.whitelist(methods=["GET"])
 def xem_dinh_kem(file):
-    """Nội dung file đính kèm của một lô thu hồi.
+    """Nội dung file đính kèm của một lô thu hồi — của LÔ, hoặc ảnh phiếu của PHIẾU KIỂM.
 
-    File lưu PRIVATE bên vanchuyen, và kế toán không có quyền DocType `Lo Thu Hoi` nên
-    không mở thẳng được — guard kế toán ở đây thay cho DocPerm. Chỉ file gắn vào lô.
+    File lô lưu PRIVATE bên vanchuyen, và kế toán không có quyền DocType `Lo Thu Hoi` nên
+    không mở thẳng được — guard kế toán ở đây thay cho DocPerm. Chỉ file gắn vào lô hoặc
+    phiếu kiểm; file gắn chứng từ khác thì không (proxy này không phải cửa sau vào /private).
     """
     guard_sales_any()
     f = frappe.db.get_value("File", file, ["attached_to_doctype", "file_name"], as_dict=True)
-    if not f or f.attached_to_doctype != LO:
+    if not f or f.attached_to_doctype not in (LO, DT):
         frappe.throw(_("Không tìm thấy file."), frappe.DoesNotExistError)
     frappe.local.response.filename = f.file_name or "dinh-kem"
     frappe.local.response.filecontent = frappe.get_doc("File", file).get_content()

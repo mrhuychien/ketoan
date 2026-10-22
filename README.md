@@ -41,12 +41,23 @@ chạy 3 chặng vận chuyển *Tạo yêu cầu → Đã lấy hàng → Đã 
   **Đếm mù**: màn kiểm hàng không nhận số siêu thị khai (cả mail dán nguyên văn — trừ phiếu
   *theo phiếu* của lô hủy tại chỗ, xem dưới); bảng so khai / kiểm (lô cũ có bảng hàng khai)
   chỉ hiện sau khi chốt.
-- **Hóa đơn trả về**: sau khi chốt, chọn hóa đơn gốc trong danh sách MỌI hóa đơn đã ghi sổ
-  của đúng khách + đúng điểm giao của lô (đủ HĐĐT, PO, địa chỉ, số tiền, còn nợ, đã trả về;
-  tìm theo số HĐ / PO / HĐĐT; tờ không còn gì để trả vẫn hiện nhưng khóa nút; "Xem mọi điểm
-  của khách" khi hàng giao điểm khác) → lập **Sales Invoice trả về (nháp)** bằng `make_return_doc`, `update_stock = 0`,
-  không vượt số còn được trả của từng dòng gốc; "Cập nhật" dựng lại các bản nháp theo
-  số kiểm mới, xóa được bản nháp. Ghi sổ (submit) làm trên Desk.
+- **Lô có phiếu trả về đi kèm hàng — ghi tay, chụp, nhập sau**: người kiểm ghi số đếm thẳng lên
+  phiếu rồi bấm **📷 Chụp phiếu** ở màn kiểm hàng (mở camera, ảnh nén còn cạnh dài 2400px rồi
+  gửi; xóa được ảnh chụp nhầm). Ảnh gắn vào phiếu kiểm (private, xem qua proxy có guard; chỉ
+  nhận ảnh thật). Tab Thu hồi có pill **📷 Chờ nhập số**; ngồi máy mở **Nhập số theo ảnh phiếu**:
+  ảnh lớn bên trái (xoay / phóng to), ô nhập bên phải, gõ phím thật (Enter ở ô tìm chọn mã đầu;
+  bàn số nhận số, ←/→ đổi Thùng/Hộp, Enter là lưu), rồi chốt.
+- **Hóa đơn trả về — không cần chọn hóa đơn gốc**: sau khi chốt, bấm **Lập hóa đơn trả về** →
+  một **Sales Invoice trả về (nháp)** cho toàn bộ số còn lại, mỗi mã một dòng ĐVT kho, không
+  `return_against`; đơn giá = lần bán gần nhất cho đúng khách (ưu tiên đúng điểm giao), mã chưa
+  từng bán thì theo bảng giá (màn hình báo mã nào); thuế theo mẫu của hóa đơn vừa cho giá;
+  `update_stock = 0`, TK 5213. Tờ này ghi giảm công nợ khách mà KHÔNG trừ vào hóa đơn bán nào
+  (`mt._returns_join` / sổ Hàng hoàn chỉ nhận phiếu trả có hóa đơn gốc) — cần thì đối trừ trên
+  ERPNext. **Tùy chọn "Hoặc trả theo hóa đơn gốc…"** vẫn còn: chọn trong MỌI hóa đơn đã ghi sổ
+  của đúng khách + đúng điểm giao (đủ HĐĐT, PO, địa chỉ, số tiền, còn nợ, đã trả về; tìm theo số
+  HĐ / PO / HĐĐT; "Xem mọi điểm của khách") → `make_return_doc`, không vượt số còn được trả của
+  từng dòng gốc. "Cập nhật" dựng lại các bản nháp theo số kiểm mới (bản nối hóa đơn gốc chia
+  trước, bản tự do nhận phần còn lại và giữ giá đã sửa), xóa được bản nháp. Ghi sổ trên Desk.
 - **Trạng thái tự đi**: hook `Sales Invoice` (insert/update/submit/cancel/trash) tính lại
   chặng của phiếu kiểm — đủ số và mọi hóa đơn đã ghi sổ thì **Xong**. Không lập hóa đơn
   (hàng hủy, đổi hàng…) thì chỉ Kế toán trưởng kết luận được, có ghi lý do.

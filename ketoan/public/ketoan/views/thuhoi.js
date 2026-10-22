@@ -1,9 +1,10 @@
 // views/thuhoi.js — THEO DÕI THU HỒI (#/thu-hoi) + một lô (#/thu-hoi/:id).
 //
 // Lô thu hồi được TẠO bên app vận chuyển (siêu thị gọi trả → xe lấy → nhận về kho).
-// Kế toán tiếp nối từ "Đã nhận hàng": kiểm hàng (#/kiem-hang/:id, màn điện thoại) →
-// chốt → lập hóa đơn trả về NHÁP từ hóa đơn gốc → ghi sổ trên Desk. Màn này KHÔNG
-// sửa gì của bên vận chuyển; hồ sơ lô hiện ở đây là bản đọc sống.
+// Kế toán tiếp nối từ "Đã nhận hàng": kiểm hàng (#/kiem-hang/:id, màn điện thoại — hoặc
+// ghi số lên phiếu trả về rồi chụp, ngồi máy nhập sau: "📷 Chờ nhập số") → chốt → lập hóa
+// đơn trả về NHÁP (mặc định KHÔNG cần chọn hóa đơn gốc; theo hóa đơn gốc là tùy chọn) →
+// ghi sổ trên Desk. Màn này KHÔNG sửa gì của bên vận chuyển; hồ sơ lô là bản đọc sống.
 import { api } from "../lib/api.js";
 import { html, raw, setHTML } from "../lib/dom.js";
 import { formatDate, formatNumber, formatVND } from "../lib/format.js";
@@ -22,6 +23,8 @@ const DA_HUY = "Đã hủy";
 const HUY_TAI_CHO = "Hủy tại chỗ";
 const BO_QUA_HTC = new Set(["Đã lấy hàng", "Đã nhận hàng", "Đang kiểm"]);
 const htcTag = () => html`<span class="kt-badge kt-th-htc">🗑 Hủy tại chỗ</span>`;
+// Phiếu kiểm chưa chốt đã có ảnh phiếu trả về: người kiểm ghi số tay lên phiếu, còn việc ngồi máy nhập.
+const choNhapTag = () => html`<span class="kt-badge kt-th-cho-nhap">📷 Chờ nhập số</span>`;
 
 const fmtSl = (n) => new Intl.NumberFormat("vi-VN", { maximumFractionDigits: 3 }).format(Number(n) || 0);
 
@@ -117,8 +120,10 @@ async function renderList(container, query) {
     const huy = c[DA_HUY] || 0;
     const tong = Object.values(c).reduce((a, n) => a + (Number(n) || 0), 0); // mọi chặng server đếm
     const pill = (key, label, n, tone = "") => html`<button type="button" class="kt-th-pill${tone ? " kt-th-pill--" + tone : ""}${S.chang === key ? " is-on" : ""}" data-f="${key}">${label} <b>${n}</b></button>`;
+    const cho = Number(S.data.cho_nhap) || 0;
     setHTML(container.querySelector("#th-pills"), html`
       ${pill("dang_mo", "Đang mở", tong - (c["Xong"] || 0) - huy)}
+      ${cho || S.chang === "cho_nhap" ? pill("cho_nhap", "📷 Chờ nhập số", cho, "viec") : ""}
       ${ds.map((k, i) => pill(k, k, c[k] || 0, i < VC ? "vc" : (k === "Đã nhận hàng" || k === "Đã kiểm hàng") ? "viec" : ""))}
       ${pill(DA_HUY, DA_HUY, huy)}
       ${pill("tat_ca", "Tất cả", tong)}`);
@@ -136,7 +141,7 @@ async function renderList(container, query) {
     }
     const rows = d.rows || [];
     if (!rows.length) {
-      setHTML(body, html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có lô nào${S.chang === "dang_mo" ? " đang mở" : ""}.</p></div>`);
+      setHTML(body, html`<div class="kt-empty"><i class="fas fa-inbox"></i><p>Không có lô nào${S.chang === "dang_mo" ? " đang mở" : S.chang === "cho_nhap" ? " chờ nhập số theo ảnh" : ""}.</p></div>`);
       return;
     }
     const ds = d.chang_list || CHANG_FB;
@@ -152,11 +157,11 @@ async function renderList(container, query) {
           <td>${r.don_vi_thu_hoi || html`<span class="kt-sub">chưa có đơn vị thu hồi</span>`}${r.ma_van_don ? html`<div class="kt-sub">VĐ ${r.ma_van_don}</div>` : ""}<div class="kt-sub">${r.nhan_luc ? "về kho " + fmtLuc(r.nhan_luc) : r.lay_luc ? "lấy " + fmtLuc(r.lay_luc) : r.ngay_hen_lay ? "thu " + formatDate(r.ngay_hen_lay) : ""}</div></td>
           <td class="num">${kiem(r)}</td>
           <td>${hd(r)}</td>
-          <td>${badge(r.chang, ds)}${r.trang_thai === HUY_TAI_CHO ? htcTag() : ""}${steps(r.chang, ds, r.trang_thai === HUY_TAI_CHO)}${huyDong(r)}</td>
+          <td>${badge(r.chang, ds)}${r.trang_thai === HUY_TAI_CHO ? htcTag() : ""}${r.cho_nhap ? choNhapTag() : ""}${steps(r.chang, ds, r.trang_thai === HUY_TAI_CHO)}${huyDong(r)}</td>
         </tr>`)}</tbody>
       </table></div>
       <div class="kt-th-cards kt-th-mob">${rows.map((r) => html`<a class="kt-th-card" href="#/thu-hoi/${encodeURIComponent(r.name)}">
-        <div class="kt-th-card-head"><b>${r.ten_diem || r.customer_name}</b><span>${badge(r.chang, ds)}${r.trang_thai === HUY_TAI_CHO ? htcTag() : ""}</span></div>
+        <div class="kt-th-card-head"><b>${r.ten_diem || r.customer_name}</b><span>${badge(r.chang, ds)}${r.trang_thai === HUY_TAI_CHO ? htcTag() : ""}${r.cho_nhap ? choNhapTag() : ""}</span></div>
         <div class="kt-sub">${r.customer_name} · ${r.name}${r.so_phieu_sieu_thi ? " · phiếu " + r.so_phieu_sieu_thi : ""}</div>
         ${steps(r.chang, ds, r.trang_thai === HUY_TAI_CHO)}${huyDong(r)}
         <div class="kt-th-card-meta">📅 ${formatDate(r.ngay_yeu_cau)}${r.tuoi > 0 ? ` · ${r.tuoi} ngày` : ""}${r.kiem_so_ma ? ` · đã kiểm ${fmtSl(r.kiem_sl)}` : ""}${r.so_hd ? ` · ${r.so_hd} HĐ trả về` : ""}</div>
@@ -235,7 +240,7 @@ async function renderLo(container, name) {
         </div>
 
         <div class="kt-card">
-          <div class="kt-card-head"><b><i class="fas ${htc ? "fa-file-lines" : "fa-barcode"}"></i> ${htc ? "Nhập theo phiếu hủy" : "Kiểm hàng"}</b>${ph ? html`<span class="kt-sub">${ph.da_chot ? `đã chốt ${fmtLuc(ph.chot_luc)} · ${ph.chot_boi || ""}` : tp ? "đang chép theo phiếu" : "đang kiểm"}</span>` : ""}</div>
+          <div class="kt-card-head"><b><i class="fas ${htc ? "fa-file-lines" : "fa-barcode"}"></i> ${htc ? "Nhập theo phiếu hủy" : "Kiểm hàng"}</b>${ph ? html`<span class="kt-sub">${ph.da_chot ? `đã chốt ${fmtLuc(ph.chot_luc)} · ${ph.chot_boi || ""}` : tp ? "đang chép theo phiếu" : (D.anh_phieu || []).length ? "chờ nhập số theo ảnh phiếu" : "đang kiểm"}</span>` : ""}</div>
           <div class="kt-th-pad">${kiemBlock(lo, ph, f)}</div>
         </div>
       </div>
@@ -264,17 +269,23 @@ async function renderLo(container, name) {
       }
       if (f.bat_dau) {
         return html`<p>Hàng đã về kho. Mở phiếu kiểm rồi đếm trên điện thoại: quét mã vạch hoặc tìm mã, nhập số thùng / hộp.</p>
+          <p class="kt-sub">Lô có phiếu trả về đi kèm? Ghi số đếm thẳng lên phiếu rồi bấm <b>📷 Chụp phiếu</b> ở màn kiểm hàng — ngồi máy nhập số theo ảnh sau.</p>
           <button type="button" class="kt-btn kt-btn--primary kt-th-big" id="th-batdau"><i class="fas fa-barcode"></i> Bắt đầu kiểm hàng</button>`;
       }
       if (lo.trang_thai === DA_HUY) return html`<div class="kt-sub">Lô đã hủy bên vận chuyển — không kiểm hàng.</div>`;
       return html`<div class="kt-alert kt-alert--info">Lô đang ở <b>${lo.trang_thai}</b> bên vận chuyển. Kế toán tiếp nối khi hàng đã về kho — điều phối bấm "Đã nhận hàng" trên app vận chuyển.</div>`;
     }
+    const anh = D.anh_phieu || [];
     return html`
       <div class="kt-th-sum"><div><div class="kt-sub">${ph.theo_phieu ? "Theo phiếu hủy" : "Đã kiểm"}</div><div class="kt-th-sum-so">${fmtSl(ph.tong_sl)}</div><div class="kt-sub">${ph.so_ma || 0} mã · ĐVT kho</div></div>
         ${ph.da_chot && D.co_khai ? html`<div><div class="kt-sub">Siêu thị khai</div><div class="kt-th-sum-so kt-th-sum-so--nhat">${fmtSl(D.tong_khai)}</div></div>` : ""}</div>
+      ${anh.length ? html`<div class="kt-th-anh-lo">
+        <div><i class="fas fa-camera"></i> <b>${anh.length} ảnh phiếu trả về</b>${ph.da_chot ? "" : html` — ${choNhapTag()} <span class="kt-sub">người kiểm đã ghi số lên phiếu; mở màn nhập: ảnh hiện cạnh ô nhập</span>`}</div>
+        <div class="kt-th-files">${anh.map((x) => html`<a class="kt-th-file" href="${x.url}" target="_blank" rel="noopener"><img src="${x.url}" alt="" loading="lazy"><span>${fmtLuc(x.creation)}${x.boi ? " · " + x.boi : ""}</span></a>`)}</div>
+      </div>` : ""}
       ${ph.khong_lap_hd ? html`<div class="kt-alert kt-alert--warning">KTT kết luận <b>không lập hóa đơn trả về</b>: ${ph.ly_do_khong_lap} — ${ph.ket_luan_boi || ""}</div>` : ""}
       <div class="kt-th-actions">
-        <a class="kt-btn kt-btn--primary" href="#/kiem-hang/${encodeURIComponent(ph.name)}"><i class="fas fa-mobile-screen"></i> ${ph.da_chot ? (ph.theo_phieu ? "Xem phiếu đã chép" : "Xem phiếu kiểm") : ph.theo_phieu ? "Mở màn nhập theo phiếu" : "Mở màn kiểm hàng"}</a>
+        <a class="kt-btn kt-btn--primary" href="#/kiem-hang/${encodeURIComponent(ph.name)}"><i class="fas ${!ph.da_chot && anh.length ? "fa-keyboard" : "fa-mobile-screen"}"></i> ${ph.da_chot ? (ph.theo_phieu ? "Xem phiếu đã chép" : "Xem phiếu kiểm") : ph.theo_phieu ? "Mở màn nhập theo phiếu" : anh.length ? "Nhập số theo ảnh phiếu" : "Mở màn kiểm hàng"}</a>
         ${f.chot ? html`<button type="button" class="kt-btn kt-btn--success" id="th-chot"><i class="fas fa-lock"></i> ${ph.theo_phieu ? "Chốt theo phiếu" : "Chốt phiếu"}</button>` : ""}
         ${f.mo_lai ? html`<button type="button" class="kt-btn kt-btn--outline" id="th-molai"><i class="fas fa-lock-open"></i> Mở lại để sửa</button>` : ""}
         ${f.ket_luan ? html`<button type="button" class="kt-btn kt-btn--outline" id="th-ketluan"><i class="fas fa-user-tie"></i> Không lập hóa đơn trả về…</button>` : ""}
@@ -331,10 +342,10 @@ async function renderLo(container, name) {
         <div class="kt-th-hd-head">
           <a href="${h.route}" target="_blank" rel="noopener"><b>${h.name}</b></a>
           <span class="kt-badge kt-badge--${h.docstatus === 1 ? "green" : "yellow"}">${h.docstatus === 1 ? "Đã ghi sổ" : "Nháp"}</span>
-          <span class="kt-sub">trả cho ${h.return_against} · ${formatDate(h.posting_date)}</span>
+          <span class="kt-sub">${h.tu_do ? "không theo hóa đơn gốc" : `trả cho ${h.return_against}`} · ${formatDate(h.posting_date)}</span>
           <b class="kt-th-hd-tien">${formatVND(h.tien)}</b>
         </div>
-        <div class="kt-sub">${h.items.map((i) => `${i.item_name || i.item_code}: ${fmtSl(i.qty)} ${i.uom || ""}${i.noi ? "" : " (không nối dòng gốc)"}`).join(" · ")}</div>
+        <div class="kt-sub">${h.items.map((i) => `${i.item_name || i.item_code}: ${fmtSl(i.qty)} ${i.uom || ""}${i.noi || h.tu_do ? "" : " (không nối dòng gốc)"}`).join(" · ")}</div>
         ${h.misa_no ? html`<div class="kt-sub">Số HĐĐT: ${h.misa_no}</div>` : ""}
         <div class="kt-th-actions">
           <a class="kt-btn kt-btn--outline kt-btn--sm" href="${h.route}" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> ${h.docstatus === 1 ? "Mở trên Desk" : "Soát & ghi sổ trên Desk"}</a>
@@ -344,10 +355,13 @@ async function renderLo(container, name) {
       ${thieuThua.length && hd.length ? html`<div class="kt-alert kt-alert--warning kt-th-mt">Hóa đơn trả về chưa khớp số đã kiểm:
         ${thieuThua.map(([it, d]) => `${it} ${d > 0 ? "thừa" : "thiếu"} ${fmtSl(Math.abs(d))}`).join(" · ")}.
         ${f.cap_nhat ? "Bấm “Cập nhật hóa đơn trả về” để chia lại các bản nháp." : ""}</div>` : ""}
-      ${hd.some((h) => h.items.some((i) => !i.noi)) ? html`<div class="kt-sub kt-th-mt">Dòng "không nối dòng gốc": phần lẻ hộp không biểu diễn đúng được theo ĐVT của dòng gốc (thùng). Trên Desk, ERPNext sẽ cảnh báo "Returned Item … does not exist" — đó là cảnh báo, không chặn; app đã tự giữ trần trả.</div>` : ""}
+      ${hd.some((h) => !h.tu_do && h.items.some((i) => !i.noi)) ? html`<div class="kt-sub kt-th-mt">Dòng "không nối dòng gốc": phần lẻ hộp không biểu diễn đúng được theo ĐVT của dòng gốc (thùng). Trên Desk, ERPNext sẽ cảnh báo "Returned Item … does not exist" — đó là cảnh báo, không chặn; app đã tự giữ trần trả.</div>` : ""}
+      ${hd.some((h) => h.tu_do && h.docstatus === 0) ? html`<div class="kt-sub kt-th-mt">Hóa đơn trả về <b>không theo hóa đơn gốc</b>: đơn giá lấy theo lần bán gần nhất cho khách (ưu tiên đúng điểm giao), mã chưa từng bán thì theo bảng giá — soát trên Desk trước khi ghi sổ. Tờ này ghi giảm công nợ của khách, không trừ vào hóa đơn bán nào.</div>` : ""}
       ${f.lap_hd ? html`<div class="kt-th-can kt-th-mt">
         <div><b>Còn cần lập hóa đơn trả về:</b> ${con.map(([it, q]) => `${it}: ${fmtSl(q)}`).join(" · ")}</div>
-        <button type="button" class="kt-btn kt-btn--primary" id="th-ungvien"><i class="fas fa-magnifying-glass"></i> Chọn hóa đơn gốc để lập hóa đơn trả về</button>
+        <button type="button" class="kt-btn kt-btn--primary" id="th-lap"><i class="fas fa-file-invoice"></i> Lập hóa đơn trả về</button>
+        <div class="kt-sub">Không cần chọn hóa đơn gốc — một tờ cho toàn bộ số còn lại, đơn giá theo lần bán gần nhất cho khách.
+          <button type="button" class="kt-th-link" id="th-ungvien">Hoặc trả theo hóa đơn gốc…</button></div>
         <div id="th-uv"></div>
       </div>` : ""}
       ${!f.lap_hd && !thieuThua.length && hd.length ? html`<div class="kt-sub kt-th-mt">${hd.every((h) => h.docstatus === 1) ? "Đủ hóa đơn trả về, đã ghi sổ hết — lô xong." : "Đủ hóa đơn trả về. Mở từng bản nháp trên Desk để soát rồi ghi sổ."}</div>` : ""}`;
@@ -388,6 +402,7 @@ async function renderLo(container, name) {
     });
     if ($("#th-ketluan")) $("#th-ketluan").addEventListener("click", () => ketLuan());
     if ($("#th-capnhat")) $("#th-capnhat").addEventListener("click", (e) => act(e.currentTarget, () => api.thCapNhatHd(name), "Đã cập nhật hóa đơn trả về nháp"));
+    if ($("#th-lap")) $("#th-lap").addEventListener("click", (e) => lapTuDo(e.currentTarget));
     if ($("#th-ungvien")) $("#th-ungvien").addEventListener("click", (e) => { UV.d = null; ungVien(e.currentTarget); });
     container.querySelectorAll("[data-xoahd]").forEach((b) => b.addEventListener("click", () => {
       if (!confirm(`Xóa hóa đơn trả về NHÁP ${b.dataset.xoahd}?`)) return;
@@ -397,6 +412,21 @@ async function renderLo(container, name) {
     if (gc) gc.addEventListener("change", async () => {
       try { await api.thGhiChu(name, gc.value); toast("Đã lưu ghi chú", "success"); } catch (e) { toast(e.message, "error"); }
     });
+  }
+
+  // Một chạm: hóa đơn trả về KHÔNG theo hóa đơn gốc cho toàn bộ số còn lại (server lấy giá bán gần nhất).
+  async function lapTuDo(btn) {
+    btn.disabled = true;
+    try {
+      const r = await api.thTaoHd(name);
+      const thieu = r.thieu_gia || [];
+      toast(`Đã lập ${r.name} (nháp, ${r.so_dong} dòng)${thieu.length ? ` — chưa có đơn giá: ${thieu.join(", ")}, điền trên Desk` : ""}${
+        r.tk_5213 ? "" : " — chưa thấy TK 5213, dòng giữ TK doanh thu mặc định"}`, thieu.length || !r.tk_5213 ? "warning" : "success");
+      await reload(r.thu_hoi);
+    } catch (e) {
+      btn.disabled = false;
+      toast(e.message, "error");
+    }
   }
 
   // Ứng viên hóa đơn gốc: MỌI hóa đơn đã ghi sổ của đúng khách + đúng điểm giao (50 tờ một
@@ -472,7 +502,7 @@ async function renderLo(container, name) {
         <div class="kt-sub">"Nhận được" = phần tờ đó còn trả được trong số đang cần trả. Nút khóa là tờ đó không còn gì để trả.</div>`
       : html`<div class="kt-alert kt-alert--warning">${UV.tim ? `Không có hóa đơn nào khớp "${UV.tim}".` : UV.moi_diem
           ? "Khách này chưa có hóa đơn bán nào đã ghi sổ." : "Chưa có hóa đơn bán nào đã ghi sổ giao điểm này."}${
-          UV.moi_diem ? "" : " Thử “Xem mọi điểm của khách”."} Hàng không thuộc hóa đơn nào thì nhờ KTT kết luận "không lập hóa đơn trả về".</div>`}
+          UV.moi_diem ? "" : " Thử “Xem mọi điểm của khách”."} Không tìm ra hóa đơn gốc thì bấm “Lập hóa đơn trả về” — không cần hóa đơn gốc.</div>`}
     </div>`);
     const tim = box.querySelector("#uv-tim");
     if (dangGo) { tim.focus(); tim.setSelectionRange(tim.value.length, tim.value.length); }
@@ -498,7 +528,7 @@ async function renderLo(container, name) {
 
   function ketLuan() {
     const m = openModal({ title: "Không lập hóa đơn trả về", icon: "fa-user-tie", body: html`
-      <p>Chỉ dùng khi lô này thật sự không ghi giảm công nợ: đổi hàng ngang giá, hàng không thuộc hóa đơn nào, hàng không về... Lý do lưu lại kèm tên người kết luận.</p>
+      <p>Chỉ dùng khi lô này thật sự không ghi giảm công nợ: đổi hàng ngang giá, hàng không về... Lý do lưu lại kèm tên người kết luận.</p>
       <div class="kt-field"><label class="kt-label">Lý do *</label><textarea class="kt-textarea" id="kl-lydo" rows="3"></textarea></div>
       <button type="button" class="kt-btn kt-btn--primary" id="kl-ok">Kết luận</button>` });
     m.body.querySelector("#kl-ok").addEventListener("click", async (e) => {
