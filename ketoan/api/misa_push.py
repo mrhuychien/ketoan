@@ -33,6 +33,11 @@ GOI_ITEMS = {"BX", "CĐ", "BXRM", "BXSD", "BXMC", "BXCR"}
 PO_IN_NAME = {"Mega Market", "Winmart", "ST KingFood Mart"}
 PO_COMMA = {"BigC"}
 
+# Khách hàng ghi số PO lên TỪNG DÒNG HÀNG: "<tên hàng>-PO<số PO>", thay cho
+# dòng ghi chú riêng. Khớp theo `_po_tung_dong` — không phân biệt hoa/thường,
+# trên cả mã khách lẫn tên khách.
+PO_EACH_LINE = ("ORION VINA",)
+
 AMOUNT_GUARD = 1.0  # đồng — lệch quá mức này thì DỪNG, không đẩy
 PRICE_PRECISION = 2  # số lẻ của đơn giá gửi MISA
 
@@ -185,6 +190,23 @@ def _po_line(po_no, ref_id, idx):
     }
 
 
+def _chuan_ten(s):
+    return " ".join(cstr(s).upper().split())
+
+
+def _po_tung_dong(si):
+    """Khách hàng này có ghi số PO lên từng dòng hàng không.
+
+    So cả mã khách (`customer`) lẫn tên khách (`customer_name`), không phân biệt
+    hoa/thường hay khoảng trắng thừa: mã Customer trên site có thể là
+    "ORION VINA", cũng có thể là tên pháp nhân đầy đủ chứa cụm đó. Khớp sót là
+    hóa đơn phát hành THIẾU số PO — mà hóa đơn điện tử đã phát hành thì không
+    sửa được, chỉ làm hóa đơn thay thế.
+    """
+    ten = [t for t in (_chuan_ten(si.get("customer")), _chuan_ten(si.get("customer_name"))) if t]
+    return any(k in t for k in PO_EACH_LINE for t in ten)
+
+
 def build_payload(si, settings):
     """Dựng object hóa đơn gửi MISA từ một Sales Invoice đã ghi sổ."""
     ref_id = (si.get("custom_misa_ref_id") or "").strip()
@@ -251,7 +273,24 @@ def build_payload(si, settings):
 
     from ketoan.api.mt import SI_PO_FIELD
     po_no = (si.get(SI_PO_FIELD) or "").strip()
-    if po_no and si.customer not in PO_COMMA and si.customer not in PO_IN_NAME:
+    if _po_tung_dong(si):
+        # Thiếu PO thì DỪNG, không phát hành: khách này đòi số PO trên từng dòng,
+        # và hóa đơn đã phát hành thì không thêm vào được — chỉ thay thế.
+        if not po_no:
+            frappe.throw(_(
+                "Không đẩy hóa đơn {0}: khách {1} ghi số PO trên TỪNG DÒNG HÀNG nhưng "
+                "hóa đơn chưa có Số PO.\n\n"
+                "Điền Số PO rồi xuất lại. Nếu ô đã khóa vì hóa đơn đã ghi sổ thì hủy, "
+                "điền Số PO trên bản sửa đổi, ghi sổ lại — hóa đơn CHƯA lên MISA nên hủy "
+                "lúc này không sinh hóa đơn thứ hai."
+            ).format(si.name, si.get("customer_name") or si.customer))
+        hau_to = f"-PO{po_no}"
+        for l in lines:
+            mo_ta = cstr(l.get("Description"))
+            # Tên hàng đã mang sẵn đúng hậu tố thì không nối thêm lần nữa.
+            if not mo_ta.endswith(hau_to):
+                l["Description"] = mo_ta + hau_to
+    elif po_no and si.customer not in PO_COMMA and si.customer not in PO_IN_NAME:
         lines.append(_po_line(po_no, ref_id, len(lines) + 1))
 
     buyer = (si.get("custom_tên_người_mua") or " ")
