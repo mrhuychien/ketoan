@@ -3,7 +3,8 @@
 """Kiểm luật "số PO trên TỪNG DÒNG HÀNG" khi xuất hóa đơn MISA (ORION VINA).
 
 Yêu cầu: khách hàng ORION VINA — mỗi dòng sản phẩm trên hóa đơn MISA mang
-thêm "-PO" + số PO, tức `Description` = "<tên hàng>-PO<số PO>".
+thêm "-PO" + số PO, tức `Description` = "<tên hàng>-PO <số PO>" — CÓ dấu cách
+giữa "PO" và số (bản đầu viết liền, kế toán báo khó đọc).
 
 Bộ kiểm dựng PAYLOAD THẬT bằng `misa_push.build_payload` — hai dòng hàng, thuế
 GTGT 8%, tổng tiền khớp sổ — để chốt so tiền cũng chạy, không chỉ soi chuỗi.
@@ -117,12 +118,12 @@ def main():
 
     # ── 1. ORION VINA ────────────────────────────────────────────────
     print("-" * 78)
-    print("── 1. ORION VINA: mọi dòng hàng mang '-PO<số PO>', không dòng ghi chú ─")
+    print("── 1. ORION VINA: mọi dòng hàng mang '-PO <số PO>', không dòng ghi chú ─")
     p, loi = _dung(_si())
     check("dựng được payload", p is not None, loi or "")
     mt = _mo_ta(p)
-    check("mọi dòng hàng = '<tên hàng>-PO4500123456'",
-          mt == ["Bánh Chocopie 360g-PO4500123456", "Bánh Ostar 80g-PO4500123456"], str(mt))
+    check("mọi dòng hàng = '<tên hàng>-PO 4500123456' (có dấu cách trước số PO)",
+          mt == ["Bánh Chocopie 360g-PO 4500123456", "Bánh Ostar 80g-PO 4500123456"], str(mt))
     check("KHÔNG thêm dòng ghi chú '(Chi tiết theo đơn hàng ...)'",
           p is not None and len(p["InvoiceDetails"]) == 2
           and not any("Chi tiết theo đơn hàng" in (d or "") for d in mt), str(len(mt)))
@@ -138,10 +139,10 @@ def main():
     print("── 2. Khớp theo mã HOẶC tên khách, không phân biệt hoa/thường ─────")
     p2, _ = _dung(_si(customer="KH-0123", customer_name="CÔNG TY TNHH ORION VINA"))
     check("mã khách 'KH-0123' + tên 'CÔNG TY TNHH ORION VINA' ⇒ áp luật",
-          _mo_ta(p2)[:1] == ["Bánh Chocopie 360g-PO4500123456"], str(_mo_ta(p2)[:1]))
+          _mo_ta(p2)[:1] == ["Bánh Chocopie 360g-PO 4500123456"], str(_mo_ta(p2)[:1]))
     p3, _ = _dung(_si(customer="orion  vina", customer_name=""))
     check("mã khách viết thường, thừa khoảng trắng 'orion  vina' ⇒ áp luật",
-          _mo_ta(p3)[:1] == ["Bánh Chocopie 360g-PO4500123456"], str(_mo_ta(p3)[:1]))
+          _mo_ta(p3)[:1] == ["Bánh Chocopie 360g-PO 4500123456"], str(_mo_ta(p3)[:1]))
 
     # ── 3. Khách khác giữ nguyên hành vi cũ ──────────────────────────
     print("-" * 78)
@@ -178,14 +179,14 @@ def main():
     print("-" * 78)
     print("── 5. Tên hàng đã có sẵn hậu tố thì không nối lần hai ─────────────")
     s10 = _si()
-    s10["_rows"][0]["item_name"] = "Bánh Chocopie 360g-PO4500123456"
+    s10["_rows"][0]["item_name"] = "Bánh Chocopie 360g-PO 4500123456"
     p10, _ = _dung(s10)
-    check("không thành '...-PO4500123456-PO4500123456'",
-          _mo_ta(p10)[:1] == ["Bánh Chocopie 360g-PO4500123456"], str(_mo_ta(p10)[:1]))
+    check("không thành '...-PO 4500123456-PO 4500123456'",
+          _mo_ta(p10)[:1] == ["Bánh Chocopie 360g-PO 4500123456"], str(_mo_ta(p10)[:1]))
 
     print("=" * 78)
     if ok_all:
-        print("KẾT QUẢ: ĐẠT — ORION VINA mang '-PO<số PO>' trên từng dòng hàng, khách "
+        print("KẾT QUẢ: ĐẠT — ORION VINA mang '-PO <số PO>' trên từng dòng hàng, khách "
               "khác giữ nguyên, thiếu PO thì dừng trước khi gọi MISA.")
         return 0
     print("KẾT QUẢ: CÓ MỤC KHÔNG ĐẠT ❌")

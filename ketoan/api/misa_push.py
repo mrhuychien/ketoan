@@ -33,7 +33,7 @@ GOI_ITEMS = {"BX", "CĐ", "BXRM", "BXSD", "BXMC", "BXCR"}
 PO_IN_NAME = {"Mega Market", "Winmart", "ST KingFood Mart"}
 PO_COMMA = {"BigC"}
 
-# Khách hàng ghi số PO lên TỪNG DÒNG HÀNG: "<tên hàng>-PO<số PO>", thay cho
+# Khách hàng ghi số PO lên TỪNG DÒNG HÀNG: "<tên hàng>-PO <số PO>", thay cho
 # dòng ghi chú riêng. Khớp theo `_po_tung_dong` — không phân biệt hoa/thường,
 # trên cả mã khách lẫn tên khách.
 PO_EACH_LINE = ("ORION VINA",)
@@ -284,7 +284,7 @@ def build_payload(si, settings):
                 "điền Số PO trên bản sửa đổi, ghi sổ lại — hóa đơn CHƯA lên MISA nên hủy "
                 "lúc này không sinh hóa đơn thứ hai."
             ).format(si.name, si.get("customer_name") or si.customer))
-        hau_to = f"-PO{po_no}"
+        hau_to = f"-PO {po_no}"
         for l in lines:
             mo_ta = cstr(l.get("Description"))
             # Tên hàng đã mang sẵn đúng hậu tố thì không nối thêm lần nữa.

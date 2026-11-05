@@ -50,8 +50,11 @@ M = [
     ("8. nối hậu tố hai lần khi tên hàng đã có sẵn", MP,
      "            if not mo_ta.endswith(hau_to):", "            if True:"),
 
-    ("9. sai khuôn hậu tố (' PO' thay vì '-PO')", MP,
-     'hau_to = f"-PO{po_no}"', 'hau_to = f" PO{po_no}"'),
+    ("9. viết LIỀN số PO '-PO4500123456' (đúng lỗi kế toán đã báo)", MP,
+     'hau_to = f"-PO {po_no}"', 'hau_to = f"-PO{po_no}"'),
+
+    ("9b. sai khuôn hậu tố (' PO' thay vì '-PO')", MP,
+     'hau_to = f"-PO {po_no}"', 'hau_to = f" PO {po_no}"'),
 
     ("10. chỉ nối vào dòng đầu tiên", MP,
      "        for l in lines:\n            mo_ta = cstr(l.get(\"Description\"))",
