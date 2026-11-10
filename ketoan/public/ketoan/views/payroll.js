@@ -172,15 +172,19 @@ const PB = (function () {
     nhat: { mode: "fields", monthField: "month", yearField: "year" },
     khoan: { mode: "date", dateField: "ngay" },
   };
+  // Ô "Ngân hàng hưởng" ghi ĐÚNG chuỗi trong danh sách của mẫu ngân hàng (mẫu
+  // 11/2026) — trước đây là chi nhánh "NHTMCP DTPT VN-CN HAI DUONG - 31202005" /
+  // "… THANH DONG-HAI DUONG - 31202004", đều BIDV.
+  var NH_BIDV = "01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV";
   var BLD_NGANHANG = [
-    { ten: "NGUYEN THI NGA", tk: "8848292453", tien: 15500000, cn: "NHTMCP DTPT VN-CN HAI DUONG - 31202005" },
-    { ten: "NGUYEN THI TRANG NHUNG", tk: "8802759555", tien: 15500000, cn: "NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004" },
-    { ten: "KHUONG THI MINH LY", tk: "8824175155", tien: 21700000, cn: "NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004" },
-    { ten: "DAO VAN TIEN", tk: "4600018088", tien: 21700000, cn: "NHTMCP DTPT VN-CN HAI DUONG - 31202005" },
-    { ten: "NGUYEN THI MIEN", tk: "4681729200", tien: 15500000, cn: "NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004" },
-    { ten: "DAO QUANG HON", tk: "8888292440", tien: 15500000, cn: "NHTMCP DTPT VN-CN HAI DUONG - 31202005" },
-    { ten: "LE THI PHUONG", tk: "4681673079", tien: 13000000, cn: "NHTMCP DTPT VN-CN HAI DUONG - 31202005" },
-    { ten: "DOAN THI HUONG", tk: "8828988889", tien: 15500000, cn: "NHTMCP DTPT VN-CN HAI DUONG - 31202005" },
+    { ten: "NGUYEN THI NGA", tk: "8848292453", tien: 15500000, cn: NH_BIDV },
+    { ten: "NGUYEN THI TRANG NHUNG", tk: "8802759555", tien: 15500000, cn: NH_BIDV },
+    { ten: "KHUONG THI MINH LY", tk: "8824175155", tien: 21700000, cn: NH_BIDV },
+    { ten: "DAO VAN TIEN", tk: "4600018088", tien: 21700000, cn: NH_BIDV },
+    { ten: "NGUYEN THI MIEN", tk: "4681729200", tien: 15500000, cn: NH_BIDV },
+    { ten: "DAO QUANG HON", tk: "8888292440", tien: 15500000, cn: NH_BIDV },
+    { ten: "LE THI PHUONG", tk: "4681673079", tien: 13000000, cn: NH_BIDV },
+    { ten: "DOAN THI HUONG", tk: "8828988889", tien: 15500000, cn: NH_BIDV },
   ];
   // Bảng bù trừ chỉ cần biết ĐÃ CHUYỂN KHOẢN cho người này bao nhiêu — số đó
   // gộp cả tiền vào tài khoản người khác đứng tên hộ, nên lớn hơn dòng mang

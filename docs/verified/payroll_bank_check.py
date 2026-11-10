@@ -5,7 +5,7 @@
 Ngân hàng đổi mẫu chi lương (11/2026). Mẫu mới do hệ thống ngân hàng sinh ra,
 khóa cấu trúc, có danh sách thả xuống — tức là ngân hàng đọc file theo khuôn
 của họ. File xuất ra lấy CHÍNH mẫu đó (`ketoan/mau/ck_luong_ngan_hang.xlsx`)
-rồi điền dòng từ dòng 4. Phép kiểm này canh sáu điều, mỗi điều một cách file
+rồi điền dòng từ dòng 4. Phép kiểm này canh bảy điều, mỗi điều một cách file
 bị ngân hàng trả về — hoặc tệ hơn, được nhận mà tiền đi sai:
 
   1. Mọi phần của mẫu ngoài sheet đầu và bảng chuỗi GIỮ NGUYÊN TỪNG BYTE —
@@ -13,16 +13,18 @@ bị ngân hàng trả về — hoặc tệ hơn, được nhận mà tiền đi
      sheet ẩn `Param`. Dòng chưa điền giữ nguyên như mẫu.
   2. Mỗi ô đúng kiểu mẫu đòi: STT là số; tài khoản, số tiền là CHỮ (ô "@");
      Loại tiền "VND"; tên không dấu IN HOA; nội dung chỉ chữ/số/./-.
-  3. "Ngân hàng hưởng" là NGUYÊN VĂN ô ngân hàng trên phiếu lương — kế toán
-     yêu cầu "điền đúng NHTMCP DTPT VN-CN HAI DUONG - 31202005", không đổi
-     sang chuỗi trong danh sách thả xuống của mẫu. Chỉ gộp khoảng trắng, bỏ
-     ký tự điều khiển (thứ làm hỏng file).
-  4. Báo đủ: thiếu tài khoản, ô ngân hàng trống / thiếu mã 8 số / mã không có
-     trong danh sách của mẫu, tài khoản trùng; số tiền ≤ 0 không ghi. Quá sức
-     chứa của mẫu ⇒ dừng, không cắt bớt người.
+  3. "Ngân hàng hưởng" là NGUYÊN VĂN ô ngân hàng trên phiếu lương ("cột ngân
+     hàng điền luôn cái này vào"); phiếu phải ghi đúng chuỗi trong danh sách
+     của mẫu ("01202001 - Ngan hang TMCP … - BIDV"). Không tự đổi chữ — chỉ
+     gộp khoảng trắng, bỏ ký tự điều khiển (thứ làm hỏng file).
+  4. Báo đủ: thiếu tài khoản, ô ngân hàng trống / không đúng chuỗi trong danh
+     sách, tài khoản trùng; số tiền ≤ 0 không ghi. Quá sức chứa ⇒ dừng.
   5. Mẫu đổi cột ⇒ dừng, không điền theo vị trí cũ.
   6. Trang Tính lương gửi ĐÚNG dòng nó tính: chạy payroll.js thật trong node,
-     tổng file = ô "Lương chuyển khoản" của tờ tổng hợp (`computeAgg`).
+     tổng file = ô "Lương chuyển khoản" của tờ tổng hợp (`computeAgg`); 8 dòng
+     Ban lãnh đạo ghi cứng đã mang chuỗi BIDV của danh sách.
+  7. Lệnh đổi dữ liệu `docs/luong/sql/doi_ngan_hang_2026_11.sql` chỉ ghi chuỗi
+     CÓ trong danh sách của mẫu — gõ sai một chữ là cả bảng lương bị báo.
 
 Chạy KHÔNG cần bench:
     python3 docs/verified/payroll_bank_check.py   # exit 0 = đạt
@@ -63,24 +65,25 @@ def muc(t):
     print("── " + t + " " + "─" * max(0, 70 - len(t)))
 
 
-# Ví dụ kế toán đưa: cột Ngân hàng hưởng phải ra ĐÚNG chuỗi này.
-VI_DU = "NHTMCP DTPT VN-CN HAI DUONG - 31202005"
+# Hai chuỗi kế toán chọn (11/2026) — đúng như trong danh sách của mẫu.
+BIDV = "01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV"
+VIB = "79314013 - Ngan hang TMCP Quoc Te Viet Nam - VIB"
+CU = "NHTMCP DTPT VN-CN HAI DUONG - 31202005"      # dạng mẫu cũ — phải đổi
+SQL = os.path.join(REPO, "docs/luong/sql/doi_ngan_hang_2026_11.sql")
 
 DONG = [
     # tên chủ TK, số TK, số tiền, ô ngân hàng trên phiếu lương
-    ["NGUYEN THI NGA", "8848292453", 15500000, VI_DU],
+    ["NGUYEN THI NGA", "8848292453", 15500000, BIDV],
     ["Nguyễn Văn Ánh", "8848 292.999", 6150000, "Vietcombank Hải Dương"],
-    ["Trần Thị Bé", "", 5575000, "BIDV"],
-    ["Lê Văn Cường", "123456789", 0, "BIDV"],
+    ["Trần Thị Bé", "", 5575000, VIB],
+    ["Lê Văn Cường", "123456789", 0, BIDV],
     ["Phạm Thị D & Co. (HD)", "12-34.56", 7600000, "NH A&B <CN 1>"],
-    ["Đỗ Đức Đạt", "8848292453", 1000000, "  NHTMCP DTPT VN-CN THANH DONG-HAI DUONG -\n 31202004 "],
-    ["Hoàng Thị E", 4681729200, 2000000.4, "NHTMCP DTPT VN-CN HAI DUONG\x07 - 31202099"],
-    ["Vũ Văn F", "0011223344", -50000, "BIDV"],
+    ["Đỗ Đức Đạt", "8848292453", 1000000, "  01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam -\n BIDV "],
+    ["Hoàng Thị E", 4681729200, 2000000.4, "NHTMCP DTPT VN-CN HAI DUONG\x07 - 31202005"],
+    ["Vũ Văn F", "0011223344", -50000, BIDV],
     ["Trịnh Văn G", "5566778899", 3000000, ""],
 ]
-COT_D = [VI_DU, "Vietcombank Hải Dương", "BIDV", "NH A&B <CN 1>",
-         "NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004",
-         "NHTMCP DTPT VN-CN HAI DUONG - 31202099", None]
+COT_D = [BIDV, "Vietcombank Hải Dương", VIB, "NH A&B <CN 1>", BIDV, CU, None]
 NOI_DUNG = "CK LƯƠNG T09/2026"
 
 
@@ -172,60 +175,60 @@ def main():
     ds = {wt["DS ngân hàng hưởng_Bank list"].cell(r, 3).value
           for r in range(2, wt["DS ngân hàng hưởng_Bank list"].max_row + 1)}
     cot_d = [x[3] for x in rows]
-    check(f"phiếu ghi “{VI_DU}” ⇒ cột D đúng chuỗi đó", cot_d[0] == VI_DU, str(cot_d[0]))
+    check("hai chuỗi kế toán chọn (BIDV, VIB) có ĐÚNG trong danh sách của mẫu",
+          BIDV in ds and VIB in ds)
+    check("phiếu ghi chuỗi BIDV/VIB ⇒ cột D đúng chuỗi đó",
+          cot_d[0] == BIDV and cot_d[2] == VIB, str(cot_d[:3]))
     check("mọi dòng: nguyên văn phiếu lương, chỉ gộp khoảng trắng + bỏ ký tự điều khiển",
           cot_d == COT_D, str(cot_d))
-    check("KHÔNG đổi sang chuỗi trong danh sách thả xuống của mẫu ('01202001 - … - BIDV')",
-          not any(d in ds for d in cot_d if d))
+    check("phiếu còn dạng cũ / chữ lạ ⇒ vẫn ghi NGUYÊN VĂN, không tự đổi",
+          cot_d[5] == CU and cot_d[1] == "Vietcombank Hải Dương")
     check("cột D là ô CHỮ", all(kieu[i][3] == "s" for i in range(6)))
     check("ô ngân hàng trống ⇒ cột D trống", cot_d[6] is None)
     check("'&', '<', '>' trong ô ngân hàng không làm hỏng file", cot_d[3] == "NH A&B <CN 1>")
 
-    bang = pb._doc_mau()["bang"]
-    for text in [VI_DU, "NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004",
-                 "01202001",                                     # mã cấp ngân hàng
-                 "NHTMCP QUOC TE VN CN HAI DUONG - 31314003"]:   # chi nhánh VIB
-        ly = pb.kiem_ngan_hang(text, bang)
-        check(f"soi “{text}” ⇒ ổn", ly == "", ly)
-    for text, mong in [("BIDV", "không có mã 8 số"),
-                       ("NHTMCP DTPT VN-CN HAI DUONG - 312020051", "không có mã 8 số"),
-                       ("NHTMCP DTPT VN-CN HAI DUONG - 31202099", "không có trong danh sách"),
-                       ("99999999", "không có trong danh sách"),
+    for text in [BIDV, VIB, "01203001 - Ngan hang TMCP Ngoai thuong Viet Nam - Vietcombank",
+                 "  " + BIDV.replace(" - ", "  -  ") + " "]:
+        ly = pb.kiem_ngan_hang(text)
+        check(f"soi “{text.strip()[:48]}…” ⇒ ổn", ly == "", ly)
+    for text, mong in [(CU, "không có trong danh sách"),
+                       ("NHTMCP QUOC TE VN-CN HAI DUONG-31314003", "không có trong danh sách"),
+                       ("BIDV", "không có trong danh sách"),
+                       (BIDV.upper(), "không có trong danh sách"),     # ngân hàng so đúng chữ
                        ("", "chưa ghi ngân hàng"), (None, "chưa ghi ngân hàng")]:
-        ly = pb.kiem_ngan_hang(text, bang)
-        check(f"soi “{text}” ⇒ báo “{mong}”", mong in ly, ly)
+        ly = pb.kiem_ngan_hang(text)
+        check(f"soi “{(text or '')[:48]}” ⇒ báo “{mong}”", mong in ly, ly)
 
     # ── 4. Báo đủ ──────────────────────────────────────────────────────
     muc("4. Báo đủ chỗ cần sửa; số tiền ≤ 0 không ghi; quá sức chứa thì dừng")
     cb = "\n".join(info["canh_bao"])
     check("báo thiếu số tài khoản (3. TRAN THI BE)", "3. TRAN THI BE: thiếu số tài khoản" in cb)
-    check("báo ô ngân hàng thiếu mã 8 số, nêu chữ trên phiếu (2, 3, 4)",
-          "2. NGUYEN VAN ANH: ô ngân hàng “Vietcombank Hải Dương” không có mã 8 số" in cb
-          and "3. TRAN THI BE: ô ngân hàng “BIDV” không có mã 8 số" in cb
-          and "4. PHAM THI D & CO. HD: ô ngân hàng “NH A&B <CN 1>” không có mã 8 số" in cb)
-    check("báo mã không có trong danh sách của mẫu (6. HOANG THI E — 31202099)",
-          "6. HOANG THI E: ô ngân hàng" in cb and "mã 31202099 không có trong danh sách" in cb)
+    khong_co = "không có trong danh sách Ngân hàng hưởng của mẫu"
+    check("báo ô ngân hàng không đúng chuỗi trong danh sách, nêu chữ trên phiếu (2, 4, 6)",
+          f"2. NGUYEN VAN ANH: ô ngân hàng “Vietcombank Hải Dương” {khong_co}" in cb
+          and f"4. PHAM THI D & CO. HD: ô ngân hàng “NH A&B <CN 1>” {khong_co}" in cb
+          and f"6. HOANG THI E: ô ngân hàng “{CU}” {khong_co}" in cb)
     check("báo phiếu chưa ghi ngân hàng (7. TRINH VAN G)",
           "7. TRINH VAN G: phiếu lương chưa ghi ngân hàng" in cb)
-    check("dòng ghi đúng dạng (1, 5) KHÔNG bị báo ngân hàng",
-          not any(x.startswith(("1. NGUYEN THI NGA: ô ngân hàng", "5. DO DUC DAT: ô ngân hàng"))
-                  for x in info["canh_bao"]))
+    check("dòng ghi đúng chuỗi (1 BIDV, 3 VIB, 5 BIDV thừa dấu cách) KHÔNG bị báo ngân hàng",
+          not any(x.startswith(("1. NGUYEN THI NGA: ô ngân hàng", "3. TRAN THI BE: ô ngân hàng",
+                                "5. DO DUC DAT: ô ngân hàng")) for x in info["canh_bao"]))
     check("báo tài khoản 8848292453 trùng (1 và 5)",
           "số tài khoản 8848292453 xuất hiện 2 lần (1. NGUYEN THI NGA; 5. DO DUC DAT)" in cb)
     check("số tiền 0 và âm KHÔNG ghi, có báo",
           any("LE VAN CUONG" in x for x in info["bo_qua"]) and any("VU VAN F" in x for x in info["bo_qua"]))
     check("tổng tiền = cộng cột số tiền (40.825.000)",
           info["tong_tien"] == 40825000 == sum(int(x[4]) for x in rows), str(info["tong_tien"]))
-    d2, i2 = pb.dung_file([["Nguyen Van A " * 8, "1", 1, VI_DU]], "CK")
+    d2, i2 = pb.dung_file([["Nguyen Van A " * 8, "1", 1, BIDV]], "CK")
     b4 = openpyxl.load_workbook(io.BytesIO(d2)).worksheets[0].cell(4, 2).value or ""
     check("tên dài quá 70 ⇒ cắt còn ≤ 70 + báo",
           0 < len(b4) <= 70 and any("cắt bớt" in x for x in i2["canh_bao"]), f"{len(b4)} ký tự")
-    d3, _ = pb.dung_file([["A", "1", 1, VI_DU]] * 988, "CK")
+    d3, _ = pb.dung_file([["A", "1", 1, BIDV]] * 988, "CK")
     w3 = openpyxl.load_workbook(io.BytesIO(d3)).worksheets[0]
     check("đủ 988 dòng (sức chứa của mẫu) ⇒ ghi tới dòng 991",
           w3.cell(991, 1).value == 988 and w3.cell(991, 5).value == "1")
     try:
-        pb.dung_file([["A", "1", 1, VI_DU]] * 989, "CK")
+        pb.dung_file([["A", "1", 1, BIDV]] * 989, "CK")
         loi = ""
     except Exception as e:  # noqa: BLE001
         loi = str(e)
@@ -292,12 +295,40 @@ def main():
         wj = openpyxl.load_workbook(io.BytesIO(dj)).worksheets[0]
         check("tổng file = ô 'Lương chuyển khoản' của tờ tổng hợp (computeAgg.tong_ck)",
               ij["tong_tien"] == round(js["tong_ck"]), f"{ij['tong_tien']} / {js['tong_ck']}")
-        check("cột D của file = ô ngân hàng từng dòng trang gửi (kể cả 8 dòng Ban lãnh đạo)",
-              [wj.cell(4 + i, 4).value for i in range(len(js["dong"]))] == [x[3] for x in js["dong"]],
-              str([x[3][-8:] for x in js["dong"][-8:]]))
+        check("cột D của file = ô ngân hàng từng dòng trang gửi",
+              [wj.cell(4 + i, 4).value for i in range(len(js["dong"]))] == [x[3] for x in js["dong"]])
+        check("8 dòng Ban lãnh đạo (ghi cứng trong payroll.js) mang chuỗi BIDV của danh sách",
+              [x[3] for x in js["dong"][-8:]] == [BIDV] * 8, str({x[3] for x in js["dong"][-8:]}))
         check("không cảnh báo nào cho bộ dữ liệu sạch", ij["canh_bao"] == [], str(ij["canh_bao"])[:90])
 
-    # Bộ đột biến tắt bước này cho nhanh (28 lần × vài giây); chạy tay thì có.
+    # ── 7. Lệnh đổi dữ liệu ────────────────────────────────────────────
+    muc("7. Lệnh SQL đổi ô ngân hàng chỉ ghi chuỗi CÓ trong danh sách của mẫu")
+    sql = open(SQL, encoding="utf-8").read()
+    sach = "\n".join(x for x in sql.splitlines() if not x.strip().startswith("--"))  # bỏ chú thích
+    lenh = [x for x in sach.split(";") if "UPDATE" in x]
+    dich = re.findall(r"SET nganhang = '([^']*)'", "".join(lenh))
+    check("4 lệnh UPDATE (2 bảng × 2 ngân hàng), mỗi lệnh ghi một chuỗi",
+          len(lenh) == 4 and len(dich) == 4, f"{len(lenh)} lệnh / {len(dich)} chuỗi")
+    check("mọi chuỗi đích đều CÓ trong danh sách Ngân hàng hưởng của mẫu",
+          bool(dich) and all(d in ds for d in dich), str(sorted(set(dich))))
+    gon = lambda t: t.replace(" ", "").upper()  # noqa: E731 — lệnh so khớp bỏ dấu cách
+    cap = {}
+    for x in lenh:
+        bang = re.search(r"UPDATE `(tab\w+)`", x).group(1)
+        d = re.search(r"SET nganhang = '([^']*)'", x).group(1)
+        for nguon in re.findall(r"'([A-Z0-9-]+)'", x.split("WHERE", 1)[1]):
+            cap[(bang, nguon)] = d
+    mong = {(b, gon(c)): d for b in ("tabSalaryDay", "tabSalaryProduct")
+            for c, d in ((CU, BIDV), ("NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004", BIDV),
+                         ("NHTMCP QUOC TE VN-CN HAI DUONG-31314003", VIB))}
+    check("CẢ HAI bảng (công nhật, công khoán) đổi đúng ba chuỗi cũ kế toán nêu: "
+          "2 chi nhánh BIDV → BIDV, VIB Hải Dương → VIB", cap == mong,
+          str(sorted(set(mong) ^ set(cap)))[:90])
+    bk = sql.find("CREATE TABLE IF NOT EXISTS `_bk_nganhang_2026_11`")
+    check("có sao lưu TRƯỚC khi đổi + lệnh lùi lại",
+          0 <= bk < sql.find("UPDATE `tabSalaryDay`") and "JOIN `_bk_nganhang_2026_11`" in sql)
+
+    # Bộ đột biến tắt bước này cho nhanh (35 lần × vài giây); chạy tay thì có.
     so = None if os.environ.get("PAYROLL_BANK_NO_SOFFICE") else (
         shutil.which("soffice") or shutil.which("libreoffice"))
     if so:
@@ -310,7 +341,7 @@ def main():
             csv = open(os.path.join(tmp, "ck.csv"), encoding="utf-8", errors="replace").read() \
                 if os.path.exists(os.path.join(tmp, "ck.csv")) else ""
             check("LibreOffice mở được file, dòng 4 đọc ra đúng",
-                  "1,NGUYEN THI NGA,8848292453,%s,15500000,VND,CK LUONG T09 2026" % VI_DU in csv,
+                  "1,NGUYEN THI NGA,8848292453,%s,15500000,VND,CK LUONG T09 2026" % BIDV in csv,
                   csv.splitlines()[3][:80] if len(csv.splitlines()) > 3 else "(không đọc được)")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -320,7 +351,7 @@ def main():
     print("=" * 78)
     if ok_all:
         print("KẾT QUẢ: ĐẠT — file là mẫu của ngân hàng, chỉ điền dòng; ngân hàng hưởng nguyên văn "
-              "phiếu lương, sai dạng thì báo; tổng khớp tờ tổng hợp.")
+              "phiếu lương, không đúng danh sách thì báo; tổng khớp tờ tổng hợp.")
         return 0
     print("KẾT QUẢ: CÓ MỤC KHÔNG ĐẠT ❌")
     return 1
@@ -329,16 +360,16 @@ def main():
 NHAT = [
     {"employee_name": "Nguyễn Văn A", "baohiem": 500000, "luongthucnhan": 6150000, "luongck": 5000000,
      "chutaikhoan": "NGUYEN VAN A", "taikhoan": "1234567890",
-     "nganhang": "NHTMCP DTPT VN-CN HAI DUONG - 31202005"},
+     "nganhang": "01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV"},
     {"employee_name": "Trần Thị B", "baohiem": 0, "luongthucnhan": 5575000, "luongck": 0},
 ]
 KHOAN = [
     {"employee_name": "Lê Văn C", "baohiem": 600000, "luongthucnhan": 8500000, "luongck": 0,
      "chutaikhoan": "", "taikhoan": "0987654321",
-     "nganhang": "NHTMCP NGOAI THUONG VN-CN HAI DUONG - 31203004"},
+     "nganhang": "01203001 - Ngan hang TMCP Ngoai thuong Viet Nam - Vietcombank"},
     {"employee_name": "Phạm Thị D", "baohiem": 300000, "luongthucnhan": 7600000, "luongck": 0,
      "chutaikhoan": "PHAM THI D", "taikhoan": "1122334455",
-     "nganhang": "NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004"},
+     "nganhang": "79314013 - Ngan hang TMCP Quoc Te Viet Nam - VIB"},
     {"employee_name": "Đinh Văn E", "baohiem": 0, "luongthucnhan": 7000000, "luongck": 0},
 ]
 

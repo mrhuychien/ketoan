@@ -3,10 +3,11 @@
 """Kiểm ĐỘT BIẾN cho `payroll_bank_check.py`.
 
 Mỗi đột biến là một cách làm hỏng file chuyển khoản lương mà vẫn tải về được:
-ngân hàng trả file về (sai kiểu ô, mất danh sách thả xuống, đè tiêu đề), hoặc
-tệ hơn — nhận file mà tiền đi sai (đoán bừa ngân hàng hưởng, ghi dòng số tiền
-0, trang gửi thiếu dòng Ban lãnh đạo). Đột biến nào không làm bộ kiểm đỏ là
-bộ kiểm đang canh hớ.
+ngân hàng trả file về (sai kiểu ô, mất danh sách thả xuống, đè tiêu đề, ô ngân
+hàng không đúng chuỗi trong danh sách), hoặc tệ hơn — nhận file mà tiền đi sai
+(tự đoán ngân hàng hưởng, ghi dòng số tiền 0, trang gửi thiếu dòng Ban lãnh
+đạo), hoặc lệnh đổi dữ liệu ghi chuỗi sai. Đột biến nào không làm bộ kiểm đỏ
+là bộ kiểm đang canh hớ.
 
     python3 docs/verified/payroll_bank_mutation_check.py
 """
@@ -21,6 +22,7 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 CHECK = "docs/verified/payroll_bank_check.py"
 PB = "ketoan/api/payroll_bank.py"
 JSF = "ketoan/public/ketoan/views/payroll.js"
+SQL = "docs/luong/sql/doi_ngan_hang_2026_11.sql"
 
 M = [
     # ── Kiểu ô / nội dung ô ────────────────────────────────────────────
@@ -74,57 +76,94 @@ M = [
      "        if not cstr(tieu_de.get(cot)).strip().startswith(dau):",
      "        if False:"),
 
-    # ── Ngân hàng hưởng: không đoán ────────────────────────────────────
-    ("14. bỏ tra sheet chi nhánh của mẫu", PB,
-     '        ma_nh = bang["chi_nhanh"].get(code)', '        ma_nh = None'),
+    # ── Ngân hàng hưởng: nguyên văn phiếu lương, soi theo danh sách ──────
+    ("14. cột D bỏ dấu/IN HOA thay vì nguyên văn", PB,
+     '            vals["D"] = ("s", nh)                  # NGUYÊN VĂN phiếu lương',
+     '            vals["D"] = ("s", _lam_sach_ten(nh))'),
 
-    ("15. bỏ luật 3 số giữa (mã tổ chức tín dụng)", PB,
-     '        d = _mot(bang["theo_tctd"].get(code[2:5]))', '        d = None'),
+    ("15. cột D tự đoán một ngân hàng khi phiếu ghi sai", PB,
+     '            vals["D"] = ("s", nh)                  # NGUYÊN VĂN phiếu lương',
+     '            vals["D"] = ("s", VI_DU_NH if ly_do else nh)'),
 
-    ("16. kết quả mơ hồ thì lấy đại một ngân hàng", PB,
-     "return next(iter(tap)) if len(tap) == 1 else None",
-     "return next(iter(tap)) if tap else None"),
+    ("16. ô sai danh sách thì để trống cột D (mất dấu vết để sửa)", PB,
+     '        if nh:\n            vals["D"]', '        if nh and not ly_do:\n            vals["D"]'),
 
-    ("17. bỏ chặn địa danh ('Bình Dương' ra ngân hàng Đài Loan)", PB,
-     "            if x and x not in DIA_DANH:", "            if x:"),
+    ("17. không gộp khoảng trắng (xuống dòng lọt vào ô)", PB,
+     'cstr(s))\n    return re.sub(r"\\s+", " ", s).strip()',
+     'cstr(s))\n    return s.strip()'),
 
-    ("18. chữ và mã chỉ hai ngân hàng khác nhau mà vẫn theo mã", PB,
-     "        if d_ten and d_ten[2:5] != d[2:5]:", "        if False:"),
+    ("18. không bỏ ký tự điều khiển (\\x07 làm hỏng file)", PB,
+     '    s = re.sub(r"[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]", "", cstr(s))\n',
+     '    s = cstr(s)\n'),
 
-    ("19. không dò ra thì ghi chữ gốc vào cột D", PB,
-     '            vals["D"] = ("s", hien)', '            vals["D"] = ("s", hien)\n        else:\n'
-     '            vals["D"] = ("s", cstr(nh_goc))'),
+    ("19. bỏ báo ô không có trong danh sách của mẫu", PB,
+     '    if goc not in (danh_sach if danh_sach is not None else _doc_mau()["danh_sach"]):',
+     '    if False:'),
+
+    ("20. so danh sách không phân biệt hoa/thường", PB,
+     '    if goc not in (danh_sach if danh_sach is not None else _doc_mau()["danh_sach"]):',
+     '    if goc.upper() not in {x.upper() for x in (danh_sach if danh_sach is not None '
+     'else _doc_mau()["danh_sach"])}:'),
+
+    ("21. bỏ báo phiếu chưa ghi ngân hàng", PB,
+     '            canh_bao.append("%s: %s — cột Ngân hàng hưởng để trống" % (nhan, ly_do))',
+     '            pass'),
+
+    ("22. đọc danh sách sai cột (mã thay vì chuỗi ngân hàng)", PB,
+     '    return {cstr(nh_rows[r].get("C")).strip() for r in nh_rows\n'
+     '            if r >= 2 and cstr(nh_rows[r].get("C")).strip()}',
+     '    return {cstr(nh_rows[r].get("B")).strip() for r in nh_rows\n'
+     '            if r >= 2 and cstr(nh_rows[r].get("B")).strip()}'),
 
     # ── Báo / chặn ────────────────────────────────────────────────────
-    ("20. ghi cả dòng số tiền 0", PB,
+    ("23. ghi cả dòng số tiền 0", PB,
      "        if tien <= 0:", "        if tien < 0:"),
 
-    ("21. bỏ báo tài khoản trùng", PB,
+    ("24. bỏ báo tài khoản trùng", PB,
      "        if len(ai) > 1:", "        if False:"),
 
-    ("22. bỏ báo thiếu số tài khoản", PB,
+    ("25. bỏ báo thiếu số tài khoản", PB,
      '            canh_bao.append("%s: thiếu số tài khoản" % nhan)', "            pass"),
 
-    ("23. bỏ chặn sức chứa — quá 988 người không bảo tách file", PB,
+    ("26. bỏ chặn sức chứa — quá 988 người không bảo tách file", PB,
      '    if len(du_lieu) > m["suc_chua"]:', "    if False:"),
 
-    ("24. bỏ chốt quyền Kế toán tiền lương", PB,
+    ("27. bỏ chốt quyền Kế toán tiền lương", PB,
      "    guard_payroll()\n", ""),
 
     # ── Trang Tính lương ──────────────────────────────────────────────
-    ("25. trang gọi sai method", JSF,
+    ("28. trang gọi sai method", JSF,
      'var BANK_METHOD = "ketoan.api.payroll_bank.xuat_file_chuyen_khoan";',
      'var BANK_METHOD = "ketoan.api.payroll_bank.xuat_file";'),
 
-    ("26. trang không gửi nội dung chuyển tiền", JSF,
+    ("29. trang không gửi nội dung chuyển tiền", JSF,
      "{ dong: dong, noi_dung: PB.CK_NOIDUNG }", "{ dong: dong }"),
 
-    ("27. trang tải về chuỗi base64 thay vì file", JSF,
+    ("30. trang tải về chuỗi base64 thay vì file", JSF,
      "saveBlob(b64Blob(r.file_b64), fn);", "saveBlob(new Blob([r.file_b64]), fn);"),
 
-    ("28. trang quên dòng Ban lãnh đạo (tổng file lệch tờ tổng hợp)", JSF,
+    ("31. trang quên dòng Ban lãnh đạo (tổng file lệch tờ tổng hợp)", JSF,
      "    BLD_NGANHANG.forEach(function (b) { data.push([b.ten, b.tk, roundCK(b.tien), b.cn]); });\n",
      ""),
+
+    ("32. 8 dòng Ban lãnh đạo vẫn ghi chi nhánh dạng cũ", JSF,
+     'var NH_BIDV = "01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV";',
+     'var NH_BIDV = "NHTMCP DTPT VN-CN HAI DUONG - 31202005";'),
+
+    # ── Lệnh đổi dữ liệu ──────────────────────────────────────────────
+    ("33. lệnh SQL gõ sai chuỗi đích ('Quoc te' thay vì 'Quoc Te')", SQL,
+     "UPDATE `tabSalaryProduct`\n   SET nganhang = '79314013 - Ngan hang TMCP Quoc Te Viet Nam - VIB'",
+     "UPDATE `tabSalaryProduct`\n   SET nganhang = '79314013 - Ngan hang TMCP Quoc te Viet Nam - VIB'"),
+
+    ("34. lệnh SQL quên chi nhánh Thành Đông ở bảng công khoán", SQL,
+     "UPDATE `tabSalaryProduct`\n   SET nganhang = '01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV'\n"
+     " WHERE REPLACE(nganhang, ' ', '') IN ('NHTMCPDTPTVN-CNHAIDUONG-31202005',\n"
+     "                                      'NHTMCPDTPTVN-CNTHANHDONG-HAIDUONG-31202004');",
+     "UPDATE `tabSalaryProduct`\n   SET nganhang = '01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV'\n"
+     " WHERE REPLACE(nganhang, ' ', '') IN ('NHTMCPDTPTVN-CNHAIDUONG-31202005');"),
+
+    ("35. lệnh SQL bỏ bước sao lưu", SQL,
+     "CREATE TABLE IF NOT EXISTS `_bk_nganhang_2026_11` AS", "-- (bỏ sao lưu)"),
 ]
 
 

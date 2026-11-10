@@ -21,13 +21,16 @@ ghi lại mẫu này thì chỉ còn `_xlnm._FilterDatabase` — cột "Ngân h�
 mất danh sách chọn.
 
 ── Cột "Ngân hàng hưởng" ──────────────────────────────────────────────────
-Ghi NGUYÊN VĂN ô ngân hàng trên phiếu lương — kế toán yêu cầu (11/2026):
-"điền đúng NHTMCP DTPT VN-CN HAI DUONG - 31202005", tức dạng "<tên chi
-nhánh> - <mã 8 số>" như mẫu cũ, KHÔNG đổi sang chuỗi trong danh sách thả
-xuống của mẫu mới ("01202001 - Ngan hang TMCP … - BIDV"). Chỉ gộp khoảng
-trắng thừa và bỏ ký tự điều khiển (thứ làm hỏng file).
-Chữ không sửa, nhưng có SOI để báo cho người sửa phiếu lương: ô trống, không
-có mã 8 số, mã không có trong danh sách ngân hàng/chi nhánh của mẫu.
+Ghi NGUYÊN VĂN ô "ngân hàng" trên phiếu lương — kế toán (11/2026): "cột ngân
+hàng điền luôn cái này vào". Phiếu lương phải ghi ĐÚNG một chuỗi trong danh
+sách "Ngân hàng hưởng" của mẫu, ví dụ
+    01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV
+    79314013 - Ngan hang TMCP Quoc Te Viet Nam - VIB
+Dữ liệu cũ dạng "NHTMCP DTPT VN-CN HAI DUONG - 31202005" đổi một lần bằng
+`docs/luong/sql/doi_ngan_hang_2026_11.sql`. Ở đây chỉ gộp khoảng trắng thừa,
+bỏ ký tự điều khiển (thứ làm hỏng file) — KHÔNG tự đổi chữ. Ô trống hoặc
+không đúng chuỗi trong danh sách: vẫn ghi nguyên văn và BÁO, để sửa phiếu
+lương (ngân hàng đọc cột này theo danh sách của họ).
 Cột "Chi nhánh ngân hàng hưởng" để trống: theo hướng dẫn của mẫu, chuyển tới
 SỐ TÀI KHOẢN chỉ cần ngân hàng.
 
@@ -58,7 +61,6 @@ MAU = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 
 SHEET_MAU = "Mẫu file_File Template"
 SHEET_NH = "DS ngân hàng hưởng_Bank list"
-SHEET_CN = "DS chi nhánh_Branch list"
 
 DONG_TIEU_DE = 3
 DONG_DAU = 4
@@ -76,6 +78,7 @@ TIEU_DE = (
 )
 
 TIEN_TE = "VND"
+VI_DU_NH = "01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV"
 NOI_DUNG_MAC_DINH = "CK LUONG"
 MAX_TEN, MAX_TK, MAX_TIEN, MAX_ND = 70, 35, 16, 190
 
@@ -170,21 +173,11 @@ def _doc_sheet(xml, sst):
     return rows
 
 
-def _bang_ngan_hang(nh_rows, cn_rows):
-    """Mã ngân hàng (sheet danh sách ngân hàng) + mã chi nhánh → mã ngân hàng
-    (sheet chi nhánh), lấy từ CHÍNH file mẫu — để soi mã trên phiếu lương."""
-    ma_ngan_hang = set()
-    for r in sorted(nh_rows):
-        ma = cstr(nh_rows[r].get("B")).strip()
-        if r >= 2 and re.fullmatch(r"\d{8}", ma):
-            ma_ngan_hang.add(ma)
-    chi_nhanh = {}
-    for r in sorted(cn_rows):
-        ma_nh = cstr(cn_rows[r].get("B")).strip()
-        m = re.match(r"(\d{8})\b", cstr(cn_rows[r].get("D")).strip())
-        if r >= 2 and m and ma_nh:
-            chi_nhanh.setdefault(m.group(1), ma_nh)
-    return {"ma_ngan_hang": ma_ngan_hang, "chi_nhanh": chi_nhanh}
+def _danh_sach_ngan_hang(nh_rows):
+    """Các chuỗi của danh sách thả xuống "Ngân hàng hưởng" (cột C sheet danh
+    sách ngân hàng) — lấy từ CHÍNH file mẫu, để soi ô ngân hàng trên phiếu."""
+    return {cstr(nh_rows[r].get("C")).strip() for r in nh_rows
+            if r >= 2 and cstr(nh_rows[r].get("C")).strip()}
 
 
 _CACHE = {}
@@ -209,7 +202,7 @@ def _doc_mau(path=None):
                  for s in wb.iter(_NS + "sheet")}
         sst_path = next((duong(r.get("Target")) for r in rels
                          if cstr(r.get("Type")).endswith("/sharedStrings")), None)
-        for ten in (SHEET_MAU, SHEET_NH, SHEET_CN):
+        for ten in (SHEET_MAU, SHEET_NH):
             if ten not in sheet:
                 frappe.throw(_("Mẫu ngân hàng không còn sheet “{0}” — mẫu đã đổi, "
                                "cần cập nhật code xuất file.").format(ten))
@@ -218,8 +211,7 @@ def _doc_mau(path=None):
         sst_xml = z.read(sst_path).decode("utf-8")
         sheet_xml = z.read(sheet[SHEET_MAU]).decode("utf-8")
         sst, thuong = _doc_sst(sst_xml)
-        bang = _bang_ngan_hang(_doc_sheet(z.read(sheet[SHEET_NH]), sst),
-                               _doc_sheet(z.read(sheet[SHEET_CN]), sst))
+        danh_sach = _danh_sach_ngan_hang(_doc_sheet(z.read(sheet[SHEET_NH]), sst))
 
     tieu_de = _doc_sheet(sheet_xml, sst).get(DONG_TIEU_DE, {})
     for cot, dau in TIEU_DE:
@@ -233,29 +225,25 @@ def _doc_mau(path=None):
         suc_chua += 1
     val = {"path": path, "sheet_path": sheet[SHEET_MAU], "sst_path": sst_path,
            "sheet_xml": sheet_xml, "sst_xml": sst_xml, "sst_n": len(sst),
-           "thuong": thuong, "bang": bang, "suc_chua": suc_chua}
+           "thuong": thuong, "danh_sach": danh_sach, "suc_chua": suc_chua}
     _CACHE.update(key=key, val=val)
     return val
 
 
 # ── soi ô ngân hàng ──────────────────────────────────────────────────────
 
-def kiem_ngan_hang(text, bang=None):
-    """Lý do ô ngân hàng trên phiếu lương cần xem lại, hoặc "" nếu ổn.
+def kiem_ngan_hang(text, danh_sach=None):
+    """Lý do ô ngân hàng trên phiếu lương cần sửa, hoặc "" nếu ổn.
 
-    Chỉ để BÁO — chữ vẫn ghi nguyên văn. Ổn = có mã 8 số và mã đó là mã chi
-    nhánh hoặc mã ngân hàng trong danh sách của mẫu ngân hàng.
+    Chỉ để BÁO — chữ vẫn ghi nguyên văn. Ổn = trùng ĐÚNG một chuỗi trong danh
+    sách "Ngân hàng hưởng" của mẫu (khác hoa/thường cũng là khác: ngân hàng so
+    theo danh sách của họ).
     """
     goc = _nguyen_van(text)
     if not goc:
         return "phiếu lương chưa ghi ngân hàng"
-    ma = re.findall(r"(?<!\d)\d{8}(?!\d)", goc)
-    if not ma:
-        return "không có mã 8 số (dạng “<tên chi nhánh> - <mã 8 số>”)"
-    bang = bang or _doc_mau()["bang"]
-    la = [x for x in ma if x not in bang["chi_nhanh"] and x not in bang["ma_ngan_hang"]]
-    if la:
-        return "mã %s không có trong danh sách chi nhánh/ngân hàng của mẫu ngân hàng" % ", ".join(la)
+    if goc not in (danh_sach if danh_sach is not None else _doc_mau()["danh_sach"]):
+        return "không có trong danh sách Ngân hàng hưởng của mẫu"
     return ""
 
 
@@ -353,11 +341,12 @@ def dung_file(dong, noi_dung=None, path=None):
         if tk:
             theo_tk.setdefault(tk, []).append(nhan)
         nh = _nguyen_van(nh_goc)
-        ly_do = kiem_ngan_hang(nh, m["bang"])
+        ly_do = kiem_ngan_hang(nh, m["danh_sach"])
         if not nh:
             canh_bao.append("%s: %s — cột Ngân hàng hưởng để trống" % (nhan, ly_do))
         elif ly_do:
-            canh_bao.append("%s: ô ngân hàng “%s” %s — kiểm lại phiếu lương" % (nhan, nh, ly_do))
+            canh_bao.append("%s: ô ngân hàng “%s” %s — sửa trên phiếu lương cho đúng chuỗi trong "
+                            "danh sách (vd “%s”)" % (nhan, nh, ly_do, VI_DU_NH))
 
         vals = {"A": ("n", stt), "E": ("s", str(tien)), "F": ("s", TIEN_TE), "G": ("s", nd)}
         if ten:
