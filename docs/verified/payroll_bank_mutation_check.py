@@ -157,10 +157,16 @@ M = [
 
     ("34. lệnh SQL quên chi nhánh Thành Đông ở bảng công khoán", SQL,
      "UPDATE `tabSalaryProduct`\n   SET nganhang = '01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV'\n"
-     " WHERE REPLACE(nganhang, ' ', '') IN ('NHTMCPDTPTVN-CNHAIDUONG-31202005',\n"
-     "                                      'NHTMCPDTPTVN-CNTHANHDONG-HAIDUONG-31202004');",
+     " WHERE BINARY TRIM(nganhang) IN ('NHTMCP DTPT VN-CN HAI DUONG - 31202005',\n"
+     "                                 'NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004');",
      "UPDATE `tabSalaryProduct`\n   SET nganhang = '01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV'\n"
-     " WHERE REPLACE(nganhang, ' ', '') IN ('NHTMCPDTPTVN-CNHAIDUONG-31202005');"),
+     " WHERE BINARY TRIM(nganhang) IN ('NHTMCP DTPT VN-CN HAI DUONG - 31202005');"),
+
+    ("34b. lệnh SQL so lỏng (bỏ dấu cách) — đổi cả chuỗi kế toán KHÔNG gửi", SQL,
+     "UPDATE `tabSalaryDay`\n   SET nganhang = '79314013 - Ngan hang TMCP Quoc Te Viet Nam - VIB'\n"
+     " WHERE BINARY TRIM(nganhang) = 'NHTMCP QUOC TE VN-CN HAI DUONG-31314003';",
+     "UPDATE `tabSalaryDay`\n   SET nganhang = '79314013 - Ngan hang TMCP Quoc Te Viet Nam - VIB'\n"
+     " WHERE REPLACE(nganhang, ' ', '') = 'NHTMCPQUOCTEVN-CNHAIDUONG-31314003';"),
 
     ("35. lệnh SQL bỏ bước sao lưu", SQL,
      "CREATE TABLE IF NOT EXISTS `_bk_nganhang_2026_11` AS", "-- (bỏ sao lưu)"),

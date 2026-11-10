@@ -8,14 +8,14 @@
 --   NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004 → 01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV
 --   NHTMCP QUOC TE VN-CN HAI DUONG-31314003           → 79314013 - Ngan hang TMCP Quoc Te Viet Nam - VIB
 --
--- Áp cho MỌI phiếu (nháp, đã duyệt, đã hủy) của SalaryDay (công nhật) và
--- SalaryProduct (công khoán). So khớp bỏ qua dấu cách và hoa/thường ("…-31314003"
--- hay "… - 31314003" đều ăn). Không đụng `modified`.
+-- CHỈ đổi ô ghi ĐÚNG ba chuỗi trên (khớp từng chữ; chỉ bỏ khoảng trắng thừa ở hai
+-- đầu) — mọi giá trị khác giữ nguyên. Áp cho phiếu nháp, đã duyệt, đã hủy của
+-- SalaryDay (công nhật) và SalaryProduct (công khoán). Không đụng `modified`.
 --
 -- Chạy trên máy chủ, trong thư mục frappe-bench:
 --     bench --site <tên site> mariadb < apps/ketoan/docs/luong/sql/doi_ngan_hang_2026_11.sql
--- Kết quả in hai bảng TRUOC / SAU. Phần SAU mà còn chuỗi nào KHÔNG phải hai
--- chuỗi mới (trừ ô trống) thì gửi lại để thêm vào lệnh.
+-- Kết quả in hai bảng TRUOC / SAU. Ô nào ở bảng SAU vẫn còn dạng cũ của ba chuỗi
+-- trên (gõ khác dấu cách, khác hoa/thường) là chưa đổi — xem rồi quyết.
 -- Lùi lại: xem cuối file.
 -- ════════════════════════════════════════════════════════════════════════
 
@@ -43,21 +43,23 @@ UNION ALL
 SELECT 'TRUOC', 'SalaryProduct', nganhang, COUNT(*)
   FROM `tabSalaryProduct` GROUP BY nganhang;
 
--- 3. Đổi
+-- 3. Đổi — CHỈ ô ghi ĐÚNG một trong ba chuỗi kế toán gửi (BINARY: khớp từng
+--    chữ, phân biệt hoa/thường; chỉ bỏ khoảng trắng thừa ở hai đầu). Chuỗi khác,
+--    dù gần giống, KHÔNG đổi — sẽ hiện ở bảng SAU.
 UPDATE `tabSalaryDay`
    SET nganhang = '01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV'
- WHERE REPLACE(nganhang, ' ', '') IN ('NHTMCPDTPTVN-CNHAIDUONG-31202005',
-                                      'NHTMCPDTPTVN-CNTHANHDONG-HAIDUONG-31202004');
+ WHERE BINARY TRIM(nganhang) IN ('NHTMCP DTPT VN-CN HAI DUONG - 31202005',
+                                 'NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004');
 UPDATE `tabSalaryProduct`
    SET nganhang = '01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV'
- WHERE REPLACE(nganhang, ' ', '') IN ('NHTMCPDTPTVN-CNHAIDUONG-31202005',
-                                      'NHTMCPDTPTVN-CNTHANHDONG-HAIDUONG-31202004');
+ WHERE BINARY TRIM(nganhang) IN ('NHTMCP DTPT VN-CN HAI DUONG - 31202005',
+                                 'NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004');
 UPDATE `tabSalaryDay`
    SET nganhang = '79314013 - Ngan hang TMCP Quoc Te Viet Nam - VIB'
- WHERE REPLACE(nganhang, ' ', '') = 'NHTMCPQUOCTEVN-CNHAIDUONG-31314003';
+ WHERE BINARY TRIM(nganhang) = 'NHTMCP QUOC TE VN-CN HAI DUONG-31314003';
 UPDATE `tabSalaryProduct`
    SET nganhang = '79314013 - Ngan hang TMCP Quoc Te Viet Nam - VIB'
- WHERE REPLACE(nganhang, ' ', '') = 'NHTMCPQUOCTEVN-CNHAIDUONG-31314003';
+ WHERE BINARY TRIM(nganhang) = 'NHTMCP QUOC TE VN-CN HAI DUONG-31314003';
 
 -- 4. Sau khi đổi
 SELECT 'SAU' AS luc, 'SalaryDay' AS bang, nganhang, COUNT(*) AS so_phieu

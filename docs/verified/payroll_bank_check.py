@@ -311,19 +311,23 @@ def main():
           len(lenh) == 4 and len(dich) == 4, f"{len(lenh)} lệnh / {len(dich)} chuỗi")
     check("mọi chuỗi đích đều CÓ trong danh sách Ngân hàng hưởng của mẫu",
           bool(dich) and all(d in ds for d in dich), str(sorted(set(dich))))
-    gon = lambda t: t.replace(" ", "").upper()  # noqa: E731 — lệnh so khớp bỏ dấu cách
     cap = {}
     for x in lenh:
         bang = re.search(r"UPDATE `(tab\w+)`", x).group(1)
         d = re.search(r"SET nganhang = '([^']*)'", x).group(1)
-        for nguon in re.findall(r"'([A-Z0-9-]+)'", x.split("WHERE", 1)[1]):
+        for nguon in re.findall(r"'([^']+)'", x.split("WHERE", 1)[1]):
             cap[(bang, nguon)] = d
-    mong = {(b, gon(c)): d for b in ("tabSalaryDay", "tabSalaryProduct")
+    # Ba chuỗi đúng như kế toán gửi (11/2026) — "chỉ đổi các trường ngân hàng có
+    # thông tin như anh gửi".
+    mong = {(b, c): d for b in ("tabSalaryDay", "tabSalaryProduct")
             for c, d in ((CU, BIDV), ("NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004", BIDV),
                          ("NHTMCP QUOC TE VN-CN HAI DUONG-31314003", VIB))}
-    check("CẢ HAI bảng (công nhật, công khoán) đổi đúng ba chuỗi cũ kế toán nêu: "
+    check("CẢ HAI bảng (công nhật, công khoán) đổi đúng ba chuỗi kế toán gửi: "
           "2 chi nhánh BIDV → BIDV, VIB Hải Dương → VIB", cap == mong,
           str(sorted(set(mong) ^ set(cap)))[:90])
+    check("CHỈ khớp đúng chuỗi (BINARY TRIM = …), không so lỏng bỏ dấu cách/hoa thường",
+          all("WHERE BINARY TRIM(nganhang) " in x for x in lenh)
+          and not re.search(r"REPLACE\(|LIKE|REGEXP|UPPER\(|LOWER\(", sach))
     bk = sql.find("CREATE TABLE IF NOT EXISTS `_bk_nganhang_2026_11`")
     check("có sao lưu TRƯỚC khi đổi + lệnh lùi lại",
           0 <= bk < sql.find("UPDATE `tabSalaryDay`") and "JOIN `_bk_nganhang_2026_11`" in sql)
