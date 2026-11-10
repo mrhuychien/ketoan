@@ -668,10 +668,11 @@ function exportBank(dong, fn) {
   return call(BANK_METHOD, { dong: dong, noi_dung: PB.CK_NOIDUNG }).then(function (r) {
     if (!r || !r.file_b64) throw new Error("Máy chủ không trả file.");
     saveBlob(b64Blob(r.file_b64), fn);
-    var cb = r.canh_bao || [], bq = r.bo_qua || [];
+    var cb = r.canh_bao || [], bq = r.bo_qua || [], gc = r.ghi_chu || [];
     log(LABEL.nganhang + " (mẫu ngân hàng): " + r.so_dong + " dòng, tổng " + fmtTien(r.tong_tien) + " đ → đang tải file." + (cb.length ? " Có " + cb.length + " chỗ cần sửa trước khi tải lên ngân hàng:" : ""), cb.length ? "err" : "ok");
     cb.forEach(function (m) { log("• " + m, "err"); });
     bq.forEach(function (m) { log("• Bỏ qua — " + m, "info"); });
+    gc.forEach(function (m) { log("• " + m, "info"); });
   });
 }
 function exportFile(loai, btn) {

@@ -1,8 +1,9 @@
 -- ════════════════════════════════════════════════════════════════════════
 -- Đổi ô "ngân hàng" trên phiếu lương sang ĐÚNG chuỗi trong danh sách
 -- "Ngân hàng hưởng" của mẫu chuyển khoản mới của ngân hàng (11/2026).
--- File xuất (Tiền lương › Chuyển khoản ngân hàng) ghi NGUYÊN VĂN ô này vào cột
--- "Ngân hàng hưởng", nên phiếu lương phải ghi đúng chuỗi của danh sách.
+-- KHÔNG BẮT BUỘC: file xuất (Tiền lương › Chuyển khoản ngân hàng) đã tự đổi ba
+-- chuỗi dưới đây sang chuỗi mới (ketoan/api/payroll_bank.py, DOI_NGAN_HANG). Chạy
+-- lệnh này khi muốn chính phiếu lương cũng mang chuỗi mới.
 --
 --   NHTMCP DTPT VN-CN HAI DUONG - 31202005            → 01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV
 --   NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004 → 01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV

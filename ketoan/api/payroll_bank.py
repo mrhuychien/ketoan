@@ -21,16 +21,19 @@ ghi lại mẫu này thì chỉ còn `_xlnm._FilterDatabase` — cột "Ngân h�
 mất danh sách chọn.
 
 ── Cột "Ngân hàng hưởng" ──────────────────────────────────────────────────
-Ghi NGUYÊN VĂN ô "ngân hàng" trên phiếu lương — kế toán (11/2026): "cột ngân
-hàng điền luôn cái này vào". Phiếu lương phải ghi ĐÚNG một chuỗi trong danh
-sách "Ngân hàng hưởng" của mẫu, ví dụ
+Phải là ĐÚNG một chuỗi trong danh sách "Ngân hàng hưởng" của mẫu, ví dụ
     01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV
     79314013 - Ngan hang TMCP Quoc Te Viet Nam - VIB
-Dữ liệu cũ dạng "NHTMCP DTPT VN-CN HAI DUONG - 31202005" đổi một lần bằng
-`docs/luong/sql/doi_ngan_hang_2026_11.sql`. Ở đây chỉ gộp khoảng trắng thừa,
-bỏ ký tự điều khiển (thứ làm hỏng file) — KHÔNG tự đổi chữ. Ô trống hoặc
-không đúng chuỗi trong danh sách: vẫn ghi nguyên văn và BÁO, để sửa phiếu
-lương (ngân hàng đọc cột này theo danh sách của họ).
+Lấy từ ô "ngân hàng" trên phiếu lương:
+  * Ô ghi một trong BA chuỗi chi nhánh dạng cũ kế toán chỉ định (11/2026 —
+    "chỉ đổi các trường ngân hàng có thông tin như anh gửi", xem
+    `DOI_NGAN_HANG`) ⇒ ghi chuỗi mới tương ứng. Khớp bỏ qua dấu cách, hoa/
+    thường, dấu tiếng Việt, kiểu dấu gạch — đúng ba chi nhánh đó, không lan
+    sang chi nhánh/ngân hàng khác. Không cần sửa phiếu trước khi xuất (lệnh
+    `docs/luong/sql/doi_ngan_hang_2026_11.sql` chỉ để đổi luôn trên phiếu).
+  * Ô khác ⇒ NGUYÊN VĂN (chỉ gộp khoảng trắng, bỏ ký tự điều khiển — thứ
+    làm hỏng file). Trống hoặc không đúng chuỗi trong danh sách: vẫn ghi và
+    BÁO để sửa phiếu lương (ngân hàng đọc cột này theo danh sách của họ).
 Cột "Chi nhánh ngân hàng hưởng" để trống: theo hướng dẫn của mẫu, chuyển tới
 SỐ TÀI KHOẢN chỉ cần ngân hàng.
 
@@ -79,6 +82,17 @@ TIEU_DE = (
 
 TIEN_TE = "VND"
 VI_DU_NH = "01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV"
+
+# Ô ngân hàng còn ghi chi nhánh dạng mẫu cũ ⇒ chuỗi trong danh sách của mẫu
+# mới. ĐÚNG ba chuỗi kế toán gửi (11/2026); chuỗi khác giữ nguyên văn.
+DOI_NGAN_HANG = {
+    "NHTMCP DTPT VN-CN HAI DUONG - 31202005":
+        "01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV",
+    "NHTMCP DTPT VN-CN THANH DONG-HAI DUONG - 31202004":
+        "01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV",
+    "NHTMCP QUOC TE VN-CN HAI DUONG-31314003":
+        "79314013 - Ngan hang TMCP Quoc Te Viet Nam - VIB",
+}
 NOI_DUNG_MAC_DINH = "CK LUONG"
 MAX_TEN, MAX_TK, MAX_TIEN, MAX_ND = 70, 35, 16, 190
 
@@ -232,6 +246,25 @@ def _doc_mau(path=None):
 
 # ── soi ô ngân hàng ──────────────────────────────────────────────────────
 
+def _khoa_doi(s):
+    """Khóa so ô ngân hàng với `DOI_NGAN_HANG`: bỏ dấu cách, dấu tiếng Việt,
+    hoa/thường, thống nhất dấu gạch ("–", "—"…) — "…-31314003" hay
+    "… – 31314003" là CÙNG chi nhánh; mã 8 số vẫn phải trùng nguyên."""
+    s = re.sub(r"[\u2010-\u2015\u2212]", "-", _khong_dau(_nguyen_van(s)))
+    return re.sub(r"\s+", "", s).upper()
+
+
+_DOI = {_khoa_doi(k): v for k, v in DOI_NGAN_HANG.items()}
+
+
+def doi_ngan_hang(text):
+    """Chuỗi ghi vào cột "Ngân hàng hưởng": chuỗi mới nếu ô là một trong ba
+    chi nhánh dạng cũ kế toán chỉ định, không thì nguyên văn (đã gộp khoảng
+    trắng, bỏ ký tự điều khiển)."""
+    nh = _nguyen_van(text)
+    return _DOI.get(_khoa_doi(nh), nh)
+
+
 def kiem_ngan_hang(text, danh_sach=None):
     """Lý do ô ngân hàng trên phiếu lương cần sửa, hoặc "" nếu ổn.
 
@@ -312,7 +345,7 @@ def dung_file(dong, noi_dung=None, path=None):
     nd = _lam_sach_noi_dung(noi_dung) or NOI_DUNG_MAC_DINH
 
     du_lieu, canh_bao, bo_qua = {}, [], []
-    theo_tk = {}
+    theo_tk, da_doi = {}, {}
     tong = 0
     for x in dong:
         x = list(x) if isinstance(x, (list, tuple)) else []
@@ -340,7 +373,10 @@ def dung_file(dong, noi_dung=None, path=None):
                             % (nhan, tk, MAX_TK))
         if tk:
             theo_tk.setdefault(tk, []).append(nhan)
-        nh = _nguyen_van(nh_goc)
+        nh = doi_ngan_hang(nh_goc)
+        if nh != _nguyen_van(nh_goc):
+            k = (_nguyen_van(nh_goc), nh)
+            da_doi[k] = da_doi.get(k, 0) + 1
         ly_do = kiem_ngan_hang(nh, m["danh_sach"])
         if not nh:
             canh_bao.append("%s: %s — cột Ngân hàng hưởng để trống" % (nhan, ly_do))
@@ -354,7 +390,7 @@ def dung_file(dong, noi_dung=None, path=None):
         if tk:
             vals["C"] = ("s", tk)
         if nh:
-            vals["D"] = ("s", nh)                  # NGUYÊN VĂN phiếu lương
+            vals["D"] = ("s", nh)                  # phiếu lương (đã đổi 3 chuỗi cũ)
         du_lieu[r] = vals
         tong += tien
 
@@ -396,8 +432,10 @@ def dung_file(dong, noi_dung=None, path=None):
             zi.external_attr = info.external_attr
             zout.writestr(zi, data)
 
+    ghi_chu = ["cột Ngân hàng hưởng: phiếu ghi “%s” → xuất “%s” (%d người)" % (cu, moi, n)
+               for (cu, moi), n in sorted(da_doi.items())]
     return out.getvalue(), {"so_dong": len(du_lieu), "tong_tien": tong,
-                            "canh_bao": canh_bao, "bo_qua": bo_qua}
+                            "canh_bao": canh_bao, "bo_qua": bo_qua, "ghi_chu": ghi_chu}
 
 
 @frappe.whitelist()

@@ -77,12 +77,12 @@ M = [
      "        if False:"),
 
     # ── Ngân hàng hưởng: nguyên văn phiếu lương, soi theo danh sách ──────
-    ("14. cột D bỏ dấu/IN HOA thay vì nguyên văn", PB,
-     '            vals["D"] = ("s", nh)                  # NGUYÊN VĂN phiếu lương',
+    ("14. cột D bỏ dấu/IN HOA thay vì chuỗi phiếu lương", PB,
+     '            vals["D"] = ("s", nh)                  # phiếu lương (đã đổi 3 chuỗi cũ)',
      '            vals["D"] = ("s", _lam_sach_ten(nh))'),
 
     ("15. cột D tự đoán một ngân hàng khi phiếu ghi sai", PB,
-     '            vals["D"] = ("s", nh)                  # NGUYÊN VĂN phiếu lương',
+     '            vals["D"] = ("s", nh)                  # phiếu lương (đã đổi 3 chuỗi cũ)',
      '            vals["D"] = ("s", VI_DU_NH if ly_do else nh)'),
 
     ("16. ô sai danh sách thì để trống cột D (mất dấu vết để sửa)", PB,
@@ -114,6 +114,33 @@ M = [
      '            if r >= 2 and cstr(nh_rows[r].get("C")).strip()}',
      '    return {cstr(nh_rows[r].get("B")).strip() for r in nh_rows\n'
      '            if r >= 2 and cstr(nh_rows[r].get("B")).strip()}'),
+
+    # ── Đổi ba chuỗi ngân hàng cũ kế toán gửi ─────────────────────────
+    ("22b. bỏ đổi ba chuỗi cũ khi xuất (tháng 10 vẫn ra 'NHTMCP DTPT…')", PB,
+     "    return _DOI.get(_khoa_doi(nh), nh)", "    return nh"),
+
+    ("22c. đổi lan sang chi nhánh KHÔNG được gửi (so bỏ mã 8 số)", PB,
+     '    return re.sub(r"\\s+", "", s).upper()', '    return re.sub(r"\\s+|\\d+$", "", s).upper()'),
+
+    ("22d. so phân biệt hoa/thường (ô gõ chữ thường không đổi)", PB,
+     '    return re.sub(r"\\s+", "", s).upper()', '    return re.sub(r"\\s+", "", s)'),
+
+    ("22e. không thống nhất dấu gạch ('–' không đổi)", PB,
+     '    s = re.sub(r"[\\u2010-\\u2015\\u2212]", "-", _khong_dau(_nguyen_van(s)))',
+     '    s = _khong_dau(_nguyen_van(s))'),
+
+    ("22f. không bỏ dấu tiếng Việt khi so ('HẢI DƯƠNG' không đổi)", PB,
+     '    s = re.sub(r"[\\u2010-\\u2015\\u2212]", "-", _khong_dau(_nguyen_van(s)))',
+     '    s = re.sub(r"[\\u2010-\\u2015\\u2212]", "-", _nguyen_van(s))'),
+
+    ("22g. không ghi chú chuỗi đã đổi", PB,
+     "            da_doi[k] = da_doi.get(k, 0) + 1", "            pass"),
+
+    ("22h. trang không đưa cảnh báo ra Nhật ký", JSF,
+     '    cb.forEach(function (m) { log("• " + m, "err"); });\n', ""),
+
+    ("22i. trang không đưa ghi chú chuỗi đã đổi ra Nhật ký", JSF,
+     '    gc.forEach(function (m) { log("• " + m, "info"); });\n', ""),
 
     # ── Báo / chặn ────────────────────────────────────────────────────
     ("23. ghi cả dòng số tiền 0", PB,
