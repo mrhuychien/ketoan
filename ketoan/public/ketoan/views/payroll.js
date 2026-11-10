@@ -1,5 +1,6 @@
 // views/payroll.js — Tính lương tháng trong portal (SalaryDay + SalaryProduct).
-// Port từ trang "Làm lương" chuẩn: quét & duyệt phiếu nháp, xuất 7 file Excel (ExcelJS),
+// Port từ trang "Làm lương" chuẩn: quét & duyệt phiếu nháp, xuất 7 file Excel (ExcelJS;
+// riêng file chuyển khoản do máy chủ điền vào MẪU CỦA NGÂN HÀNG — payroll_bank.py),
 // in PDF. Dùng frappe.client.get_list/get/submit qua api.call (tôn trọng quyền DocType).
 // Gate: chỉ Kế toán trưởng (cap manager).
 import { api } from "../lib/api.js";
@@ -274,21 +275,10 @@ const PB = (function () {
     ws.views = [{ state: "frozen", ySplit: hRow }]; return wb;
   }
 
-  function buildNganhang(data) {
-    var ExcelJS = XLSX_LIB(); var wb = new ExcelJS.Workbook(); var ws = wb.addWorksheet("File luong mau");
-    var H = ["STT\n(Bắt buộc, định dạng số, tối đa 4 ký tự)", "Tên người thụ hưởng \n(Bắt buộc, định dạng text, tối đa 70 ký tự)", "Tài khoản người thụ hưởng\n(Bắt buộc, định dạng text, tối đa 20 ký tự)", "Số tiền\n(Bắt buộc, định dạng số, mặc định là VND)", "Chi nhánh Ngân hàng hưởng\n(Định dạng Tên Chi nhánh ngân hàng_Mã 8 số) (bắt buộc)", "Nội dung\n(Bắt buộc, tối đa 150 ký tự)\n"];
-    H.forEach(function (h, j) { hdr(ws.getCell(1, j + 1), h); }); ws.getRow(1).height = 58;
-    ["(1)", "(2)", "(3)", "(4)", "(5)", "(6)"].forEach(function (t, j) { var c = ws.getCell(2, j + 1); c.value = t; sty(c, { center: true }); });
-    var r = 3;
-    data.forEach(function (row, i) { var ten = row[0], tk = row[1], tien = row[2], cn = row[3];
-      var c1 = ws.getCell(r, 1); c1.value = i + 1; sty(c1, { center: true });
-      var c2 = ws.getCell(r, 2); c2.value = ten || ""; sty(c2);
-      var c3 = ws.getCell(r, 3); c3.value = String(tk || ""); sty(c3); c3.numFmt = "@";
-      var c4 = ws.getCell(r, 4); c4.value = flt(tien); sty(c4, { num: true });
-      var c5 = ws.getCell(r, 5); c5.value = cn || ""; sty(c5);
-      var c6 = ws.getCell(r, 6); c6.value = CK_NOIDUNG; sty(c6); r++; });
-    [8, 34, 24, 16, 48, 20].forEach(function (wd, j) { ws.getColumn(j + 1).width = wd; }); return wb;
-  }
+  // File "Chuyển khoản ngân hàng" KHÔNG dựng ở đây: máy chủ điền thẳng vào
+  // file mẫu của ngân hàng (ketoan/api/payroll_bank.py) — mẫu có danh sách thả
+  // xuống, tên vùng công thức và khóa cấu trúc mà ExcelJS đọc-ghi lại là rơi
+  // mất. Trang chỉ tính DÒNG (`bankRows`) rồi gửi đi.
 
   function buildButru(empRows, opts) {
     opts = opts || {}; var ExcelJS = XLSX_LIB(); var wb = new ExcelJS.Workbook(); var ws = wb.addWorksheet("SalaryDay");
@@ -353,7 +343,6 @@ const PB = (function () {
     BLD_NGANHANG.forEach(function (b) { data.push([b.ten, b.tk, roundCK(b.tien), b.cn]); });
     return data;
   }
-  function buildBank(nhat, khoan) { return buildNganhang(bankRows(nhat, khoan)); }
 
   function secHead(opts) { var h = ""; if (opts.company) h += '<div class="co">' + esc(opts.company) + "</div>"; if (opts.title) h += '<div class="ti">' + esc(opts.title) + "</div>"; return h; }
   function section(opts, inner) { return "<section>" + secHead(opts) + "<table>" + inner + "</table></section>"; }
@@ -549,7 +538,8 @@ const PB = (function () {
       case "thkhoan": return { wb: buildSalary(khoan, COLSPEC_KHOAN, { title: ti("thkhoan"), company: co }), rows: khoan.length };
       case "tmnhat": { var f1 = nhat.filter(function (r) { return flt(r.baohiem) <= 0; }); return { wb: buildSalary(f1, COLSPEC_NHAT, { title: ti("tmnhat"), company: co, tall: true }), rows: f1.length }; }
       case "tmkhoan": { var f2 = khoan.filter(function (r) { return flt(r.baohiem) <= 0; }); return { wb: buildSalary(f2, COLSPEC_KHOAN, { title: ti("tmkhoan"), company: co, tall: true }), rows: f2.length }; }
-      case "nganhang": { var n = nhat.filter(function (r) { return flt(r.baohiem) > 0; }).length + khoan.filter(function (r) { return flt(r.baohiem) > 0; }).length + BLD_NGANHANG.length; return { wb: buildBank(nhat, khoan), rows: n }; }
+      // Không có `wb`: `dong` gửi lên máy chủ để điền vào mẫu của ngân hàng.
+      case "nganhang": { var dong = bankRows(nhat, khoan); return { dong: dong, rows: dong.length }; }
       case "butru": { var f3 = nhat.filter(function (r) { return flt(r.luongck) > 0; }); return { wb: buildButru(f3, { title: ti("butru"), company: co, tall: true }), rows: f3.length + BLD_BUTRU.length }; }
       case "tonghop": return { wb: buildTonghop(computeAgg(nhat, khoan), thang, nam), rows: nhat.length + khoan.length };
     }
@@ -564,6 +554,7 @@ const PB = (function () {
     htmlTonghop: htmlTonghop, htmlBanLanhDao: htmlBanLanhDao,
     COLSPEC_NHAT: COLSPEC_NHAT, COLSPEC_KHOAN: COLSPEC_KHOAN, NHAT_KEYS: NHAT_KEYS, KHOAN_KEYS: KHOAN_KEYS, NEED: NEED,
     FN: FN, DT_NHAT: DT_NHAT, DT_KHOAN: DT_KHOAN, PERIOD: PERIOD, flt: flt, cint: cint,
+    CK_NOIDUNG: CK_NOIDUNG,
   };
 })();
 
@@ -659,10 +650,30 @@ function submitDrafts(loai, btn) {
   queue.forEach(function (item, i) { seq = seq.then(function () { setProg(btn, "Đang duyệt " + (i + 1) + "/" + total + "…"); return call("frappe.client.get", { doctype: item.dt, name: item.name }).then(function (doc) { return call("frappe.client.submit", { doc: JSON.stringify(doc) }); }).then(function () { submitted++; }).catch(function (e) { failed++; errs.push({ name: item.name, error: shortErr(e) }); }); }); });
   seq.then(function () { log("Đã duyệt " + submitted + " phiếu" + (failed ? (", lỗi " + failed + ".") : "."), failed ? "err" : "ok"); errs.slice(0, 10).forEach(function (e) { log("• " + e.name + ": " + e.error, "err"); }); }).catch(function (e) { log("Duyệt thất bại: " + shortErr(e), "err"); }).then(function () { return loadData(true); }).then(function () { return scan(); });
 }
-function downloadWb(wb, filename) { return wb.xlsx.writeBuffer().then(function (buf) { var blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }); var url = URL.createObjectURL(blob); var a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 2000); }); }
+var XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+// Máy chủ điền vào file mẫu chuyển khoản của ngân hàng (giữ nguyên danh sách
+// thả xuống, khóa cấu trúc) — xem ketoan/api/payroll_bank.py.
+var BANK_METHOD = "ketoan.api.payroll_bank.xuat_file_chuyen_khoan";
+function saveBlob(blob, filename) { var url = URL.createObjectURL(blob); var a = document.createElement("a"); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 2000); }
+function downloadWb(wb, filename) { return wb.xlsx.writeBuffer().then(function (buf) { saveBlob(new Blob([buf], { type: XLSX_MIME }), filename); }); }
+function b64Blob(b64) { var bin = atob(b64), n = bin.length, u8 = new Uint8Array(n); for (var i = 0; i < n; i++) u8[i] = bin.charCodeAt(i); return new Blob([u8], { type: XLSX_MIME }); }
+function fmtTien(n) { return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, "."); }
+// Trả Promise; cảnh báo của máy chủ (thiếu tài khoản, chưa dò ra ngân hàng,
+// tài khoản trùng…) ghi ra nhật ký — file vẫn tải về để sửa tay trong Excel.
+function exportBank(dong, fn) {
+  return call(BANK_METHOD, { dong: dong, noi_dung: PB.CK_NOIDUNG }).then(function (r) {
+    if (!r || !r.file_b64) throw new Error("Máy chủ không trả file.");
+    saveBlob(b64Blob(r.file_b64), fn);
+    var cb = r.canh_bao || [], bq = r.bo_qua || [], gc = r.ghi_chu || [];
+    log(LABEL.nganhang + " (mẫu ngân hàng): " + r.so_dong + " dòng, tổng " + fmtTien(r.tong_tien) + " đ → đang tải file." + (cb.length ? " Có " + cb.length + " chỗ cần sửa trước khi tải lên ngân hàng:" : ""), cb.length ? "err" : "ok");
+    cb.forEach(function (m) { log("• " + m, "err"); });
+    bq.forEach(function (m) { log("• Bỏ qua — " + m, "info"); });
+    gc.forEach(function (m) { log("• " + m, "info"); });
+  });
+}
 function exportFile(loai, btn) {
   P = readPeriod(); if (!P) { log("Chưa chọn kỳ lương.", "err"); return; } if (!DATA.loaded) { log("Dữ liệu chưa nạp xong.", "info"); return; }
-  if (!window.ExcelJS) { log("Chưa tải được thư viện ExcelJS — kiểm tra mạng hoặc CSP.", "err"); return; }
+  if (loai !== "nganhang" && !window.ExcelJS) { log("Chưa tải được thư viện ExcelJS — kiểm tra mạng hoặc CSP.", "err"); return; }
   setBusy(btn, true, "Đang tạo…");
   try {
     var need = PB.NEED[loai];
@@ -670,7 +681,8 @@ function exportFile(loai, btn) {
     var khoan = need.indexOf("k") >= 0 ? normalize(inPeriod(DATA.khoan, PF.khoan, 1), PB.KHOAN_KEYS) : [];
     var out = PB.buildFile(loai, nhat, khoan, P.thang, P.nam);
     var fn = PREFIX_FILE[loai] + "_T" + pad2(P.thang) + "_" + P.nam + ".xlsx";
-    downloadWb(out.wb, fn).then(function () { log(LABEL[loai] + ": " + out.rows + " dòng → đang tải file.", "ok"); }).catch(function (e) { log(LABEL[loai] + " lỗi: " + shortErr(e), "err"); }).then(function () { setBusy(btn, false); });
+    var job = out.dong ? exportBank(out.dong, fn) : downloadWb(out.wb, fn).then(function () { log(LABEL[loai] + ": " + out.rows + " dòng → đang tải file.", "ok"); });
+    job.catch(function (e) { log(LABEL[loai] + " lỗi: " + shortErr(e), "err"); }).then(function () { setBusy(btn, false); });
   } catch (e) { log(LABEL[loai] + " lỗi: " + shortErr(e), "err"); setBusy(btn, false); }
 }
 var PRINT_CSS = '*{box-sizing:border-box;}body{font-family:"Times New Roman",serif;color:#000;margin:0;}section{padding:0;}section + section{page-break-before:always;}.co{text-align:center;font-weight:bold;font-size:11pt;margin-bottom:1px;}.ti{text-align:center;font-weight:bold;font-size:13pt;margin:1px 0 6px;}table{width:100%;border-collapse:collapse;table-layout:fixed;}th,td{border:0.5pt solid #000;padding:1.5px 3px;font-size:8.5pt;line-height:1.1;vertical-align:middle;word-wrap:break-word;overflow-wrap:break-word;}th{text-align:center;font-weight:bold;background:#eee;font-size:8pt;}td.c{text-align:center;}td.n{text-align:right;}td.b,.b{font-weight:bold;}tr.tall td{height:42px;}thead{display:table-header-group;}tr{page-break-inside:avoid;}table.narrow{width:52%;}table.mid{width:80%;}.gap{margin-top:14px;}.sub{font-size:10pt;font-weight:bold;margin:0 0 4px;}tr.it td{font-style:italic;}tr.b td{font-weight:bold;}.sign{width:52%;margin-top:18px;text-align:right;font-size:11pt;}.sign div:first-child{font-style:italic;}.warn{margin-top:10px;font-size:10pt;font-weight:bold;border:1pt solid #000;padding:4px 6px;}@page{size:A4 landscape;margin:8mm;}';
