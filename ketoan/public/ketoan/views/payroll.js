@@ -658,17 +658,16 @@ function saveBlob(blob, filename) { var url = URL.createObjectURL(blob); var a =
 function downloadWb(wb, filename) { return wb.xlsx.writeBuffer().then(function (buf) { saveBlob(new Blob([buf], { type: XLSX_MIME }), filename); }); }
 function b64Blob(b64) { var bin = atob(b64), n = bin.length, u8 = new Uint8Array(n); for (var i = 0; i < n; i++) u8[i] = bin.charCodeAt(i); return new Blob([u8], { type: XLSX_MIME }); }
 function fmtTien(n) { return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, "."); }
-// Trả Promise; cảnh báo của máy chủ (thiếu tài khoản, chưa dò ra ngân hàng,
-// tài khoản trùng…) ghi ra nhật ký — file vẫn tải về để sửa tay trong Excel.
+// Trả Promise; cảnh báo của máy chủ (thiếu tài khoản, ô ngân hàng thiếu mã 8
+// số hoặc mã lạ, tài khoản trùng…) ghi ra nhật ký — file vẫn tải về.
 function exportBank(dong, fn) {
   return call(BANK_METHOD, { dong: dong, noi_dung: PB.CK_NOIDUNG }).then(function (r) {
     if (!r || !r.file_b64) throw new Error("Máy chủ không trả file.");
     saveBlob(b64Blob(r.file_b64), fn);
-    var cb = r.canh_bao || [], bq = r.bo_qua || [], gc = r.ghi_chu || [];
+    var cb = r.canh_bao || [], bq = r.bo_qua || [];
     log(LABEL.nganhang + " (mẫu ngân hàng): " + r.so_dong + " dòng, tổng " + fmtTien(r.tong_tien) + " đ → đang tải file." + (cb.length ? " Có " + cb.length + " chỗ cần sửa trước khi tải lên ngân hàng:" : ""), cb.length ? "err" : "ok");
     cb.forEach(function (m) { log("• " + m, "err"); });
     bq.forEach(function (m) { log("• Bỏ qua — " + m, "info"); });
-    gc.forEach(function (m) { log("• " + m, "info"); });
   });
 }
 function exportFile(loai, btn) {

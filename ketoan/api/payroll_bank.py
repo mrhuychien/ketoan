@@ -21,20 +21,15 @@ ghi lại mẫu này thì chỉ còn `_xlnm._FilterDatabase` — cột "Ngân h�
 mất danh sách chọn.
 
 ── Cột "Ngân hàng hưởng" ──────────────────────────────────────────────────
-Phải là ĐÚNG MỘT chuỗi trong danh sách của mẫu, ví dụ
-"01202001 - Ngan hang TMCP Dau tu va Phat trien Viet Nam - BIDV". Ô "ngân
-hàng" trên phiếu lương là chữ tự do theo mẫu CŨ ("<tên chi nhánh> - <mã 8
-số>"), nên dò theo thứ tự:
-  1. có mã 8 số → mã ngân hàng trong danh sách; hoặc mã CHI NHÁNH trong sheet
-     chi nhánh của mẫu → ngân hàng của chi nhánh đó; hoặc 3 số giữa (mã tổ
-     chức tín dụng) khớp đúng MỘT ngân hàng;
-  2. không có mã → tên: tiền tố dài nhất trong (tên viết tắt "BIDV",
-     "Vietcombank"…; tên đầy đủ; tên CITAD "NHTMCP DTPT VN"…), chỉ nhận khi
-     ra đúng MỘT ngân hàng. Dò theo tên thì báo lại để kế toán liếc qua.
-Không dò ra thì để TRỐNG ô đó và báo tên người: cột bắt buộc còn trống thì
-ngân hàng không nhận file — không có chuyện tiền đi nhầm ngân hàng trong im
-lặng. Cột "Chi nhánh ngân hàng hưởng" để trống: theo hướng dẫn của mẫu, chuyển
-tới SỐ TÀI KHOẢN chỉ cần chọn ngân hàng.
+Ghi NGUYÊN VĂN ô ngân hàng trên phiếu lương — kế toán yêu cầu (11/2026):
+"điền đúng NHTMCP DTPT VN-CN HAI DUONG - 31202005", tức dạng "<tên chi
+nhánh> - <mã 8 số>" như mẫu cũ, KHÔNG đổi sang chuỗi trong danh sách thả
+xuống của mẫu mới ("01202001 - Ngan hang TMCP … - BIDV"). Chỉ gộp khoảng
+trắng thừa và bỏ ký tự điều khiển (thứ làm hỏng file).
+Chữ không sửa, nhưng có SOI để báo cho người sửa phiếu lương: ô trống, không
+có mã 8 số, mã không có trong danh sách ngân hàng/chi nhánh của mẫu.
+Cột "Chi nhánh ngân hàng hưởng" để trống: theo hướng dẫn của mẫu, chuyển tới
+SỐ TÀI KHOẢN chỉ cần ngân hàng.
 
 Ngân hàng đổi mẫu lần sau: thay file trong `ketoan/mau/` rồi chạy
 `python3 docs/verified/payroll_bank_check.py` — bộ kiểm so cấu trúc với mẫu,
@@ -84,21 +79,6 @@ TIEN_TE = "VND"
 NOI_DUNG_MAC_DINH = "CK LUONG"
 MAX_TEN, MAX_TK, MAX_TIEN, MAX_ND = 70, 35, 16, 190
 
-# Tên gọi tắt hay gặp mà danh sách của mẫu không có.
-BI_DANH = {
-    "VCB": "VIETCOMBANK", "CTG": "VIETINBANK", "VTB": "VIETINBANK",
-    "VIETTINBANK": "VIETINBANK", "TCB": "TECHCOMBANK", "MBBANK": "MB",
-    "VPB": "VPBANK", "TPB": "TPBANK", "STB": "SACOMBANK", "HDB": "HD BANK",
-}
-
-# Đuôi chỉ là ĐỊA DANH ("… - Taipei Fubon - Binh Duong", "… - SMBC - TP HCM"):
-# đưa vào bảng dò là chữ "Bình Dương" trên phiếu lương khớp nhầm một ngân hàng
-# Đài Loan.
-DIA_DANH = {("BINH", "DUONG"), ("TPHCM",), ("TP", "HCM"), ("HCM",), ("HA", "NOI"),
-            ("HANOI",), ("HN",)}
-# Chữ đầu tên mà người ta thêm/bớt tùy ý: "Ngân hàng TMCP Quân đội" = "Quân đội".
-_DAU_TEN = {"NGAN", "HANG", "NH", "TMCP", "TM", "CP", "TNHH", "MTV"}
-
 _NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 _NS_R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 
@@ -113,19 +93,6 @@ def _khong_dau(s):
     s = cstr(s).replace("đ", "d").replace("Đ", "D").replace("ð", "d").replace("Ð", "D")
     s = unicodedata.normalize("NFD", s)
     return "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
-
-
-def _tu(s):
-    """Dãy từ IN HOA không dấu — khóa so tên ngân hàng."""
-    return tuple(re.findall(r"[A-Z0-9]+", _khong_dau(s).upper()))
-
-
-def _loi(tu):
-    """Bỏ chữ đầu chung chung: ("NGAN","HANG","TMCP","QUAN","DOI") → ("QUAN","DOI")."""
-    i = 0
-    while i < len(tu) and tu[i] in _DAU_TEN:
-        i += 1
-    return tu[i:]
 
 
 def _gon(s):
@@ -160,10 +127,11 @@ def _so(n):
     return "{:,}".format(n).replace(",", ".")
 
 
-def _mot(tap):
-    """Phần tử duy nhất của tập, hoặc None nếu rỗng/nhiều."""
-    tap = set(tap or ())
-    return next(iter(tap)) if len(tap) == 1 else None
+def _nguyen_van(s):
+    """Chữ như người gõ — chỉ gộp khoảng trắng (cả xuống dòng, cách cứng) và bỏ
+    ký tự điều khiển: một ký tự \\x0b lọt vào là cả file XML hỏng."""
+    s = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", cstr(s))
+    return re.sub(r"\s+", " ", s).strip()
 
 
 # ── đọc mẫu ──────────────────────────────────────────────────────────────
@@ -203,45 +171,20 @@ def _doc_sheet(xml, sst):
 
 
 def _bang_ngan_hang(nh_rows, cn_rows):
-    """Các bảng dò ngân hàng, dựng từ CHÍNH sheet danh sách của mẫu."""
-    theo_ma, theo_tctd = {}, {}
+    """Mã ngân hàng (sheet danh sách ngân hàng) + mã chi nhánh → mã ngân hàng
+    (sheet chi nhánh), lấy từ CHÍNH file mẫu — để soi mã trên phiếu lương."""
+    ma_ngan_hang = set()
     for r in sorted(nh_rows):
-        if r < 2:
-            continue
-        ma, hien = cstr(nh_rows[r].get("B")).strip(), cstr(nh_rows[r].get("C")).strip()
-        if re.fullmatch(r"\d{8}", ma) and hien:
-            theo_ma.setdefault(ma, set()).add(hien)
-            theo_tctd.setdefault(ma[2:5], set()).add(hien)
-
-    chi_nhanh, ten = {}, {}
-
-    def them(k, hien, ca_loi=True):
-        for x in ((k, _loi(k)) if ca_loi else (k,)):
-            if x and x not in DIA_DANH:
-                ten.setdefault(x, set()).update(hien)
-
-    for ds in theo_ma.values():
-        for hien in ds:
-            phan = hien.split(" - ")
-            if len(phan) >= 2:
-                them(_tu(phan[1]), {hien})                 # tên đầy đủ
-            if len(phan) >= 3:
-                them(_tu(phan[-1]), {hien}, False)         # tên viết tắt
+        ma = cstr(nh_rows[r].get("B")).strip()
+        if r >= 2 and re.fullmatch(r"\d{8}", ma):
+            ma_ngan_hang.add(ma)
+    chi_nhanh = {}
     for r in sorted(cn_rows):
-        if r < 2:
-            continue
         ma_nh = cstr(cn_rows[r].get("B")).strip()
         m = re.match(r"(\d{8})\b", cstr(cn_rows[r].get("D")).strip())
-        if m and ma_nh:
+        if r >= 2 and m and ma_nh:
             chi_nhanh.setdefault(m.group(1), ma_nh)
-        if ma_nh in theo_ma:
-            them(_tu(cn_rows[r].get("C")), theo_ma[ma_nh])  # tên CITAD
-    gon = {}
-    for k, ds in ten.items():
-        gon.setdefault("".join(k), set()).update(ds)
-    return {"theo_ma": theo_ma, "theo_tctd": theo_tctd, "chi_nhanh": chi_nhanh,
-            "ten": ten, "ten_gon": gon,
-            "danh_sach": sorted({h for ds in theo_ma.values() for h in ds})}
+    return {"ma_ngan_hang": ma_ngan_hang, "chi_nhanh": chi_nhanh}
 
 
 _CACHE = {}
@@ -295,81 +238,25 @@ def _doc_mau(path=None):
     return val
 
 
-# ── dò ngân hàng ─────────────────────────────────────────────────────────
+# ── soi ô ngân hàng ──────────────────────────────────────────────────────
 
-def _theo_ma(ma, bang):
-    """(hiển thị | None, lý do) từ các mã 8 số — mẫu cũ ghi mã ở CUỐI chuỗi."""
-    for code in reversed(ma):
-        ds = bang["theo_ma"].get(code)
-        if ds:
-            d = _mot(ds)
-            if d:
-                return d, ""
-            return None, "mã %s ứng với %d dòng trong danh sách của mẫu" % (code, len(ds))
-        ma_nh = bang["chi_nhanh"].get(code)
-        if ma_nh:
-            ds = bang["theo_ma"].get(ma_nh)
-            d = _mot(ds)
-            if d:
-                return d, ""
-            return None, "mã chi nhánh %s thuộc ngân hàng %s — %s" % (
-                code, ma_nh, "ứng với nhiều dòng trong danh sách của mẫu" if ds
-                else "không có trong danh sách của mẫu")
-        d = _mot(bang["theo_tctd"].get(code[2:5]))
-        if d:
-            return d, ""
-    return None, "mã %s không có trong danh sách ngân hàng/chi nhánh của mẫu" % ", ".join(ma)
+def kiem_ngan_hang(text, bang=None):
+    """Lý do ô ngân hàng trên phiếu lương cần xem lại, hoặc "" nếu ổn.
 
-
-def _theo_ten(tu, bang):
-    """(hiển thị | None, lý do) từ chữ — tiền tố DÀI NHẤT, chỉ nhận khi ra MỘT."""
-    # Từ sát chữ gốc tới chuẩn hóa nhiều nhất; lượt nào khớp (một hay nhiều)
-    # là dừng ở lượt đó — không để lượt sau "chữa" một kết quả mơ hồ.
-    lan = []
-    for t in (tu, (_tu(BI_DANH[tu[0]]) + tu[1:]) if tu and tu[0] in BI_DANH else tu):
-        for x in (t, _loi(t)):
-            if x and x not in lan:
-                lan.append(x)
-    for t in lan:
-        dai = 0
-        ds = set()
-        for k, hien in bang["ten"].items():
-            if len(k) >= dai and t[:len(k)] == k:
-                if len(k) > dai:
-                    dai, ds = len(k), set()
-                ds |= hien
-        if not dai:
-            ds = set(bang["ten_gon"].get(t[0], ()))   # "HDBank" = "HD BANK"
-        if len(ds) == 1:
-            return next(iter(ds)), ""
-        if len(ds) > 1:
-            return None, "tên khớp %d ngân hàng trong danh sách" % len(ds)
-    return None, "không nhận ra ngân hàng"
-
-
-def tim_ngan_hang(text, bang):
-    """(chuỗi trong danh sách | None, cách dò "ma"/"ten"/"", lý do khi không ra).
-
-    Có mã 8 số thì theo MÃ; phần chữ còn lại mà chỉ đích danh một ngân hàng
-    KHÁC (khác mã tổ chức tín dụng — 3 số giữa) thì không đoán bên nào đúng:
-    trả None để người sửa phiếu lương.
+    Chỉ để BÁO — chữ vẫn ghi nguyên văn. Ổn = có mã 8 số và mã đó là mã chi
+    nhánh hoặc mã ngân hàng trong danh sách của mẫu ngân hàng.
     """
-    goc = _khong_dau(text)
-    tu = _tu(goc)
-    if not tu:
-        return None, "", "phiếu lương chưa ghi ngân hàng"
+    goc = _nguyen_van(text)
+    if not goc:
+        return "phiếu lương chưa ghi ngân hàng"
     ma = re.findall(r"(?<!\d)\d{8}(?!\d)", goc)
-    if ma:
-        d, ly_do = _theo_ma(ma, bang)
-        if not d:
-            return None, "", ly_do
-        chu = tuple(t for t in tu if not t.isdigit())
-        d_ten = _theo_ten(chu, bang)[0] if chu else None
-        if d_ten and d_ten[2:5] != d[2:5]:
-            return None, "", "chữ trên phiếu chỉ “%s” nhưng mã chỉ “%s” — hai ngân hàng khác nhau" % (d_ten, d)
-        return d, "ma", ""
-    d, ly_do = _theo_ten(tu, bang)
-    return (d, "ten", "") if d else (None, "", ly_do)
+    if not ma:
+        return "không có mã 8 số (dạng “<tên chi nhánh> - <mã 8 số>”)"
+    bang = bang or _doc_mau()["bang"]
+    la = [x for x in ma if x not in bang["chi_nhanh"] and x not in bang["ma_ngan_hang"]]
+    if la:
+        return "mã %s không có trong danh sách chi nhánh/ngân hàng của mẫu ngân hàng" % ", ".join(la)
+    return ""
 
 
 # ── ghi file ─────────────────────────────────────────────────────────────
@@ -428,18 +315,16 @@ def dung_file(dong, noi_dung=None, path=None):
     """(bytes xlsx, thông tin) từ các dòng [tên, tài khoản, số tiền, ngân hàng].
 
     Dòng số tiền ≤ 0 không ghi (không có gì để chuyển). Dòng thiếu tài khoản /
-    chưa dò ra ngân hàng VẪN ghi, ô đó để trống hoặc giữ nguyên, và báo — ngân
-    hàng sẽ không nhận file cho tới khi sửa, nên không ai bị sót lương trong im
-    lặng.
+    ô ngân hàng có vấn đề VẪN ghi (ô trống để trống, chữ giữ nguyên) và báo —
+    không ai bị sót lương trong im lặng.
     """
     if not isinstance(dong, (list, tuple)):
         frappe.throw(_("Dữ liệu chuyển khoản không hợp lệ."))
     m = _doc_mau(path)
-    bang = m["bang"]
     nd = _lam_sach_noi_dung(noi_dung) or NOI_DUNG_MAC_DINH
 
     du_lieu, canh_bao, bo_qua = {}, [], []
-    theo_ten, theo_tk = {}, {}
+    theo_tk = {}
     tong = 0
     for x in dong:
         x = list(x) if isinstance(x, (list, tuple)) else []
@@ -467,21 +352,20 @@ def dung_file(dong, noi_dung=None, path=None):
                             % (nhan, tk, MAX_TK))
         if tk:
             theo_tk.setdefault(tk, []).append(nhan)
-        hien, cach, ly_do = tim_ngan_hang(nh_goc, bang)
-        if not hien:
-            canh_bao.append("%s: chưa xác định được Ngân hàng hưởng từ “%s” (%s) — mở file, chọn "
-                            "ngân hàng ở cột D trước khi tải lên" % (nhan, cstr(nh_goc).strip(), ly_do))
-        elif cach == "ten":
-            k = cstr(nh_goc).strip()
-            theo_ten.setdefault(k, [hien, 0])[1] += 1
+        nh = _nguyen_van(nh_goc)
+        ly_do = kiem_ngan_hang(nh, m["bang"])
+        if not nh:
+            canh_bao.append("%s: %s — cột Ngân hàng hưởng để trống" % (nhan, ly_do))
+        elif ly_do:
+            canh_bao.append("%s: ô ngân hàng “%s” %s — kiểm lại phiếu lương" % (nhan, nh, ly_do))
 
         vals = {"A": ("n", stt), "E": ("s", str(tien)), "F": ("s", TIEN_TE), "G": ("s", nd)}
         if ten:
             vals["B"] = ("s", ten)
         if tk:
             vals["C"] = ("s", tk)
-        if hien:
-            vals["D"] = ("s", hien)
+        if nh:
+            vals["D"] = ("s", nh)                  # NGUYÊN VĂN phiếu lương
         du_lieu[r] = vals
         tong += tien
 
@@ -523,10 +407,8 @@ def dung_file(dong, noi_dung=None, path=None):
             zi.external_attr = info.external_attr
             zout.writestr(zi, data)
 
-    ghi_chu = ["dò theo TÊN: “%s” → %s (%d người) — liếc lại cho chắc" % (k, v[0], v[1])
-               for k, v in sorted(theo_ten.items())]
     return out.getvalue(), {"so_dong": len(du_lieu), "tong_tien": tong,
-                            "canh_bao": canh_bao, "bo_qua": bo_qua, "ghi_chu": ghi_chu}
+                            "canh_bao": canh_bao, "bo_qua": bo_qua}
 
 
 @frappe.whitelist()
